@@ -1,0 +1,30 @@
+# Derived from esp-sdr sdkconfig.defaults(.esp32s3). GPL-3.0-or-later.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# adctrig and the raw dump path live in the PHY cert-test archive.
+CONFIG_ESP_PHY_ENABLE_CERT_TEST=y
+CONFIG_ESP_PHY_DEBUG=y
+# Binary protocol owns USB Serial/JTAG; keep the console off it.
+CONFIG_ESP_CONSOLE_NONE=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_FREERTOS_HZ=1000
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# CONFIG_PM_ENABLE is not set
+# Leave non-modem SRAM for static data, DSP buffers and task stacks.
+# CONFIG_ESP_WIFI_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_EXTRA_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_RX_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_SLP_IRAM_OPT is not set
+# CONFIG_ESP_PHY_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_AMPDU_TX_ENABLED is not set
+# CONFIG_ESP_WIFI_AMPDU_RX_ENABLED is not set
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+# Largest FFT we run; esp-dsp sizes every twiddle table by this.
+CONFIG_DSP_MAX_FFT_SIZE_2048=y
+CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+# Scanner busy-waits on the capture-done bit for up to ~0.4 ms per hop.
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n

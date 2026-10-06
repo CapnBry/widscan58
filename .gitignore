@@ -1,0 +1,18 @@
+# Reference checkout of https://github.com/ESPARGOS/esp-sdr (has its own .git)
+ref/
+# Full flash dump of the S3 as delivered (esp-sdr WebSDR firmware); local only
+backup/
+
+# Firmware build output and generated config
+firmware/.pio/
+firmware/sdkconfig.*
+!firmware/sdkconfig.defaults
+firmware/managed_components/
+
+# Web
+web/node_modules/
+web/dist/
+web/e2e-out/
+
+*.rx5808
+__pycache__/

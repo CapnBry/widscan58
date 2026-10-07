@@ -46,6 +46,7 @@ static struct {
     uint32_t w_hops, w_rotations;
     uint64_t w_hop_sum, w_tune_sum, w_cap_sum, w_dsp_sum;
     uint32_t w_hop_max, w_tune_max, w_dsp_max;
+    bool psd_error_reported;
 } s;
 
 static int16_t cdb(float db) {
@@ -85,7 +86,10 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->spec_bins = 256;
     c->spec_span_hz = p->usable_hz;
     c->spec_detector = 1;
-    c->fft_type = PSD_FFT_F32_R4; /* bit-identical to R2 within 0.01 dB, 30% faster FFT */
+    /* esp-sdr's rounded 16-bit FFT with block-floating-point scaling: ~6x faster
+     * FFT than float, within ~0.1-0.3 dB per bin. Caveat: a strong signal in the
+     * same capture makes weak bins read ~1-1.4 dB low (R4 has no such limit). */
+    c->fft_type = PSD_FFT_S16R;
 }
 
 void scanner_get_config(scan_config_t *c) {
@@ -116,6 +120,7 @@ static void apply_config(void) {
     bool measure_changed = profile_changed || s.cfg.nfft != shared.nfft || s.cfg.rssi_hz != shared.rssi_hz;
     s.cfg = shared;
     s.plan = shared_plan;
+    s.psd_error_reported = false;
     dirty = false;
     xSemaphoreGive(lock);
     if (measure_changed) memset(s.ch, 0, sizeof(s.ch));
@@ -188,9 +193,15 @@ static void do_hop(void) {
     int64_t t2 = esp_timer_get_time();
     const float rate = radio_caps()->rates_hz[c->rate_code];
     psd_result_t psd;
-    if (psd_compute(words, c->capture_samples, c->nfft, c->segments, rate, c->conjugate,
-                    p->usable_hz, c->dc_guard, &psd) != ESP_OK) {
+    esp_err_t err = psd_compute(words, c->capture_samples, c->nfft, c->segments, rate, c->conjugate,
+                                p->usable_hz, c->dc_guard, &psd);
+    if (err != ESP_OK) {
         s.capture_errors++;
+        /* Say so once per configuration; otherwise the scanner just goes quiet. */
+        if (!s.psd_error_reported) {
+            link_printf("ERR psd %s fft %s\n", esp_err_to_name(err), psd_fft_name(psd_get_fft()));
+            s.psd_error_reported = true;
+        }
         return;
     }
     metrics_input_t in = {

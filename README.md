@@ -21,6 +21,7 @@ say so in their headers.
 | `web/` | Vite + TypeScript dashboard (Web Serial, simulator, replay). |
 | `tools/rx5808cli.py` | Python client: `info`, `monitor`, `rawiq`, `spectrum`, `cmd`, `bootloader`. |
 | `tools/serial_bridge.py` | Serial ↔ WebSocket bridge (headless tests, remote viewing). |
+| `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN). Experimental, see the flashing notes. |
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
 | `ref/esp-sdr/` | Reference checkout of esp-sdr (not tracked here). Restore it with `git clone https://github.com/ESPARGOS/esp-sdr ref/esp-sdr`. |
 | `backup/` | Full flash dump of the S3 as it arrived (esp-sdr WebSDR firmware). Local only, not tracked. |
@@ -29,20 +30,55 @@ say so in their headers.
 
 ```sh
 cd firmware
-pio run -e esp32s3 -t upload      # no buttons needed: esptool resets via USB (usb-reset)
+pio run -e esp32s3 -t upload      # esptool resets via USB (usb-reset); usually no buttons needed
 ```
+
+**Flashing is not fully reliable yet** (see PLAN.md, "Open: flashing reliability"). Uploads sometimes fail partway through, and a failure after the erase step leaves the board unbootable (the ROM prints `invalid header: 0xffffffff`). The reliable path:
+
+1. Hold BOOT, tap EN, release BOOT.
+2. Run `tools/flash.sh --manual`, or `esptool --before no-reset --after watchdog-reset write-flash 0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin` from `firmware/.pio/build/esp32s3`.
+
+Use `--after watchdog-reset`: an RTS reset does not always leave download mode.
 
 Use the PlatformIO Core that pioarduino 55.03.312-1 expects (6.2.x). The
 platform pins ESP-IDF 5.5.5. Before changing the platform version, run
 `tools/check_phy_abi.sh esp32s3 25fe69f946311abdaf9ad56591f25fedbc20ac98 <new-idf-tag>`.
 The firmware depends on private PHY functions, and they must stay identical.
 
-Ways back into the bootloader, from least to most manual: esptool's `usb-reset`
-(automatic on upload), the `BOOTLOADER` command (`tools/rx5808cli.py bootloader`
-or the button in the UI), or hold BOOT while pressing EN/RESET.
+Ways back into the bootloader: esptool's `usb-reset` (automatic on upload), or
+hold BOOT while pressing EN. The `BOOTLOADER` command left the board
+unresponsive in testing; don't rely on it yet.
 
 To restore the original WebSDR firmware:
 `esptool --chip esp32s3 -p /dev/ttyACM0 write-flash 0 backup/websdr-s3-flash-4MB.bin`.
+
+## Performance (ESP32-S3, measured)
+
+| Setup | Updates per channel |
+|---|---:|
+| All 8 channels (4 pair LOs), S16R FFT (default) | ~64 /s |
+| All 8 channels, R4 FFT | ~57 /s |
+| One channel, or one neighbouring pair (1 LO: the tune is skipped) | ~445 /s (S16R), ~344 /s (R4) |
+
+- A hop with 4 LOs is about 0.83 ms tune (median; bursty long tunes add ~15 %), 0.17 ms capture (4096 samples at 40 MS/s), and about 2.2 ms DSP with S16R.
+- The display spectrum is sent every 4th hop by default (`SPEC`).
+- Full tables and the FFT accuracy study are in PLAN.md.
+
+## Useful commands
+
+Send these with `tools/rx5808cli.py cmd …` or the UI's Protocol console.
+
+| Command | Purpose |
+|---|---|
+| `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration, band profile, DSP time breakdown, masked board spurs |
+| `ENABLE <mask>`, `MODE PAIR\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how |
+| `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
+| `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R; R4 is exact float and best for step-on/IMD measurement |
+| `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples |
+| `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
+| `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled) |
+| `RECAL`, `RECALMODE ONCE\|EVERY`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug) |
+| `REBOOT` | Restart (USB stays connected; the UI re-syncs on `READY`) |
 
 ## Web UI
 

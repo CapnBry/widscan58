@@ -13,7 +13,7 @@
 static float *work;     /* 2 * PSD_MAX_FFT interleaved complex */
 static int16_t *work16; /* same, for the fixed-point FFT */
 static int16_t *window16; /* Q15 Hann */
-static psd_fft_t fft_type = PSD_FFT_F32_R4;
+static psd_fft_t fft_type = PSD_FFT_S16R;
 /* S16 input scaling is block floating point: each segment is shifted left by
  * the most bits that keep it within half the int16 range (one bit of headroom
  * for complex butterfly growth), then its power is scaled back exactly. Real
@@ -42,6 +42,10 @@ const char *psd_fft_name(psd_fft_t type) {
 static bool is_power_of_4(unsigned n) { return n && !(n & (n - 1)) && (n & 0x55555555u); }
 static bool is_s16(psd_fft_t t) { return t == PSD_FFT_S16 || t == PSD_FFT_S16R; }
 static bool loaded_r2, loaded_r4, loaded_s16;
+/* Radix-4 needs a power-of-4 size, so 1024 is the largest we run with it. Its
+ * twiddle table is one 16 KB block: allocated at boot and kept, because after
+ * boot the heap is too fragmented to find a block that size reliably. */
+#define R4_MAX_FFT 1024
 static float *window;
 static float *acc;
 static uint8_t *valid;
@@ -69,7 +73,7 @@ static esp_err_t ensure(psd_fft_t t) {
         if (!work) return ESP_ERR_NO_MEM;
     }
     if (t == PSD_FFT_F32_R4 && !loaded_r4) {
-        err = dsps_fft4r_init_fc32(NULL, PSD_MAX_FFT);
+        err = dsps_fft4r_init_fc32(NULL, R4_MAX_FFT);
         loaded_r4 = err == ESP_OK;
     } else if (t == PSD_FFT_F32_R2 && !loaded_r2) {
         err = dsps_fft2r_init_fc32(NULL, PSD_MAX_FFT);
@@ -82,7 +86,6 @@ void psd_release_unused(void) {
     psd_fft_t t = fft_type;
     /* R4 falls back to R2 for non-power-of-4 sizes; keep R2 only if it is the type. */
     if (loaded_r2 && t != PSD_FFT_F32_R2) { dsps_fft2r_deinit_fc32(); loaded_r2 = false; }
-    if (loaded_r4 && t != PSD_FFT_F32_R4) { dsps_fft4r_deinit_fc32(); loaded_r4 = false; }
     if (loaded_s16 && !is_s16(t)) {
         dsps_fft2r_deinit_sc16();
         heap_caps_free(work16);
@@ -100,6 +103,9 @@ esp_err_t psd_init(void) {
     valid = heap_caps_malloc(PSD_MAX_FFT, MALLOC_CAP_INTERNAL);
     dest = heap_caps_malloc(PSD_MAX_FFT * sizeof(uint16_t), MALLOC_CAP_INTERNAL);
     if (!(window && acc && valid && dest)) return ESP_ERR_NO_MEM;
+    esp_err_t err = dsps_fft4r_init_fc32(NULL, R4_MAX_FFT); /* kept for life, see R4_MAX_FFT */
+    if (err != ESP_OK) return err;
+    loaded_r4 = true;
     return ensure(fft_type);
 }
 

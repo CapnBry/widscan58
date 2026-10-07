@@ -493,10 +493,10 @@ Measured on the ESP32-S3 Micro (4 MB flash, 2 MB PSRAM, native USB only):
 | Web UI | 16/16 headless checks pass against both the simulator and the real board (via `tools/serial_bridge.py`): commands, plan changes, raw I/Q, light/dark, 390 px width. |
 
 **FFT comparison (2026-10-06).** `FFTTYPE R2|R4|S16|S16R`, `FFTEVAL SYNTH|LIVE` runs every FFT on identical samples.
-- **R4 (radix-4 float) is now the default.** It matches R2 to within 0.01 dB on every bin and the FFT is 30 % faster (1.15 vs 1.64 ms per hop).
+- **R4 (radix-4 float)** was briefly the default. It matches R2 to within 0.01 dB on every bin and the FFT is 30 % faster (1.15 vs 1.64 ms per hop).
 - **S16R** is esp-sdr's rounding-corrected S3 16-bit FFT with block-floating-point input scaling. The FFT takes 0.27 ms per hop.
   - Noise-only and live captures: per-bin error vs float 0.10–0.28 dB RMS, floor bias −0.1 to −0.2 dB, spur level and tone-to-spur range equal to float.
-  - With a strong signal in the same capture (−10 / −3 dBFS), weak bins read 1.0–1.4 dB low (1.3–2.6 dB RMS). This is inherent to a 16-bit FFT and matters for step-on/IMD measurement next to a strong VTX, so S16R stays opt-in.
+  - With a strong signal in the same capture (−10 / −3 dBFS), weak bins read 1.0–1.4 dB low (1.3–2.6 dB RMS). This is inherent to a 16-bit FFT and matters for step-on/IMD measurement next to a strong VTX, S16R is now the default anyway (see below); use `FFTTYPE R4` for step-on/IMD work.
 - Plain esp-dsp S16 (truncation bias) is worse in every case. Keep it only for comparison.
 - FFT tables load on demand: free heap is 62.8 KB with R4, 97.5 KB with S16R (it was 35 KB with everything loaded).
 - **Open: bursty long tunes.** 13–20 % of hops take ≥ 3 ms to tune, in bursts (6–60 ms apart, then quiet for several seconds), on every LO. Promiscuous mode is not the cause. Probably pre-emption on core 0; this costs about 15 % of the rotation rate.
@@ -509,6 +509,36 @@ Open items:
 - IMD/step-on statistics (§4.8): not started.
 - Alias-emulation profile: not started.
 - ~~Re-verify Web Serial in a real browser~~ Done (2026-10-06, Chrome via Claude in Chrome): auto-reconnect from the stored grant, 12/12 in-page checks, 20 s sustained at about 77 KiB/s with 0 CRC errors and no break events. A firmware `REBOOT` keeps USB connected; the UI now re-syncs settings when it sees `READY`.
+
+**Update (2026-10-06, evening).**
+- **Default FFT is now S16R** (rounded 16-bit FFT with block-floating-point scaling). Caveat: with a strong signal in the same capture, weak bins read about 1–1.4 dB low. Switch to `FFTTYPE R4` for step-on/IMD measurement.
+- **R4 tables are allocated at boot and kept** (16 KB, sized for 1024 points), because after boot the heap is too fragmented to find a 16 KB block. Other FFT tables load on demand. A failing PSD now reports `ERR psd <err> fft <type>` once per configuration, instead of the scanner going silent.
+- **Tune skip:** when the next hop uses the same LO (one channel enabled, or one pair-mode LO), `radio_tune` skips the PLL reprogram and settle delay. The 200 ms safety full tune and recalibration still run.
+- **Display spectrum default:** every 4th hop, rotating through the LOs.
+
+Measured timing (S16R default, spectrum every 4th hop, 8 s per row):
+
+| FFT | Enabled | Hops/s | Updates per channel | Tune median / mean | Capture | DSP | Free heap |
+|---|---|---:|---:|---:|---:|---:|---:|
+| S16R | all 8 (4 LOs) | 255–261 | **64–65 /s** | 835 / ~1400 µs | 168 µs | 2.21 ms | 80 KB |
+| S16R | S1 only (1 LO) | 445 | **445 /s** | 3 / 25 µs | 176 µs | 2.03 ms | 80 KB |
+| S16R | S1+S2 pair (1 LO) | 430 | **430 /s each** | 3 / 25 µs | 177 µs | 2.14 ms | 80 KB |
+| R4 | all 8 | 227 | 57 /s | 822 / 1286 µs | 168 µs | 2.84 ms | 80 KB |
+| R4 | S1 only | 344 | 344 /s | 2 / 28 µs | 175 µs | 2.66 ms | 80 KB |
+| R2 | all 8 | 202 | 51 /s | 806 / 1331 µs | 169 µs | 3.32 ms | 68 KB |
+| R2 | S1 only | 293 | 293 /s | 2 / 29 µs | 174 µs | 3.13 ms | 68 KB |
+
+- With one LO, the hop is capture plus DSP only, so the FFT type sets the rate directly.
+- With 4 LOs, the bursty long tunes (≥ 3 ms on 13–20 % of hops) cost about 15 % of the rate. Still open.
+
+**Open: flashing reliability (S3).** Uploads sometimes fail partway through (`No more data to read`, `MD5 mismatch`, `written flash region is empty`).
+- A failure after the erase step leaves the board unbootable: the ROM prints `invalid header: 0xffffffff`.
+- Reliable recovery: hold BOOT, tap EN, release BOOT, then `esptool --before no-reset --after watchdog-reset write-flash …` (`tools/flash.sh --manual`).
+- An RTS hard reset does not exit download mode; use `--after watchdog-reset`.
+- The `BOOTLOADER` command left the board unresponsive (not in usable download mode) on its only test.
+- `tools/flash.sh` (SCAN STOP, then usb-reset) also failed mid-image on its only test.
+- Root cause unknown. Next step: check the kernel log for re-enumeration and the ROM reset reason during a failure, and whether the chip resets while idle in download mode (watchdog) versus only during writes (power).
+- Last state: the board may be unbootable after that failed `flash.sh` run. Reflash it with BOOT + EN first.
 
 ## 7. Risks and open questions
 

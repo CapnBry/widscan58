@@ -58,7 +58,11 @@ static radio_caps_t caps = {
 static unsigned tune_skip = 7;
 static bool tuned_once;
 static int64_t last_full_tune;
-void radio_set_tune_skip(unsigned mask) { tune_skip = mask; tuned_once = false; }
+static uint32_t tuned_lo_khz; /* LO currently programmed */
+void radio_set_tune_skip(unsigned mask) {
+    tune_skip = mask;
+    tuned_once = false;
+}
 static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
 static unsigned gain_code = 60;
 static int filter_code = -1;
@@ -103,6 +107,11 @@ esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     }
     int64_t now = esp_timer_get_time();
     bool full = !tuned_once || recalibrated || now - last_full_tune > FULL_TUNE_INTERVAL_US;
+    /* Same LO as last time (one hop in the plan: a single channel, or one
+     * pair-mode LO): the PLL is already there, so skip the ~0.8 ms reprogram
+     * and the settle delay. Recalibration and the periodic full tune still
+     * run because `full` is decided first. */
+    if (!full && lo_khz == tuned_lo_khz) return ESP_OK;
     if (full) last_full_tune = now;
     s3_lo_select_normal();
     /* Program the PLL directly: channel setup at 2412 MHz, then the
@@ -118,6 +127,7 @@ esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     }
     if (full || !(tune_skip & 4)) gain_apply();
     tuned_once = true;
+    tuned_lo_khz = lo_khz;
     if (settle_us) esp_rom_delay_us(settle_us);
     return ESP_OK;
 }

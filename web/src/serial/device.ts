@@ -227,7 +227,15 @@ export class Device {
         clearTimeout(waiter.timer);
         waiter.resolve(item);
       }
-      for (const fn of this.listeners) fn(item);
+      // A throwing listener must not reach the transport: Web Serial's read
+      // loop would treat it as a fatal port error and stop reading.
+      for (const fn of this.listeners) {
+        try {
+          fn(item);
+        } catch (e) {
+          console.error(e);
+        }
+      }
     }
   }
 

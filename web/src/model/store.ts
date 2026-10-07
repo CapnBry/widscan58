@@ -147,9 +147,13 @@ export class Store {
   ingest(item: StreamItem) {
     if (item.kind === "text") {
       const line = item.line;
-      if (line.startsWith("PROFILE ")) this.setProfile(JSON.parse(line.slice(8)) as Profile);
-      else if (line.startsWith("STATUS ")) this.status = JSON.parse(line.slice(7)) as Status;
-      else if (line.startsWith("INFO ")) this.info = line.slice(5);
+      try {
+        if (line.startsWith("PROFILE ")) this.setProfile(JSON.parse(line.slice(8)) as Profile);
+        else if (line.startsWith("STATUS ")) this.status = JSON.parse(line.slice(7)) as Status;
+      } catch (e) {
+        this.addLog("error", `bad ${line.split(" ")[0]} reply (${(e as Error).message}); ignored`);
+      }
+      if (line.startsWith("INFO ")) this.info = line.slice(5);
       else if (line.startsWith("SPURS ")) {
         const f = line.split(" ");
         const n = Number(f[1]);

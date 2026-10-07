@@ -220,11 +220,10 @@ export class Console implements View {
     const now = performance.now();
     if (store.lastMetrics && now - this.lastInspect > 500) {
       this.lastInspect = now;
-      const p = store.profile;
       const m = store.lastMetrics;
       const named = {
         ...m,
-        channels: m.channels.map((c) => ({ name: p?.channels[c.id]?.name, ...c })),
+        channels: m.channels.map((c) => ({ name: this.app.channelName(c.id), ...c })),
       };
       this.inspector.textContent = JSON.stringify(named, null, 1);
     }

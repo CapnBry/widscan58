@@ -226,8 +226,7 @@ export class Panorama implements View {
     ctx.textBaseline = "top";
     p.channels.forEach((c, id) => {
       ctx.fillStyle = t.ink2;
-      ctx.fillText(c.name, a.sx(c.khz), a.top + 2);
-      void id;
+      ctx.fillText(app.channelName(id), a.sx(c.khz), a.top + 2);
     });
     if (st) {
       ctx.fillStyle = t.muted;
@@ -287,7 +286,7 @@ export class Panorama implements View {
     const i = Math.max(0, Math.min(n - 1, Math.floor(((this.hoverX - a.left) / (a.right - a.left)) * n)));
     const khz = a.ix(this.hoverX);
     const p = this.app.store.profile!;
-    const ch = p.channels.find((c) => Math.abs(c.khz - khz) <= p.search_hz / 1000);
+    const chId = p.channels.findIndex((c) => Math.abs(c.khz - khz) <= p.search_hz / 1000);
     const fmt = (v: number) => (Number.isNaN(v) ? "—" : `${v.toFixed(1)} dB`);
     const row = (color: string, value: string, label: string) => {
       const r = el("div", { class: "row" }, el("i", { style: `background:${color}` }), el("b"), el("span"));
@@ -296,7 +295,7 @@ export class Panorama implements View {
       return r;
     };
     const head = el("div", { class: "head" });
-    head.textContent = `${this.app.displayMHz(khz).toFixed(3)} MHz${ch ? ` · ${ch.name}` : ""}`;
+    head.textContent = `${this.app.displayMHz(khz).toFixed(3)} MHz${chId >= 0 ? ` · ${this.app.channelName(chId)}` : ""}`;
     this.tip.replaceChildren(
       head,
       row(t.ink, fmt(comp.live[i]), "live"),
@@ -390,7 +389,7 @@ export class Panorama implements View {
       s.ctx.fillStyle = channelColor(id);
       s.ctx.fillRect(x - 1, wa.bottom, 2, 4);
       s.ctx.fillStyle = t.ink2;
-      s.ctx.fillText(c.name, x, wa.bottom + 4);
+      s.ctx.fillText(this.app.channelName(id), x, wa.bottom + 4);
     });
   }
 }

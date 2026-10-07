@@ -120,6 +120,7 @@ export class ChannelGrid implements View {
       tile.root.classList.toggle("disabled", !enabled);
       tile.root.classList.toggle("selected", this.app.settings.selected === id);
       tile.key.style.background = channelColor(id);
+      tile.name.textContent = this.app.channelName(id);
       tile.freq.textContent =
         `${this.app.displayMHz(c.khz).toFixed(3)} MHz` + (this.app.settings.equivAxis && p.scale !== 1 ? " (equiv)" : "");
       const m = cs?.latest;

@@ -88,6 +88,25 @@ const tiles = await page.$$(".tile");
 await tiles[5].click();
 const selected = await page.evaluate(() => window.rx5808.app.settings.selected);
 check("tile click selects channel", selected === 5, `selected ${selected}`);
+// The 5.8 GHz axis renames a scaled profile's channels to Raceband.
+const labels = () =>
+  page.evaluate(() => ({
+    tiles: [...document.querySelectorAll(".tile .name")].map((e) => e.textContent).join(","),
+    zoom: [...document.querySelectorAll("section.card h2")].find((h) => h.textContent.startsWith("Channel zoom"))?.textContent,
+  }));
+const [equivBtn] = await page.$$("xpath/.//button[contains(., '5.8 GHz axis')]");
+const before = await labels();
+await equivBtn.click();
+await sleep(500);
+const after = await labels();
+await equivBtn.click();
+await sleep(500);
+const back = await labels();
+check(
+  "5.8 GHz axis relabels channels",
+  after.tiles === "R1,R2,R3,R4,R5,R6,R7,R8" && after.zoom.includes("R6 ·") && back.tiles === before.tiles,
+  `${before.tiles} -> ${after.tiles} (zoom "${after.zoom}") -> ${back.tiles}`,
+);
 const [rawBtn] = await page.$$("xpath/.//button[contains(., 'Capture')]");
 await rawBtn.click();
 await sleep(2500);

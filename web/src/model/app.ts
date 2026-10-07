@@ -3,6 +3,10 @@ import type { Device } from "../serial/device";
 import type { Store } from "./store";
 import { equivKhz } from "../proto/frames";
 
+// Raceband R1-R8 (MHz). A scaled profile's channel takes the Raceband name
+// its 5.8 GHz equivalent lands on.
+const RACEBAND_MHZ = [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917];
+
 export interface View {
   el: HTMLElement;
   render(): void;
@@ -88,6 +92,18 @@ export class App {
     const p = this.store.profile;
     if (!p || !this.settings.equivAxis || p.scale === 1) return khz / 1000;
     return equivKhz(p, khz) / 1000;
+  }
+
+  /** Channel name for display: the Raceband name (R1-R8) of a scaled channel
+   *  on the 5.8 GHz axis, otherwise the profile's own name. */
+  channelName(id: number): string {
+    const p = this.store.profile;
+    const c = p?.channels[id];
+    if (!c) return "";
+    if (!this.settings.equivAxis || p.scale === 1) return c.name;
+    const mhz = equivKhz(p, c.khz) / 1000;
+    const r = RACEBAND_MHZ.findIndex((f) => Math.abs(f - mhz) < 1);
+    return r >= 0 ? `R${r + 1}` : c.name;
   }
 
   /** Display a frequency offset (Hz) in kHz, scaled back to the 5.8 GHz equivalent if requested. */

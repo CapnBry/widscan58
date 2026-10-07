@@ -50,10 +50,11 @@ export class History implements View {
     const p = store.profile;
     const s = prepare(this.canvas);
     if (!p) return;
-    if (this.legendFor !== p.name) {
-      this.legendFor = p.name;
+    const legendKey = `${p.name}/${app.settings.equivAxis}`;
+    if (this.legendFor !== legendKey) {
+      this.legendFor = legendKey;
       this.legend.replaceChildren(
-        ...p.channels.map((c, id) => el("span", {}, el("i", { style: `background:${channelColor(id)}` }), c.name)),
+        ...p.channels.map((_, id) => el("span", {}, el("i", { style: `background:${channelColor(id)}` }), app.channelName(id))),
       );
     }
     const now = store.now();
@@ -141,7 +142,7 @@ export class History implements View {
       if (best > 0.5) return;
       const r = el("div", { class: "row" }, el("i", { style: `background:${channelColor(id)}` }), el("b"), el("span"));
       r.children[1].textContent = `${val.toFixed(1)} dBFS`;
-      r.children[2].textContent = p.channels[id].name;
+      r.children[2].textContent = app.channelName(id);
       rows.push(r);
     });
     this.tip.replaceChildren(...rows);

@@ -9,7 +9,7 @@ export class Zoom implements View {
   el: HTMLElement;
   private canvas = el("canvas");
   private title = el("span");
-  private readout = el("div", { class: "legend" });
+  private readout = el("div", { class: "readout" });
 
   constructor(private app: App) {
     const t = theme();
@@ -45,7 +45,7 @@ export class Zoom implements View {
     const half = search * 1.6;
     const f0 = ch.khz - half;
     const f1 = ch.khz + half;
-    this.title.textContent = `${ch.name} · ${app.displayMHz(ch.khz).toFixed(3)} MHz`;
+    this.title.textContent = `${app.channelName(id)} · ${app.displayMHz(ch.khz).toFixed(3)} MHz`;
     const a = axes(s, f0, f1, app.settings.dbMin, app.settings.dbMax, { top: 16 });
     const ctx = s.ctx;
     const t = theme();
@@ -147,13 +147,13 @@ export class Zoom implements View {
       ["RSSI", `${m.rssi.toFixed(1)} dBFS (EMA ${m.rssiEma.toFixed(1)})`],
       ["SNR", `${m.snr.toFixed(1)} dB`],
       ["floor", `${m.floor.toFixed(1)} dBFS`],
-      ["peak", sig ? `${m.peak.toFixed(1)} dBFS/bin @ ${off(m.peakOffHz)}` : "—"],
       ["centre", sig && !(m.flags & CHF.NO_CENTROID) ? off(m.centroidOffHz) : "—"],
+      ["peak", sig ? `${m.peak.toFixed(1)} dBFS/bin @ ${off(m.peakOffHz)}` : "—"],
       ["OBW", sig ? `${(app.displayOffsetKhz(m.obwHz) / 1000).toFixed(2)} MHz` : "—"],
     ];
     this.readout.replaceChildren(
       ...items.map(([k, v]) => {
-        const sEl = el("span");
+        const sEl = el("span", { title: `${k} ${v}` });
         const b = el("b");
         b.textContent = v;
         sEl.append(`${k} `, b);

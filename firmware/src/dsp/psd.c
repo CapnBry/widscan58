@@ -1,4 +1,4 @@
-/* Welch PSD: esp-dsp float/fixed FFTs, or esp-sdr's rounded S3 fixed FFT.
+/* Welch PSD: esp-dsp float/fixed FFTs, or esp-sdr's rounded fixed FFT.
  * GPL-3.0-or-later. */
 #include <math.h>
 #include <stdlib.h>
@@ -28,9 +28,28 @@ static psd_fft_t fft_type = PSD_FFT_S16R;
 #if CONFIG_IDF_TARGET_ESP32S3
 /* esp-sdr: esp-dsp's aes3 kernel with the sum-branch rounding bias removed. */
 extern int s3_fft2r_sc16_rnd(int16_t *data, int N, int16_t *w);
-#define HAVE_S16R 1
+#define fft2r_sc16_rnd s3_fft2r_sc16_rnd
 #else
-#define HAVE_S16R 0
+/* Portable equivalent: esp-sdr main/common/spectrum_fft.h, the rounded Q15
+ * radix-2 FFT it runs on the C5 (same butterflies and bit-reversed twiddles as
+ * the esp-dsp ANSI kernel, output X/N). */
+static int fft2r_sc16_rnd(int16_t *x, int n, int16_t *w) {
+    for (unsigned half = (unsigned)n / 2, groups = 1; half; half /= 2, groups *= 2)
+        for (unsigned group = 0; group < groups; group++)
+            for (unsigned offset = 0; offset < half; offset++) {
+                unsigned a = group * half * 2 + offset, b = a + half;
+                int32_t wr = w[2 * group], wi = w[2 * group + 1];
+                int32_t ar = x[2 * a], ai = x[2 * a + 1], br = x[2 * b], bi = x[2 * b + 1];
+                uint32_t tr = (uint32_t)(wr * br) + (uint32_t)(wi * bi);
+                uint32_t ti = (uint32_t)(wr * bi) - (uint32_t)(wi * br);
+                uint32_t rr = (uint32_t)(ar * 32767) + 32767u, ri = (uint32_t)(ai * 32767) + 32767u;
+                x[2 * a] = (int16_t)((rr + tr) >> 16);
+                x[2 * a + 1] = (int16_t)((ri + ti) >> 16);
+                x[2 * b] = (int16_t)((rr - tr) >> 16);
+                x[2 * b + 1] = (int16_t)((ri - ti) >> 16);
+            }
+    return 0;
+}
 #endif
 
 void psd_set_fft(psd_fft_t type) { fft_type = type < PSD_FFT_COUNT ? type : PSD_FFT_F32_R4; }
@@ -139,7 +158,6 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
     if (segments > max_segments) segments = max_segments;
     if (!segments) return ESP_ERR_INVALID_SIZE;
     psd_fft_t type = fft_type == PSD_FFT_F32_R4 && !is_power_of_4(nfft) ? PSD_FFT_F32_R2 : fft_type;
-    if (type == PSD_FFT_S16R && !HAVE_S16R) type = PSD_FFT_S16;
     esp_err_t err = ensure(type);
     if (err != ESP_OK) return err;
     window_setup(nfft);
@@ -192,9 +210,7 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
         }
         t2 = esp_timer_get_time(); t_prep += t2 - t; t = t2;
         if (type == PSD_FFT_S16) dsps_fft2r_sc16(work16, nfft);
-#if HAVE_S16R
-        else if (type == PSD_FFT_S16R) s3_fft2r_sc16_rnd(work16, (int)nfft, dsps_fft_w_table_sc16);
-#endif
+        else if (type == PSD_FFT_S16R) fft2r_sc16_rnd(work16, (int)nfft, dsps_fft_w_table_sc16);
         else if (type == PSD_FFT_F32_R4) {
             dsps_fft4r_fc32(work, nfft);
             dsps_bit_rev4r_fc32(work, nfft); /* radix-4 needs its own reorder */

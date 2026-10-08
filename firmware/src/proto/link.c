@@ -10,7 +10,15 @@
 #include "frames.h"
 #include "link.h"
 
+#if RX_TARGET_C5
+/* The C5 heap is ~125 KB once the 128 KiB capture bank is reserved, and Wi-Fi
+ * needs most of what's left: max item ~18 KB, a ~9000-sample RAWIQ. */
+#define LINK_QUEUE_BYTES (36 * 1024)
+#define LINK_USB_TX_BYTES 4096
+#else
 #define LINK_QUEUE_BYTES (72 * 1024) /* NOSPLIT: max item ~half, fits a 16380-sample RAWIQ */
+#define LINK_USB_TX_BYTES 16384
+#endif
 static RingbufHandle_t queue;
 static volatile uint32_t drops;
 
@@ -35,10 +43,10 @@ static void link_task(void *arg) {
 }
 
 void link_init(void) {
-    usb_serial_jtag_driver_config_t cfg = {.tx_buffer_size = 16384, .rx_buffer_size = 1024};
+    usb_serial_jtag_driver_config_t cfg = {.tx_buffer_size = LINK_USB_TX_BYTES, .rx_buffer_size = 1024};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&cfg));
     queue = xRingbufferCreate(LINK_QUEUE_BYTES, RINGBUF_TYPE_NOSPLIT);
-    xTaskCreatePinnedToCore(link_task, "link", 4096, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(link_task, "link", 4096, NULL, 5, NULL, portNUM_PROCESSORS - 1);
 }
 
 size_t link_capacity(void) { return xRingbufferGetMaxItemSize(queue); }
@@ -49,7 +57,8 @@ unsigned link_fill_permille(void) {
     return free >= max ? 0 : (unsigned)(1000 - free * 1000 / max);
 }
 
-bool link_frame(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free) {
+static bool frame_put(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free,
+                      TickType_t wait) {
     size_t len = alen + blen;
     size_t total = sizeof(frame_header_t) + len + 4;
     if (len > 0xffff || (min_free && xRingbufferGetCurFreeSize(queue) < total + min_free)) {
@@ -57,7 +66,7 @@ bool link_frame(uint8_t type, const void *a, size_t alen, const void *b, size_t 
         return false;
     }
     void *slot;
-    if (xRingbufferSendAcquire(queue, &slot, total, 0) != pdTRUE) {
+    if (xRingbufferSendAcquire(queue, &slot, total, wait) != pdTRUE) {
         drops++;
         return false;
     }
@@ -70,6 +79,14 @@ bool link_frame(uint8_t type, const void *a, size_t alen, const void *b, size_t 
     memcpy(p + sizeof(h) + len, &crc, 4);
     xRingbufferSendComplete(queue, slot);
     return true;
+}
+
+bool link_frame(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free) {
+    return frame_put(type, a, alen, b, blen, min_free, 0);
+}
+
+bool link_frame_wait(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, uint32_t wait_ms) {
+    return frame_put(type, a, alen, b, blen, 0, pdMS_TO_TICKS(wait_ms));
 }
 
 bool link_text(const char *text) {

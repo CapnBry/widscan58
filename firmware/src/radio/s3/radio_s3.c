@@ -44,7 +44,8 @@ static radio_caps_t caps = {
     .target = "esp32s3",
     .max_samples = IQ_WORDS,
     /* Rate codes: 0 = 80 MS/s, 1 = 40 MS/s (ctrl bit 15), 2 = 16 MS/s (bit 16). */
-    .rates_hz = {80000000, 40000000, 16000000, 0},
+    .rates_hz = {80000000, 40000000, 16000000},
+    .lo_step_khz = 1, /* integer MHz channel plus a kHz PLL offset */
     .filter_code_max = 63,
     .spurs_khz = s3_spurs_khz,
     .nspurs = sizeof(s3_spurs_khz) / sizeof(s3_spurs_khz[0]),

@@ -69,7 +69,7 @@ of the carrier.
 | Usable span per capture | ±24 MHz (filter) inside ±40 MHz Nyquist |
 | RSSI integration window | ±5 MHz |
 | Centre search window | ±12 MHz |
-| Pair-mode LOs | 5676 / 5750 / 5824 / 5898 MHz (channels at −18 / +19 MHz) |
+| Pair-mode LOs | 5677 / 5751 / 5825 / 5899 MHz (the planner rounds the half-MHz midpoints up; channels at −19 / +18 MHz) |
 | FFT | 1024 points → 78.1 kHz bins; Welch 4 × 1024 from a 4096-sample snapshot |
 
 R8 (5917 MHz) is above esp-sdr's validated 5150–5895 MHz range and must be checked
@@ -458,8 +458,8 @@ saturation/alias/bursty flags, reconnect handling, ≥ 1 h soak. IMD: firmware
 with scheduled `testgen` multi-tone runs.
 
 ### Phase 0-C5 → C5 port (when the devkits arrive)
-1. `esp32c5` env + `radio/c5/` (`adctrig` capture, `phy_set_chanfreq`, mode-1
-   filter).
+1. ~~`esp32c5` env + `radio/c5/` (`adctrig` capture, `phy_set_chanfreq`, mode-1
+   filter).~~ Done 2026-10-08, running on a XIAO ESP32-C5; see Status.
 2. Rerun the Phase 0 measurements at 5.8 GHz, plus:
    - real alias rejection (R3 seen from LO 5676 at −24 MHz);
    - whether R8 at 5917 MHz is usable.
@@ -539,6 +539,45 @@ Measured timing (S16R default, spectrum every 4th hop, 8 s per row):
 - `tools/flash.sh` (SCAN STOP, then usb-reset) also failed mid-image on its only test.
 - Root cause unknown. Next step: check the kernel log for re-enumeration and the ROM reset reason during a failure, and whether the chip resets while idle in download mode (watchdog) versus only during writes (power).
 - Last state: the board may be unbootable after that failed `flash.sh` run. Reflash it with BOOT + EN first.
+
+**C5 target (2026-10-08). Runs on a Seeed XIAO ESP32-C5 (chip rev v1.0, 8 MB flash), scans R1–R8, and passes the headless web suite.**
+
+What exists:
+- `pio run -e esp32c5` builds without warnings (board `esp32-c5-devkitc-1`, 4 MB, same pioarduino / IDF 5.5.5 as the S3). All 14 C5 PHY functions the backend calls are instruction-identical between esp-sdr's IDF pin and IDF 5.5.5 (`tools/check_phy_abi.sh esp32c5 25fe69f9... v5.5.5`).
+- `src/radio/c5/radio_c5.c`, ported from esp-sdr's `families/c5_c6_c61/receiver.c`:
+  - Capture: `adctrig(n-1, 0, 0, 2*rate_code, ...)` into 0x40830000, with fill-word and overrun-guard checks. Rate codes 0–5 = 80/40/20/10/8/4 MS/s.
+  - The SRAM ownership bit hands the modem the whole 128 KiB bank 0x40820000–0x40840000, so the bank is reserved from the heap and `sram_guard.ld` fails the link if static sections reach it. Static RAM currently ends at 0x4081b9c8 (about 18 KB of headroom).
+  - Tuning: `phy_set_chanfreq(mhz, 1)`, whole MHz only (`radio_caps()->lo_step_khz = 1000`). PHY channel mode 1 is the wide analog path. Mode 0 (11–23 MHz) is not exposed.
+  - Calibration: `recal_c5.c`, esp-sdr's C5 `rx_recalibrate` (fresh DC/IQ at the LO, then the gain table), with `--wrap=phy_chip_set_chan_ana`.
+  - Filter: BBTOP 0x67 host 1 regs 6/7, applied only around a capture. In mode 1, code 0 is about 48 MHz and code 60 about 22 MHz (esp-sdr curve).
+  - Gain: `force_rx_gain`; the maximum index is read from 0x600a702c (< 90).
+  - `BOOTLOADER` sets `LP_AON_FORCE_DOWNLOAD_BOOT`.
+- Shared code:
+  - Profiles carry a `target`. The firmware boots into the first profile for its chip, and `PROFILE` rejects the other chip's (`ERR profile_target`). The `c5-race` values match the web simulator.
+  - `radio_caps_t` has 6 rate slots and `lo_step_khz`. `RAWIQ` and `FFTEVAL LIVE` reject LOs that are not a multiple of it.
+  - The link and command tasks were pinned to core 1; they now use the last core (core 0 on the single-core C5).
+- FFT: the S3's S16R kernel is Xtensa assembly. Other targets get a C port of esp-sdr's rounded Q15 radix-2 kernel (`spectrum_fft.h`), checked on the host with a test tone. That arithmetic is identical to esp-dsp's ANSI `dsps_fft2r_sc16`, which is what S16 maps to on the C5. So on the C5, S16 and S16R should give the same result; the truncation bias only exists in the S3 SIMD kernel. The C5 has no FPU, so R2/R4 run in software floating point.
+- `tools/flash.sh` takes `RX_ENV=esp32c5` and writes the C5 bootloader at 0x2000.
+
+Bring-up on hardware (XIAO ESP32-C5, 2026-10-08):
+- **Boot loop, fixed.** `esp_wifi_init` failed with `ESP_ERR_NO_MEM` and `app_main` aborted before `READY`, so the web UI never connected. The C5 heap is only ~125 KB once the capture bank is reserved, and the S3-sized link buffers (72 KiB queue + 16 KiB USB TX) took most of it. The C5 now uses a 36 KiB queue and 4 KiB of USB TX, and `PSD_MAX_FFT` is 1024 (`FFT` rejects 2048). Free heap while scanning is about 11 KB, so watch it when adding anything.
+- Boot steps after `link_init` use `BOOT_CHECK`: on failure the board prints `ERR boot <step> <error> heap=… largest=…` every second and keeps draining USB RX, instead of reboot-looping silently.
+- `RAWIQ` is capped by the link queue: `STATUS` reports `rawiq_max` (9180 on the C5, 16380 on the S3), the command refuses more (`ERR rawiq_args`), and the UI disables larger sizes. RAWIQ frames wait up to 500 ms for queue space (`link_frame_wait`); before that, an 8192-sample capture sometimes failed with `ERR link_full`.
+- **USB reset wedge on rev v1.0 silicon, fixed.** The ROM loops forever after a USB Serial/JTAG (RTS) reset if UART0's clock is gated (esp-idf#18089, IDFGH-17050). IDF 5.5.5 avoids the gating only when USB Serial/JTAG is the *console*. Ours is off (the binary protocol owns the port), so `app_main` turns the UART0 clocks back on. Before the fix, esptool auto-reset failed (`Write timeout`), and closing the port (the UI or the bridge disconnecting) left the board dead until RESET was pressed. Now `pio run -t upload` / `tools/flash.sh` work hands-free, and open/close cycles are fine.
+- Capture: all six rate codes complete. A 48 MHz-crystal harmonic at 5856 MHz shows up at LO+19 MHz (80/40 MS/s) and folds to −1/−1/+3/−1 MHz at 20/10/8/4 MS/s, as expected. The lower rates are plain decimation with no anti-alias filter. That spur's sign confirms `CONJ 1` for the C5 too. Other narrow spurs seen while scanning: 5664 and 5760 MHz (also 48 MHz harmonics), plus lines near 5840 and 5920 MHz. They aren't in `spurs_khz` yet. 5 GHz Wi-Fi is visible around 5860–5915 MHz.
+- Hop timing, all 8 channels in pair mode: **15.3 ms/hop** (15 rotations/s) against the 2.5 ms target.
+  - Tune: 1.23 ms, almost all `phy_set_chanfreq`. `TUNESKIP 2` saves only ~40 µs. `TUNESKIP 4` raises the floor by 21 dB: as on the S3, channel setup resets the gain, so the re-apply stays.
+  - Capture: 1.88 ms. About 1.78 ms of that is fixed overhead inside `adctrig` (1024 samples 1.80 ms, 8192 samples 1.99 ms, filter on or off). Its 10 ms delay is on the TX-tone path, not ours, so the cost is elsewhere in the cert-test routine. Driving the capture registers directly, as the S3 backend does, is the likely fix.
+  - DSP: 12.2 ms. `TIMING`: PSD 8.7 ms (prep 1.1, FFT 3.1, power 3.4), metrics 3.0 ms. The C5 has no FPU, and window/power/metrics are float.
+
+Next steps, in order:
+1. **DSP cost.** The biggest item (12 of 15 ms). Move window, power and metrics to fixed point, or at least drop the float work done per bin. `FFTEVAL SYNTH`/`LIVE` for all FFT types: S16 and S16R should match on the C5, and R4 shows the soft-float cost. Step-on/IMD relies on R4, so it needs an affordable path.
+2. **Capture overhead.** Find where `adctrig`'s 1.78 ms goes. Either replace it with direct register writes, or keep only the parts that are needed per capture.
+3. **Calibration.** Compare `RECALMODE ONCE` (calibrate at 5787 MHz only) with `EVERY` across R1–R8: DC spike size, noise floor and image level. Decide the default. If `EVERY` is needed and slow, this is where the per-LO calibration cache (§4.4) comes back.
+4. **RF characterisation** (Phase 0-C5 step 2): board spurs by LO sweep (add them to `spurs_khz`), the real width of filter code 0, alias rejection (R3 seen from LO 5677 at −24 MHz), and whether R8 (5917 MHz, above esp-sdr's validated 5150–5895 MHz) is usable.
+5. **Profile.** Finalise `c5-race` (pair vs. single mode, filter code, windows), then run the Phase 1 acceptance criteria with real VTXs.
+6. `BOOTLOADER` is still untested on the C5.
+7. The S3 firmware picked up the shared changes (`BOOT_CHECK`, `rawiq_max`, `link_frame_wait`). It builds but hasn't been reflashed or rerun on the S3.
 
 ## 7. Risks and open questions
 

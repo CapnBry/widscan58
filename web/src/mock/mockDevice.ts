@@ -184,6 +184,7 @@ export class MockTransport implements Transport {
             gain_mode: this.gainManual ? "MANUAL" : "HARDWARE",
             gain: this.gain,
             gain_max: 82,
+            rawiq_max: 16380,
             recal: "ONCE",
             rssi_hz: p.rssiHz,
             search_hz: p.searchHz,

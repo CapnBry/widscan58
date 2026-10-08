@@ -4,14 +4,18 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+#if RX_TARGET_C5
+#define PSD_MAX_FFT 1024 /* the C5 heap is small; c5-race uses 1024 */
+#else
 #define PSD_MAX_FFT 2048
+#endif
 
 /* FFT implementation used by psd_compute (all esp-dsp, S3-optimised where available). */
 typedef enum {
     PSD_FFT_F32_R2 = 0, /* float radix-2 (dsps_fft2r_fc32) */
     PSD_FFT_F32_R4 = 1, /* float radix-4 (dsps_fft4r_fc32); power-of-4 sizes only, else R2 */
     PSD_FFT_S16 = 2,    /* 16-bit fixed radix-2, scaled 1/2 per stage (dsps_fft2r_sc16) */
-    PSD_FFT_S16R = 3,   /* as S16 with esp-sdr's rounding fix (s3_fft2r_sc16_rnd) */
+    PSD_FFT_S16R = 3,   /* as S16 with esp-sdr's rounding fix (S3 SIMD kernel, portable C elsewhere) */
     PSD_FFT_COUNT
 } psd_fft_t;
 void psd_set_fft(psd_fft_t type);

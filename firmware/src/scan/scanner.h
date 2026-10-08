@@ -41,7 +41,7 @@ typedef struct {
 } scan_config_t;
 
 void scanner_defaults(const profile_t *p, scan_config_t *c);
-void scanner_init(void);
+esp_err_t scanner_init(void);
 void scanner_get_config(scan_config_t *c);
 void scanner_set_config(const scan_config_t *c);
 void scanner_get_plan(plan_t *plan);

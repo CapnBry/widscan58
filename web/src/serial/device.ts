@@ -35,6 +35,11 @@ export class WebSerialTransport implements Transport {
 
   /** Non-fatal line conditions: Web Serial errors the current readable stream,
    *  but port.readable is replaced and reading can continue. */
+  /* Chrome (up to at least 153) inherits VMIN=0 from a previous pyserial or
+   * esptool user of the tty and then misreads "no data yet" as a lost device. */
+  private static readonly LOST_HINT =
+    "If the board is still plugged in: another serial tool probably left the tty at VMIN=0. " +
+    "Run `stty -F /dev/ttyACM0 min 1` (adjust the port), or press RESET on the board, then connect again.";
   private static readonly RECOVERABLE = new Set(["BreakError", "FramingError", "ParityError", "BufferOverrunError"]);
   onWarning: (msg: string) => void = () => {};
 
@@ -52,7 +57,11 @@ export class WebSerialTransport implements Transport {
         const err = e as DOMException;
         if (!WebSerialTransport.RECOVERABLE.has(err.name)) {
           this.reader.releaseLock();
+          // Release the port, or the next connect attempt finds it still open.
+          await port.close().catch(() => {});
+          this.port = null;
           onClose(`read error: ${err.name}: ${err.message}`);
+          if (err.name === "NetworkError") this.onWarning(WebSerialTransport.LOST_HINT);
           return;
         }
         this.onWarning(`${err.name} (${err.message}); continuing`);

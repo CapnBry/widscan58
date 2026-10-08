@@ -351,7 +351,7 @@ static void do_rawiq(const scan_request_t *r) {
     }
     frame_rawiq_t h = {.lo_khz = r->lo_khz, .rate_hz = radio_caps()->rates_hz[r->rate_code],
                        .n = r->n, .conjugated = c->conjugate, .shift = (uint8_t)shift};
-    if (!link_frame(FRAME_RAWIQ, &h, sizeof(h), iq, 2u * r->n, 0)) link_text("ERR link_full\n");
+    if (!link_frame_wait(FRAME_RAWIQ, &h, sizeof(h), iq, 2u * r->n, 500)) link_text("ERR link_full\n");
 }
 
 /* FFT A/B evaluation: every FFT path on identical samples, averaged over reps.
@@ -440,14 +440,16 @@ static void scanner_task(void *arg) {
     }
 }
 
-void scanner_init(void) {
+esp_err_t scanner_init(void) {
     lock = xSemaphoreCreateMutex();
     requests = xQueueCreate(4, sizeof(scan_request_t));
     s.scratch = heap_caps_malloc(PSD_MAX_FFT * sizeof(float), MALLOC_CAP_INTERNAL);
-    scanner_defaults(profile_default(), &shared);
+    if (!s.scratch) return ESP_ERR_NO_MEM;
+    scanner_defaults(profile_default(radio_caps()->target), &shared);
     plan_build(shared.profile, shared.enabled, shared.mode, &shared_plan);
     s.cfg.profile = NULL; /* force a full apply */
-    ESP_ERROR_CHECK(psd_init());
+    esp_err_t err = psd_init();
+    if (err != ESP_OK) return err;
     /* Core 0: the PHY and Wi-Fi driver live there. */
-    xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, NULL, 0);
+    return xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, NULL, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }

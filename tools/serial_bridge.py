@@ -15,6 +15,8 @@ import signal
 import serial
 import websockets
 
+from ttyfix import keep_vmin1
+
 
 async def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -24,6 +26,7 @@ async def main():
     args = ap.parse_args()
 
     ser = serial.Serial(args.port, 115200, timeout=0)
+    keep_vmin1(ser)
     loop = asyncio.get_running_loop()
     clients: set = set()
     stats = {"rx": 0, "tx": 0}
@@ -39,6 +42,7 @@ async def main():
                 try:
                     ser.close()
                     ser.open()
+                    keep_vmin1(ser)
                 except serial.SerialException:
                     pass
                 continue

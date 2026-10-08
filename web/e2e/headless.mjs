@@ -112,6 +112,13 @@ await rawBtn.click();
 await sleep(2500);
 s = await snap();
 check("raw I/Q capture", !!s.rawiq, JSON.stringify(s.rawiq));
+const sizes = await page.evaluate(() => {
+  const max = window.rx5808.store.status?.rawiq_max;
+  const card = [...document.querySelectorAll("section")].find((e) => e.querySelector("h2")?.textContent.startsWith("Raw I/Q"));
+  const opts = [...(card?.querySelectorAll("select option") ?? [])];
+  return { max, n: opts.length, bad: opts.filter((o) => o.disabled !== Number(o.value) > (max ?? Infinity)).map((o) => o.value) };
+});
+check("raw I/Q sizes respect rawiq_max", sizes.n > 0 && sizes.bad.length === 0, JSON.stringify(sizes));
 await send("GAIN MANUAL 60");
 await sleep(3000);
 s = await snap();

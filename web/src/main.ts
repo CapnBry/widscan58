@@ -143,7 +143,7 @@ async function connect(transport: Transport, readOnly = false) {
     await device.open();
   } catch (e) {
     store.addLog("error", `open failed: ${(e as Error).message}`);
-    setState("err", "Connection failed");
+    setState("err", `Connection failed (${(e as Error).message})`);
     return;
   }
   app.device = device;

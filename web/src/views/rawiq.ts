@@ -71,7 +71,19 @@ export class RawIqView implements View {
     );
   }
 
+  /* The C5's smaller link queue caps RAWIQ below the capture buffer size. */
+  private limitSamples() {
+    const max = this.app.store.status?.rawiq_max ?? Infinity;
+    let best = "";
+    for (const o of Array.from(this.n.options)) {
+      o.disabled = Number(o.value) > max;
+      if (!o.disabled) best = o.value;
+    }
+    if (this.n.selectedOptions[0]?.disabled && best) this.n.value = best;
+  }
+
   render() {
+    this.limitSamples();
     const r = this.app.store.rawiq;
     const themeKey = theme().ink;
     if (themeKey !== this.shownTheme) {

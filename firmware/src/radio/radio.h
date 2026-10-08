@@ -10,10 +10,13 @@ static inline int radio_word_i(uint32_t w) { return (int32_t)(w << 22) >> 22; }
 static inline int radio_word_q(uint32_t w) { return (int32_t)(w << 12) >> 22; }
 #define RADIO_FULL_SCALE 512
 
+#define RADIO_MAX_RATES 6
+
 typedef struct {
     const char *target;
     uint32_t max_samples;
-    uint32_t rates_hz[4];   /* indexed by radio rate code, 0 = unsupported */
+    uint32_t rates_hz[RADIO_MAX_RATES]; /* indexed by radio rate code, 0 = unsupported */
+    uint32_t lo_step_khz;   /* LO tuning resolution */
     uint8_t gain_max;
     uint8_t filter_code_max;
     /* Narrow spurs generated on the board itself (absolute kHz), found by
@@ -33,7 +36,8 @@ esp_err_t radio_init(void);
 const radio_caps_t *radio_caps(void);
 const char *radio_phy_version(void);
 
-/* Tune the receive LO. Applies gain and RX path setup; waits settle_us. */
+/* Tune the receive LO (a multiple of lo_step_khz). Applies gain and RX path
+ * setup; waits settle_us. */
 esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us);
 void radio_set_recal(radio_recal_t mode, uint32_t centre_khz);
 void radio_force_recal(void);

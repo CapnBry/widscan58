@@ -8,7 +8,8 @@ Web Serial dashboard shows it all live.
 
 Status: the **ESP32-S3** runs a scaled 2.4 GHz mock-up of Raceband (channels
 S1–S8, see [PLAN.md](PLAN.md) §2.2). The **ESP32-C5** (real 5.8 GHz Raceband)
-backend comes once hardware is available.
+target runs on a Seeed XIAO ESP32-C5 and works with the web UI, but at
+15 ms/hop it is still far from the timing target; see PLAN.md, Status.
 
 License: GPL-3.0-or-later (see [LICENSE](LICENSE)). Files derived from esp-sdr
 say so in their headers.
@@ -21,7 +22,7 @@ say so in their headers.
 | `web/` | Vite + TypeScript dashboard (Web Serial, simulator, replay). |
 | `tools/rx5808cli.py` | Python client: `info`, `monitor`, `rawiq`, `spectrum`, `cmd`, `bootloader`. |
 | `tools/serial_bridge.py` | Serial ↔ WebSocket bridge (headless tests, remote viewing). |
-| `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN). Experimental, see the flashing notes. |
+| `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN; `RX_ENV=esp32c5` for the C5). Experimental, see the flashing notes. |
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
 | `ref/esp-sdr/` | Reference checkout of esp-sdr (not tracked here). Restore it with `git clone https://github.com/ESPARGOS/esp-sdr ref/esp-sdr`. |
 | `backup/` | Full flash dump of the S3 as it arrived (esp-sdr WebSDR firmware). Local only, not tracked. |
@@ -31,19 +32,33 @@ say so in their headers.
 ```sh
 cd firmware
 pio run -e esp32s3 -t upload      # esptool resets via USB (usb-reset); usually no buttons needed
+pio run -e esp32c5 -t upload      # ESP32-C5 (tested on a XIAO ESP32-C5), native USB port
 ```
+
+Each target boots into its own band profile: `s3-race24` on the S3, `c5-race`
+on the C5. `PROFILE <name>` refuses the other target's profile
+(`ERR profile_target`).
 
 **Flashing is not fully reliable yet** (see PLAN.md, "Open: flashing reliability"). Uploads sometimes fail partway through, and a failure after the erase step leaves the board unbootable (the ROM prints `invalid header: 0xffffffff`). The reliable path:
 
 1. Hold BOOT, tap EN, release BOOT.
 2. Run `tools/flash.sh --manual`, or `esptool --before no-reset --after watchdog-reset write-flash 0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin` from `firmware/.pio/build/esp32s3`.
+   For the C5 use `RX_ENV=esp32c5 tools/flash.sh`. The C5 bootloader goes at **0x2000**, not 0x0.
 
 Use `--after watchdog-reset`: an RTS reset does not always leave download mode.
 
 Use the PlatformIO Core that pioarduino 55.03.312-1 expects (6.2.x). The
 platform pins ESP-IDF 5.5.5. Before changing the platform version, run
-`tools/check_phy_abi.sh esp32s3 25fe69f946311abdaf9ad56591f25fedbc20ac98 <new-idf-tag>`.
-The firmware depends on private PHY functions, and they must stay identical.
+`tools/check_phy_abi.sh esp32s3 25fe69f946311abdaf9ad56591f25fedbc20ac98 <new-idf-tag>`,
+and the same with `esp32c5`. The firmware depends on private PHY functions, and
+they must stay identical. Both targets pass against IDF 5.5.5.
+
+**Web UI says "The device has been lost" right after connecting** (while the board
+stays plugged in): an earlier pyserial user of the port, such as esptool,
+`pio device monitor` or a script, left the tty at VMIN=0. Chrome (up to at least
+153) reads that as a lost device. Fix: `stty -F /dev/ttyACM0 min 1`, or press
+RESET. `tools/flash.sh`, `rx5808cli.py` and `serial_bridge.py` leave the port in
+the right state (`tools/ttyfix.py`); `pio run -t upload` does not.
 
 Ways back into the bootloader: esptool's `usb-reset` (automatic on upload), or
 hold BOOT while pressing EN. The `BOOTLOADER` command left the board
@@ -73,10 +88,11 @@ Send these with `tools/rx5808cli.py cmd …` or the UI's Protocol console.
 | `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration, band profile, DSP time breakdown, masked board spurs |
 | `ENABLE <mask>`, `MODE PAIR\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how |
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
-| `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R; R4 is exact float and best for step-on/IMD measurement |
+| `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R; R4 is exact float and best for step-on/IMD measurement. On the C5, S16 and S16R use the same rounding (only the S3's SIMD S16 kernel has the truncation bias), and float FFTs are slow (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples |
 | `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
-| `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled) |
+| `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled). The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
+| `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `RECAL`, `RECALMODE ONCE\|EVERY`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug) |
 | `REBOOT` | Restart (USB stays connected; the UI re-syncs on `READY`) |
 

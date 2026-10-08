@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Flash the esp-rx5808 firmware reliably over the S3's USB Serial/JTAG.
+# Flash the esp-rx5808 firmware reliably over the S3's USB Serial/JTAG
+# (RX_ENV=esp32c5 for the C5; the S3 notes below are untested on it).
 # GPL-3.0-or-later.
 #
 # esptool's USB reset into download mode can lose the race against the
@@ -14,7 +15,7 @@
 # release BOOT (that full reset also clears the watchdog), then run
 #   tools/flash.sh --manual
 #
-#   tools/flash.sh [--manual] [port]
+#   [RX_ENV=esp32c5] tools/flash.sh [--manual] [port]
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 manual=0
@@ -22,9 +23,10 @@ if [[ ${1:-} == --manual ]]; then manual=1; shift; fi
 port=${1:-$(ls /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_* 2>/dev/null | head -1)}
 [[ -n $port ]] || { echo "no Espressif USB Serial/JTAG device found" >&2; exit 1; }
 esptool=${ESPTOOL:-$HOME/.platformio/penv/bin/esptool}
-build=$here/firmware/.pio/build/esp32s3
+env=${RX_ENV:-esp32s3} # or esp32c5
+build=$here/firmware/.pio/build/$env
 
-(cd "$here/firmware" && pio run -e esp32s3)
+(cd "$here/firmware" && pio run -e "$env")
 
 before=usb-reset
 if (( manual )); then
@@ -39,6 +41,15 @@ s.reset_input_buffer()
 ' "$port"
 fi
 
-"$esptool" --chip esp32s3 -p "$port" --before "$before" --after watchdog-reset \
+boot_offset=0x0
+[[ $env == esp32c5 ]] && boot_offset=0x2000 # C5 ROM loads the bootloader from 0x2000
+"$esptool" --chip "$env" -p "$port" --before "$before" --after watchdog-reset \
     write-flash --flash-mode dio --flash-freq 80m --flash-size 4MB \
-    0x0 "$build/bootloader.bin" 0x8000 "$build/partitions.bin" 0x10000 "$build/firmware.bin"
+    "$boot_offset" "$build/bootloader.bin" 0x8000 "$build/partitions.bin" 0x10000 "$build/firmware.bin"
+
+# esptool (pyserial) leaves the tty at VMIN=0, which Chrome's Web Serial
+# misreports as "The device has been lost"; see tools/ttyfix.py.
+for _ in {1..30}; do
+    stty -F "$port" min 1 time 0 2>/dev/null && break
+    sleep 0.1
+done

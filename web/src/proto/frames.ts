@@ -217,6 +217,7 @@ export interface Status {
   gain_mode: "MANUAL" | "HARDWARE";
   gain: number;
   gain_max: number;
+  rawiq_max?: number; // largest RAWIQ the link can carry in one frame
   recal: "ONCE" | "EVERY";
   rssi_hz: number;
   search_hz: number;

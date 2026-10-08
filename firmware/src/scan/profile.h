@@ -14,6 +14,7 @@ typedef struct {
 typedef struct {
     const char *name;
     const char *description;
+    const char *target;     /* radio_caps()->target this profile is tuned for */
     uint32_t band_lo_khz, band_hi_khz;
     /* Display mapping to the 5.8 GHz band this profile mimics:
      * equiv_khz = equiv_base_khz + (khz - base_khz) / scale. scale 1 = real band. */
@@ -41,7 +42,8 @@ typedef struct {
 } profile_t;
 
 const profile_t *profile_find(const char *name);
-const profile_t *profile_default(void);
+/* First profile for the target. */
+const profile_t *profile_default(const char *target);
 size_t profile_count(void);
 const profile_t *profile_at(size_t index);
 /* Equivalent 5.8 GHz frequency for display. */

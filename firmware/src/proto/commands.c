@@ -23,6 +23,12 @@
  * task queues frames concurrently, and a frame landing between the pieces of
  * a line cuts it in two on the host. Only the command task uses it. */
 static char reply[3072];
+
+/* Largest RAWIQ that fits one link frame (8-bit I/Q plus header and CRC). */
+static unsigned rawiq_max(void) {
+    unsigned n = (unsigned)((link_capacity() - 64) / 2);
+    return n < radio_caps()->max_samples ? n : radio_caps()->max_samples;
+}
 static size_t reply_len;
 static bool reply_overflow;
 
@@ -66,13 +72,13 @@ static void send_status(void) {
     scanner_get_plan(&plan);
     reply_add("STATUS {\"profile\":\"%s\",\"running\":%d,\"enabled\":%" PRIu32 ",\"mode\":\"%s\","
               "\"capture_samples\":%u,\"nfft\":%u,\"segments\":%u,\"rate_code\":%u,\"filter\":%d,"
-              "\"conjugate\":%d,\"settle_us\":%" PRIu32 ",\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,"
+              "\"conjugate\":%d,\"settle_us\":%" PRIu32 ",\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"plan\":[",
               c.profile->name, c.running, c.enabled, c.mode == PLAN_PAIR ? "PAIR" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.settle_us,
-              c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max,
+              c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, rawiq_max(),
               c.recal == RADIO_RECAL_ONCE ? "ONCE" : "EVERY", c.rssi_hz, c.search_hz, c.dc_guard,
               (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type));
@@ -112,6 +118,7 @@ static void handle(char *line) {
     } else if (sscanf(line, "PROFILE %31s %c", arg, &extra) == 1) {
         const profile_t *p = profile_find(arg);
         if (!p) { link_text("ERR profile\n"); return; }
+        if (strcmp(p->target, radio_caps()->target)) { link_text("ERR profile_target\n"); return; }
         bool running = c.running;
         scanner_defaults(p, &c);
         c.running = running;
@@ -158,7 +165,7 @@ static void handle(char *line) {
         c.capture_samples = (uint16_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
-    } else if (sscanf(line, "FFT %" SCNu32 " %c", &a, &extra) == 1 && a >= 256 && a <= 2048 && !(a & (a - 1))) {
+    } else if (sscanf(line, "FFT %" SCNu32 " %c", &a, &extra) == 1 && a >= 256 && a <= PSD_MAX_FFT && !(a & (a - 1))) {
         c.nfft = (uint16_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
@@ -166,7 +173,7 @@ static void handle(char *line) {
         c.segments = (uint8_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
-    } else if (sscanf(line, "RATE %" SCNu32 " %c", &a, &extra) == 1 && a < 4 && radio_caps()->rates_hz[a]) {
+    } else if (sscanf(line, "RATE %" SCNu32 " %c", &a, &extra) == 1 && a < RADIO_MAX_RATES && radio_caps()->rates_hz[a]) {
         c.rate_code = (uint8_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
@@ -208,7 +215,8 @@ static void handle(char *line) {
         /* RAWIQ <lo_khz> <samples> [rate_code] */
         int fields = sscanf(line, "RAWIQ %" SCNu32 " %" SCNu32 " %" SCNu32, &a, &b, &d);
         if (fields < 3) d = c.rate_code;
-        if (b < 16 || b > radio_caps()->max_samples || d >= 4 || !radio_caps()->rates_hz[d]) {
+        if (b < 16 || b > radio_caps()->max_samples || b > rawiq_max() || d >= RADIO_MAX_RATES ||
+            !radio_caps()->rates_hz[d] || a % radio_caps()->lo_step_khz) {
             link_text("ERR rawiq_args\n");
             return;
         }
@@ -228,7 +236,8 @@ static void handle(char *line) {
     } else if (sscanf(line, "FFTEVAL SYNTH %" SCNd32 " %" SCNd32 " %" SCNd32 " %c", &sa, &sb, &sd, &extra) == 3) {
         scan_request_t r = {.type = SCAN_REQ_FFTEVAL_SYNTH, .p1 = sa, .p2 = sb, .p3 = sd};
         if (!scanner_request(&r)) link_text("ERR busy\n");
-    } else if (sscanf(line, "FFTEVAL LIVE %" SCNu32 " %" SCNd32 " %c", &a, &sd, &extra) == 2) {
+    } else if (sscanf(line, "FFTEVAL LIVE %" SCNu32 " %" SCNd32 " %c", &a, &sd, &extra) == 2 &&
+               !(a % radio_caps()->lo_step_khz)) {
         scan_request_t r = {.type = SCAN_REQ_FFTEVAL_LIVE, .lo_khz = a, .p3 = sd};
         if (!scanner_request(&r)) link_text("ERR busy\n");
     } else if (!strcmp(line, "TIMING?")) {
@@ -285,5 +294,5 @@ static void commands_task(void *arg) {
 }
 
 void commands_task_start(void) {
-    xTaskCreatePinnedToCore(commands_task, "cmd", 6144, NULL, 6, NULL, 1);
+    xTaskCreatePinnedToCore(commands_task, "cmd", 6144, NULL, 6, NULL, portNUM_PROCESSORS - 1);
 }

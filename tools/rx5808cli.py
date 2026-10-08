@@ -19,6 +19,8 @@ import zlib
 
 import serial
 
+from ttyfix import keep_vmin1
+
 FRAME_METRICS, FRAME_SPECTRUM, FRAME_TELEMETRY, FRAME_RAWIQ, FRAME_LOG = 1, 2, 3, 4, 5
 METRICS_HDR = struct.Struct("<IIIHHHHhhBBBB")
 CHANNEL = struct.Struct("<BBhhhhhhiiI")
@@ -37,6 +39,7 @@ class Link:
 
     def __init__(self, port, timeout=0.05):
         self.ser = serial.Serial(port, 115200, timeout=timeout)
+        keep_vmin1(self.ser)
         self.buf = bytearray()
         self.crc_errors = 0
 

@@ -87,8 +87,9 @@ export class Panorama implements View {
   private hoverX: number | null = null;
   private lastAxes: Axes | null = null;
   private lastComp: Composite | null = null;
-  // Waterfall ring of rows, each a composite "live" row at fixed width.
-  private rows: Float32Array[] = [];
+  // Waterfall ring of rows, each a composite "live" row at fixed width, stored
+  // as colour-ramp indices fixed at capture time so history never recolours.
+  private rows: Uint8Array[] = [];
   private rowTimes: number[] = [];
   private rowWidth = 600;
   private lastRowVersion = 0;
@@ -96,6 +97,11 @@ export class Panorama implements View {
   private lut: Uint8ClampedArray | null = null;
   private lutKey = "";
   private img: ImageData | null = null;
+  private wfFloor = NaN; // smoothed colour-scale reference (dBFS/bin)
+  // Persistent CPU-backed scratch canvas holding the waterfall bitmap. A fresh
+  // (GPU-backed) canvas per frame sometimes drew blank, flashing the waterfall.
+  private scratch: OffscreenCanvas | null = null;
+  private scratchCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   constructor(private app: App) {
     const holdBtn = el("button", {}, "Reset holds");
@@ -320,9 +326,24 @@ export class Panorama implements View {
     }
     if (store.waterfallVersion - this.lastRowVersion >= hops) {
       this.lastRowVersion = store.waterfallVersion;
-      // Resample the composite to the fixed row width.
-      const row = new Float32Array(this.rowWidth);
-      for (let j = 0; j < this.rowWidth; j++) row[j] = comp.live[Math.floor((j / this.rowWidth) * comp.live.length)];
+      // Colour range follows the noise floor so empty spectrum sits near the
+      // surface colour and signals rise through the ramp (floor-5 .. floor+40 dB).
+      // Median over LOs, slowly smoothed, so one hop's outlier floor can't
+      // shift the scale.
+      const floors = [...store.floorByLo.values()].filter(Number.isFinite).sort((x, y) => x - y);
+      if (floors.length) {
+        const med = floors[floors.length >> 1];
+        this.wfFloor = Number.isNaN(this.wfFloor) ? med : this.wfFloor + 0.1 * (med - this.wfFloor);
+      }
+      const floor = Number.isNaN(this.wfFloor) ? this.app.settings.dbMin : this.wfFloor;
+      const lo = floor - 5;
+      const span = 45;
+      // Resample the composite to the fixed row width and quantise to the ramp.
+      const row = new Uint8Array(this.rowWidth);
+      for (let j = 0; j < this.rowWidth; j++) {
+        const v = comp.live[Math.floor((j / this.rowWidth) * comp.live.length)];
+        row[j] = Number.isNaN(v) ? 0 : Math.max(0, Math.min(255, Math.round(((v - lo) / span) * 255)));
+      }
       this.rows.unshift(row);
       this.rowTimes.unshift(store.now());
     }
@@ -342,19 +363,12 @@ export class Panorama implements View {
     if (!this.img || this.img.width !== this.rowWidth || this.img.height !== plotH)
       this.img = new ImageData(this.rowWidth, plotH);
     const data = this.img.data;
-    // Colour range follows the noise floor so empty spectrum sits near the
-    // surface colour and signals rise through the ramp (floor-5 .. floor+40 dB).
-    const floors = [...store.floorByLo.values()];
-    const floor = floors.length ? floors.reduce((x, y) => x + y, 0) / floors.length : this.app.settings.dbMin;
-    const lo = floor - 5;
-    const span = 45;
     const bg = this.lut;
     for (let y = 0; y < plotH; y++) {
       const row = this.rows[y];
       for (let x = 0; x < this.rowWidth; x++) {
         const o = (y * this.rowWidth + x) * 4;
-        const v = row ? row[x] : NaN;
-        const idx = Number.isNaN(v) ? 0 : Math.max(0, Math.min(255, Math.round(((v - lo) / span) * 255)));
+        const idx = row ? row[x] : 0;
         data[o] = bg[idx * 3];
         data[o + 1] = bg[idx * 3 + 1];
         data[o + 2] = bg[idx * 3 + 2];
@@ -362,10 +376,16 @@ export class Panorama implements View {
       }
     }
     // Scale the fixed-width image to the plot area.
-    const tmp = new OffscreenCanvas(this.rowWidth, plotH);
-    tmp.getContext("2d")!.putImageData(this.img, 0, 0);
+    if (!this.scratch || !this.scratchCtx) {
+      this.scratch = new OffscreenCanvas(this.rowWidth, plotH);
+      this.scratchCtx = this.scratch.getContext("2d", { willReadFrequently: true })!;
+    } else if (this.scratch.width !== this.rowWidth || this.scratch.height !== plotH) {
+      this.scratch.width = this.rowWidth;
+      this.scratch.height = plotH;
+    }
+    this.scratchCtx.putImageData(this.img, 0, 0);
     s.ctx.imageSmoothingEnabled = false;
-    s.ctx.drawImage(tmp, wa.left, wa.top, plotW, plotH);
+    s.ctx.drawImage(this.scratch, wa.left, wa.top, plotW, plotH);
     // Time labels on the left.
     const t = theme();
     s.ctx.fillStyle = t.muted;

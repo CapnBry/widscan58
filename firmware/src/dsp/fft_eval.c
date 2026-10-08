@@ -58,30 +58,46 @@ static float db(float x) { return x > 1e-30f ? 10.0f * log10f(x) : -300.0f; }
 
 void fft_eval_run(const uint32_t *words, unsigned n, unsigned nfft, unsigned segments, float rate_hz,
                   float usable_hz, fft_eval_result_t results[PSD_FFT_COUNT]) {
-    /* Heap is tight with three FFT implementations loaded; the 64 KiB capture
-     * aperture is idle here and holds n <= 8192 words below this point. */
-    unsigned aperture_words;
-    uint32_t *aperture = radio_sample_buffer(&aperture_words);
-    ref = (float *)(aperture + 8192);
+    /* Heap is tight. Use the DSP region after psd's part, or else the capture
+     * aperture, which is idle here and holds n <= 8192 words below this point. */
+    size_t region_bytes;
+    uint8_t *region = radio_dsp_region(&region_bytes);
+    if (region && region_bytes >= PSD_REGION_BYTES + 2 * PSD_MAX_FFT * sizeof(float))
+        ref = (float *)(region + PSD_REGION_BYTES);
+    else
+        ref = (float *)(radio_sample_buffer(NULL) + 8192);
     scratch = ref + PSD_MAX_FFT;
     psd_fft_t saved = psd_get_fft();
     int tone_k = -1;
-    for (unsigned t = 0; t < PSD_FFT_COUNT; t++) { /* index 0 (F32_R2) is the reference */
-        const psd_fft_t types[PSD_FFT_COUNT] = {PSD_FFT_F32_R2, PSD_FFT_F32_R4, PSD_FFT_S16, PSD_FFT_S16R};
+    /* Index 0 is the float reference: R4 when the size allows it (its table
+     * stays loaded), else R2. On the C5 the R2 table may not fit next to it. */
+    const bool r4 = !(nfft & 0xaaaaaaaau);
+    const psd_fft_t types[PSD_FFT_COUNT] = {r4 ? PSD_FFT_F32_R4 : PSD_FFT_F32_R2, r4 ? PSD_FFT_F32_R2 : PSD_FFT_F32_R4,
+                                            PSD_FFT_S16, PSD_FFT_S16R};
+    for (unsigned t = 0; t < PSD_FFT_COUNT; t++) {
         psd_set_fft(types[t]);
+        psd_release_unused(); /* one type's tables at a time: the C5 has no room for all */
         psd_result_t r;
         int64_t t0 = esp_timer_get_time();
-        psd_compute(words, n, nfft, segments, rate_hz, false, usable_hz, DC_GUARD, &r);
+        esp_err_t err = psd_compute(words, n, nfft, segments, rate_hz, false, usable_hz, DC_GUARD, &r);
         uint32_t psd_us = (uint32_t)(esp_timer_get_time() - t0);
+        fft_eval_result_t *o = &results[t];
+        memset(o, 0, sizeof(*o));
+        o->type = types[t];
+        o->err = err;
+        if (err != ESP_OK) {
+            if (t == 0) { /* no reference: nothing to compare against */
+                for (unsigned u = 1; u < PSD_FFT_COUNT; u++) results[u] = (fft_eval_result_t){.type = types[u], .err = err};
+                break;
+            }
+            continue;
+        }
         if (t == 0) {
-            memcpy(ref, r.p, nfft * sizeof(float));
+            for (unsigned k = 0; k < nfft; k++) ref[k] = r.p[k] * r.scale;
             float best = -1;
             for (unsigned k = 0; k < nfft; k++)
                 if (r.valid[k] && ref[k] > best) { best = ref[k]; tone_k = (int)k; }
         }
-        fft_eval_result_t *o = &results[t];
-        memset(o, 0, sizeof(*o));
-        o->type = types[t];
         o->fft_us = r.fft_us;
         o->psd_us = psd_us;
         float tone = 0, spur = 0, dmax = 0;
@@ -89,7 +105,7 @@ void fft_eval_run(const uint32_t *words, unsigned n, unsigned nfft, unsigned seg
         unsigned nn = 0;
         for (unsigned k = 0; k < nfft; k++) {
             if (!r.valid[k]) continue;
-            float p = r.p[k];
+            float p = r.p[k] * r.scale;
             float d = db(p) - db(ref[k]);
             if (fabsf(d) > dmax && ref[k] > 0 && p > 0) dmax = fabsf(d);
             bool near_tone = tone_k >= 0 && abs((int)k - tone_k) <= TONE_GUARD;
@@ -113,7 +129,7 @@ void fft_eval_run(const uint32_t *words, unsigned n, unsigned nfft, unsigned seg
         nn = 0;
         for (unsigned k = 0; k < nfft; k++) {
             if (!r.valid[k] || (tone_k >= 0 && abs((int)k - tone_k) <= TONE_GUARD)) continue;
-            scratch[nn++] = db(r.p[k]) - db(ref[k]);
+            scratch[nn++] = db(r.p[k] * r.scale) - db(ref[k]);
         }
         o->floor_rel_db = median(scratch, nn);
     }

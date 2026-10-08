@@ -198,6 +198,11 @@ esp_err_t radio_init(void) {
     return radio_tune(recal_centre_khz, 3000);
 }
 
+void *radio_dsp_region(size_t *bytes) {
+    if (bytes) *bytes = 0;
+    return NULL;
+}
+
 uint32_t *radio_sample_buffer(unsigned *max_words) {
     if (max_words) *max_words = 0x10000u / 4u; /* whole reserved 64 KiB */
     return IQ_BUFFER;

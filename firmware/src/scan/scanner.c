@@ -37,7 +37,8 @@ static struct {
     unsigned hop;
     channel_state_t ch[PROFILE_MAX_CHANNELS];
     float floor_bias;
-    float *scratch;
+    float centroid_ratio;
+    uint32_t *scratch;
     uint32_t seq_metrics, seq_spectrum;
     uint8_t spec_codes[1024];
     /* Telemetry window */
@@ -133,6 +134,26 @@ static void apply_config(void) {
     unsigned segs = s.cfg.capture_samples / s.cfg.nfft;
     if (segs > s.cfg.segments) segs = s.cfg.segments;
     s.floor_bias = metrics_percentile_bias(segs ? segs : 1, FLOOR_PERCENTILE);
+    s.centroid_ratio = powf(10.0f, s.cfg.centroid_db / 10.0f);
+}
+
+/* log2(1 + i/256) * 256, for spectrum codes without per-bin float math. */
+static uint8_t log2_frac[256];
+static void log2_frac_init(void) {
+    for (unsigned i = 0; i < 256; i++) log2_frac[i] = (uint8_t)lrintf(log2f(1.0f + i / 256.0f) * 256.0f);
+}
+
+/* Spectrum code (frame_spectrum_t: dBFS = code / 2 - 127.5, clamped to 0..255)
+ * of v * scale, with code256_scale = (20 log10(scale) + 255) * 256:
+ * code = 2 dB + 255 = 6.0206 log2(v) + 20 log10(scale) + 255, to 1/256 code. */
+static uint8_t spectrum_code(uint32_t v, int32_t code256_scale) {
+    if (!v) return 0;
+    unsigned e = 31 - (unsigned)__builtin_clz(v);
+    uint32_t frac = e >= 8 ? (v >> (e - 8)) & 0xffu : (v << (8 - e)) & 0xffu;
+    int32_t log2_q8 = (int32_t)(e << 8) + log2_frac[frac];
+    int32_t code256 = ((log2_q8 * 1541) >> 8) + code256_scale; /* 6.0206 = 1541 / 256 */
+    int32_t code = (code256 + 128) >> 8;
+    return code <= 0 ? 0 : code >= 255 ? 255 : (uint8_t)code;
 }
 
 static void emit_spectrum(const psd_result_t *psd, uint32_t lo_khz) {
@@ -147,20 +168,23 @@ static void emit_spectrum(const psd_result_t *psd, uint32_t lo_khz) {
     unsigned nin = (unsigned)(k1 - k0 + 1);
     if (nout > nin) nout = nin;
     float stride = (float)nin / nout;
+    const int32_t code256_scale = (int32_t)lrintf((20.0f * log10f(psd->scale) + 255.0f) * 256.0f);
     for (unsigned j = 0; j < nout; j++) {
-        int a = k0 + (int)(j * stride), b = k0 + (int)((j + 1) * stride);
+        int a = k0 + (int)(j * nin / nout), b = k0 + (int)((j + 1) * nin / nout);
         if (b <= a) b = a + 1;
-        float acc = 0, any = 0;
+        uint64_t acc = 0;
+        uint32_t any = 0;
         unsigned count = 0;
         for (int k = a; k < b; k++) {
-            any = fmaxf(any, psd->p[k]);
-            if (abs(k - half) <= c->dc_guard) continue;
-            if (c->spec_detector) acc = fmaxf(acc, psd->p[k]);
-            else acc += psd->p[k];
+            uint32_t p = psd->p[k];
+            if (p > any) any = p;
+            if ((unsigned)abs(k - half) <= c->dc_guard) continue;
+            if (!c->spec_detector) acc += p;
+            else if (p > acc) acc = p;
             count++;
         }
-        float v = count ? (c->spec_detector ? acc : acc / count) : any;
-        s.spec_codes[j] = SPECTRUM_CODE(fast_db(v));
+        uint64_t v = count ? (c->spec_detector ? acc : acc / count) : any;
+        s.spec_codes[j] = spectrum_code(v > UINT32_MAX ? UINT32_MAX : (uint32_t)v, code256_scale);
     }
     frame_spectrum_t h = {
         .seq = s.seq_spectrum++,
@@ -205,10 +229,10 @@ static void do_hop(void) {
         return;
     }
     metrics_input_t in = {
-        .p = psd.p, .valid = psd.valid, .nfft = psd.nfft, .bin_hz = psd.bin_hz,
+        .p = psd.p, .scale = psd.scale, .valid = psd.valid, .nfft = psd.nfft, .bin_hz = psd.bin_hz,
         .enbw_bins = psd.enbw_bins, .floor_bias = s.floor_bias,
         .passband_hz = p->passband_hz, .rssi_hz = c->rssi_hz, .search_hz = c->search_hz,
-        .signal_snr_db = c->signal_snr_db, .centroid_db = c->centroid_db,
+        .signal_snr_db = c->signal_snr_db, .centroid_ratio = s.centroid_ratio,
     };
     /* Mask the board's own spurs like the DC bins: excluded from the floor,
      * peak and centroid; RSSI fills them with the window mean. */
@@ -232,7 +256,7 @@ static void do_hop(void) {
             if (fabsf(d) <= c->search_hz) m.flags |= CHF_SPUR;
         }
         channel_state_t *st = &s.ch[hop->ch[j]];
-        float lin = powf(10.0f, m.rssi_db / 10.0f);
+        float lin = m.rssi;
         if (!st->init) { st->rssi_ema = lin; st->init = true; }
         else st->rssi_ema += c->ema_alpha * (lin - st->rssi_ema);
         if (!(m.flags & CHF_SIGNAL)) {
@@ -265,9 +289,9 @@ static void do_hop(void) {
         .seq = s.seq_metrics++,
         .t_ms = (uint32_t)(t0 / 1000),
         .lo_khz = hop->lo_khz,
-        .tune_us = clamp_u16((uint32_t)(t1 - t0)),
-        .capture_us = clamp_u16((uint32_t)(t2 - t1)),
-        .dsp_us = clamp_u16((uint32_t)(t3 - t2)),
+        .tune_us = (uint32_t)(t1 - t0),
+        .capture_us = (uint32_t)(t2 - t1),
+        .dsp_us = (uint32_t)(t3 - t2),
         .saturated = clamp_u16(psd.saturated),
         .floor_bin_cdb = cdb(fl.floor_bin_db),
         .dc_cdb = cdb(metrics_db(dc)),
@@ -300,10 +324,10 @@ static void emit_telemetry(int64_t now) {
         .rotations = s.rotations,
         .hops_total = s.hops_total,
         .rotation_mhz = window_us ? (uint32_t)((uint64_t)s.w_rotations * 1000000000ull / window_us) : 0,
-        .hop_us_avg = clamp_u16(s.w_hop_sum / n), .hop_us_max = clamp_u16(s.w_hop_max),
-        .tune_us_avg = clamp_u16(s.w_tune_sum / n), .tune_us_max = clamp_u16(s.w_tune_max),
-        .capture_us_avg = clamp_u16(s.w_cap_sum / n),
-        .dsp_us_avg = clamp_u16(s.w_dsp_sum / n), .dsp_us_max = clamp_u16(s.w_dsp_max),
+        .hop_us_avg = (uint32_t)(s.w_hop_sum / n), .hop_us_max = s.w_hop_max,
+        .tune_us_avg = (uint32_t)(s.w_tune_sum / n), .tune_us_max = s.w_tune_max,
+        .capture_us_avg = (uint32_t)(s.w_cap_sum / n),
+        .dsp_us_avg = (uint32_t)(s.w_dsp_sum / n), .dsp_us_max = s.w_dsp_max,
         .link_fill_pm = (uint16_t)link_fill_permille(),
         .heap_free = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         .drops = link_drops(),
@@ -382,6 +406,7 @@ static void do_fft_eval(const scan_request_t *r) {
         fft_eval_run(words, n, c->nfft, c->segments, rate, c->profile->usable_hz, one);
         for (unsigned t = 0; t < PSD_FFT_COUNT; t++) {
             acc[t].type = one[t].type;
+            if (one[t].err != ESP_OK) acc[t].err = one[t].err;
             acc[t].floor_db += one[t].floor_db / reps;
             acc[t].tone_db += one[t].tone_db / reps;
             acc[t].spur_db += one[t].spur_db / reps;
@@ -394,13 +419,19 @@ static void do_fft_eval(const scan_request_t *r) {
         }
     }
     psd_release_unused(); /* the evaluation loaded every implementation */
-    for (unsigned t = 0; t < PSD_FFT_COUNT; t++)
+    for (unsigned t = 0; t < PSD_FFT_COUNT; t++) {
+        if (acc[t].err != ESP_OK) {
+            link_printf("FFTEVAL %s %s ERR %s\n", r->type == SCAN_REQ_FFTEVAL_SYNTH ? "SYNTH" : "LIVE",
+                        psd_fft_name(acc[t].type), esp_err_to_name(acc[t].err));
+            continue;
+        }
         link_printf("FFTEVAL %s %s tone %.2f floor %.2f spur %.2f sfdr %.2f rel %.3f dmean %.3f drms %.3f dmax %.2f fft_us %u psd_us %u\n",
                     r->type == SCAN_REQ_FFTEVAL_SYNTH ? "SYNTH" : "LIVE", psd_fft_name(acc[t].type),
                     (double)acc[t].tone_db, (double)acc[t].floor_db, (double)acc[t].spur_db,
                     (double)(acc[t].tone_db - acc[t].spur_db), (double)acc[t].floor_rel_db,
                     (double)acc[t].diff_mean_db, (double)acc[t].diff_rms_db, (double)acc[t].diff_max_db,
                     (unsigned)acc[t].fft_us, (unsigned)acc[t].psd_us);
+    }
     link_text("FFTEVAL END\n");
 }
 
@@ -441,9 +472,11 @@ static void scanner_task(void *arg) {
 }
 
 esp_err_t scanner_init(void) {
+    log2_frac_init();
+    metrics_init();
     lock = xSemaphoreCreateMutex();
     requests = xQueueCreate(4, sizeof(scan_request_t));
-    s.scratch = heap_caps_malloc(PSD_MAX_FFT * sizeof(float), MALLOC_CAP_INTERNAL);
+    s.scratch = heap_caps_malloc(PSD_MAX_FFT * sizeof(*s.scratch), MALLOC_CAP_INTERNAL);
     if (!s.scratch) return ESP_ERR_NO_MEM;
     scanner_defaults(profile_default(radio_caps()->target), &shared);
     plan_build(shared.profile, shared.enabled, shared.mode, &shared_plan);

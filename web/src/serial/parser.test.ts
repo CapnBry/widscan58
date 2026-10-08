@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StreamParser, crc32, encodeFrame } from "./parser";
-import { FRAME_METRICS, FRAME_SPECTRUM, parseMetrics, parseSpectrum } from "../proto/frames";
+import { FRAME_METRICS, FRAME_SPECTRUM, parseMetrics, parseSpectrum, parseTelemetry } from "../proto/frames";
 
 const text = (s: string) => new TextEncoder().encode(s);
 const join = (...parts: Uint8Array[]) => {
@@ -14,20 +14,22 @@ const join = (...parts: Uint8Array[]) => {
 };
 
 function metricsPayload(): Uint8Array {
-  const dv = new DataView(new ArrayBuffer(28 + 26));
+  const H = 34; // sizeof(frame_metrics_t)
+  const dv = new DataView(new ArrayBuffer(H + 26));
   dv.setUint32(0, 7, true);
   dv.setUint32(8, 2410437, true);
-  dv.setInt16(20, -6860, true);
-  dv.setUint8(24, 60);
-  dv.setUint8(26, 4);
-  dv.setUint8(27, 1);
-  dv.setUint8(28, 3);
-  dv.setUint8(29, 1);
-  dv.setInt16(30, -3600, true);
-  dv.setInt16(38, -32768, true);
-  dv.setInt32(42, -1234, true);
-  dv.setInt32(46, 885000, true);
-  dv.setUint32(50, 59000, true);
+  dv.setUint32(20, 67602, true); // dsp_us beyond the old u16 range
+  dv.setInt16(26, -6860, true);
+  dv.setUint8(30, 60);
+  dv.setUint8(32, 4);
+  dv.setUint8(33, 1);
+  dv.setUint8(H, 3);
+  dv.setUint8(H + 1, 1);
+  dv.setInt16(H + 2, -3600, true);
+  dv.setInt16(H + 10, -32768, true);
+  dv.setInt32(H + 14, -1234, true);
+  dv.setInt32(H + 18, 885000, true);
+  dv.setUint32(H + 22, 59000, true);
   return new Uint8Array(dv.buffer);
 }
 
@@ -47,6 +49,7 @@ describe("StreamParser", () => {
     const m = parseMetrics(f.payload);
     expect(m.loKhz).toBe(2410437);
     expect(m.floorBin).toBeCloseTo(-68.6);
+    expect(m.dspUs).toBe(67602);
     expect(m.channels[0]).toMatchObject({ id: 3, flags: 1, rssi: -36, clearFloor: null, peakOffHz: -1234, centroidOffHz: 885000, obwHz: 59000 });
   });
 
@@ -88,5 +91,18 @@ describe("StreamParser", () => {
     if (f.kind !== "frame") throw new Error();
     const s = parseSpectrum(f.payload);
     expect(Array.from(s.db)).toEqual([-127.5, -70, 0]);
+  });
+});
+
+describe("telemetry", () => {
+  it("decodes u32 timings", () => {
+    const dv = new DataView(new ArrayBuffer(62));
+    dv.setUint32(16, 69382, true);
+    dv.setUint32(40, 66713, true);
+    dv.setUint16(44, 250, true);
+    dv.setUint32(46, 29872, true);
+    dv.setInt8(61, -1);
+    const t = parseTelemetry(dv);
+    expect([t.hopUsAvg, t.dspUsMax, t.linkFill, t.heapFree, t.filter]).toEqual([69382, 66713, 0.25, 29872, -1]);
   });
 });

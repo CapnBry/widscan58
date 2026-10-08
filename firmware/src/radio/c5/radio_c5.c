@@ -187,6 +187,15 @@ esp_err_t radio_init(void) {
     return radio_tune(recal_centre_khz, 3000);
 }
 
+/* The dump only writes the upper half of the bank. The lower half is reserved
+ * just because the modem owns the whole bank during a capture; its contents
+ * survive captures (checked on hardware: 4000+ captures of every size and
+ * rate, recalibration on every tune, hardware AGC). */
+void *radio_dsp_region(size_t *bytes) {
+    if (bytes) *bytes = 0x10000u;
+    return (void *)0x40820000;
+}
+
 uint32_t *radio_sample_buffer(unsigned *max_words) {
     if (max_words) *max_words = 0x10000u / 4u; /* 0x40830000 up to the end of the reserved bank */
     return IQ_BUFFER;

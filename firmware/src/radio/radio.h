@@ -2,6 +2,7 @@
  * Everything above this interface is target independent. */
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -58,6 +59,11 @@ void radio_set_tune_skip(unsigned mask);
 /* The capture aperture, for scratch use between captures (it is overwritten
  * by the next radio_capture). */
 uint32_t *radio_sample_buffer(unsigned *max_words);
+
+/* RAM that captures never write, for DSP tables and scratch that must survive
+ * them; not accessible during radio_capture. NULL (and 0 bytes) where there
+ * is none. */
+void *radio_dsp_region(size_t *bytes);
 
 /* Reboot into the ROM serial bootloader (download mode). Does not return. */
 void radio_reboot_to_bootloader(void);

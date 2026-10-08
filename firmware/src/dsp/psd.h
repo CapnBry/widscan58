@@ -15,7 +15,7 @@ typedef enum {
     PSD_FFT_F32_R2 = 0, /* float radix-2 (dsps_fft2r_fc32) */
     PSD_FFT_F32_R4 = 1, /* float radix-4 (dsps_fft4r_fc32); power-of-4 sizes only, else R2 */
     PSD_FFT_S16 = 2,    /* 16-bit fixed radix-2, scaled 1/2 per stage (dsps_fft2r_sc16) */
-    PSD_FFT_S16R = 3,   /* as S16 with esp-sdr's rounding fix (S3 SIMD kernel, portable C elsewhere) */
+    PSD_FFT_S16R = 3,   /* rounded 16-bit: esp-sdr's S3 SIMD radix-2, fft_r4_sc16.h elsewhere */
     PSD_FFT_COUNT
 } psd_fft_t;
 void psd_set_fft(psd_fft_t type);
@@ -32,10 +32,15 @@ typedef struct {
     float enbw_bins;        /* N * sum(w^2) / sum(w)^2 (1.5 for Hann) */
     unsigned saturated;     /* samples at the ADC rails */
     float dc_i, dc_q;       /* mean raw I/Q (LO leakage / DC offset), counts */
-    float *p;               /* nfft bins, natural order, tone-normalised linear power */
+    uint32_t *p;            /* nfft bins, natural order; linear power = p[k] * scale */
+    float scale;            /* tone-normalised: a full-scale tone's bin -> 1.0 */
     uint8_t *valid;         /* bins usable for metrics */
     uint32_t prep_us, fft_us, power_us; /* time breakdown */
 } psd_result_t;
+
+/* Where radio_dsp_region() exists, psd keeps the float FFT tables and work
+ * buffer in its first PSD_REGION_BYTES; the rest is free for others. */
+#define PSD_REGION_BYTES (28 * 1024)
 
 esp_err_t psd_init(void);
 /* words: packed I/Q (radio.h). Uses floor(n/nfft) non-overlapping Hann

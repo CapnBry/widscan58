@@ -5,6 +5,7 @@
 
 typedef struct {
     psd_fft_t type;
+    esp_err_t err;         /* psd_compute failed (e.g. no heap for this FFT's tables) */
     float floor_db;        /* median noise bin, dBFS/bin */
     float tone_db;         /* strongest bin, dBFS/bin */
     float spur_db;         /* strongest bin outside the tone and DC guards */
@@ -16,7 +17,8 @@ typedef struct {
     uint32_t psd_us;       /* whole psd_compute */
 } fft_eval_result_t;
 
-/* Run every FFT type over the same words; results[0] is the F32_R2 reference. */
+/* Run every FFT type over the same words; results[0] is the float reference
+ * (R4 for power-of-4 sizes, else R2). */
 void fft_eval_run(const uint32_t *words, unsigned n, unsigned nfft, unsigned segments, float rate_hz,
                   float usable_hz, fft_eval_result_t results[PSD_FFT_COUNT]);
 

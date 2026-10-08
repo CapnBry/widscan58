@@ -8,8 +8,8 @@ Web Serial dashboard shows it all live.
 
 Status: the **ESP32-S3** runs a scaled 2.4 GHz mock-up of Raceband (channels
 S1–S8, see [PLAN.md](PLAN.md) §2.2). The **ESP32-C5** (real 5.8 GHz Raceband)
-target runs on a Seeed XIAO ESP32-C5 and works with the web UI, but at
-15 ms/hop it is still far from the timing target; see PLAN.md, Status.
+target runs on a Seeed XIAO ESP32-C5 and works with the web UI: ~6.6 ms/hop,
+about 36 rotations/s over R1–R8 (PLAN.md, Status, has the breakdown).
 
 License: GPL-3.0-or-later (see [LICENSE](LICENSE)). Files derived from esp-sdr
 say so in their headers.
@@ -24,6 +24,8 @@ say so in their headers.
 | `tools/serial_bridge.py` | Serial ↔ WebSocket bridge (headless tests, remote viewing). |
 | `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN; `RX_ENV=esp32c5` for the C5). Experimental, see the flashing notes. |
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
+| `tools/ttyfix.py` | Leaves a serial port at VMIN=1 after pyserial use (see the Web UI "device has been lost" note). |
+| `tools/gen_twiddle.py` | Generates `firmware/src/dsp/fft_twiddle_q15.h` for the radix-4 FFT. |
 | `ref/esp-sdr/` | Reference checkout of esp-sdr (not tracked here). Restore it with `git clone https://github.com/ESPARGOS/esp-sdr ref/esp-sdr`. |
 | `backup/` | Full flash dump of the S3 as it arrived (esp-sdr WebSDR firmware). Local only, not tracked. |
 
@@ -45,7 +47,18 @@ on the C5. `PROFILE <name>` refuses the other target's profile
 2. Run `tools/flash.sh --manual`, or `esptool --before no-reset --after watchdog-reset write-flash 0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin` from `firmware/.pio/build/esp32s3`.
    For the C5 use `RX_ENV=esp32c5 tools/flash.sh`. The C5 bootloader goes at **0x2000**, not 0x0.
 
-Use `--after watchdog-reset`: an RTS reset does not always leave download mode.
+Use `--after watchdog-reset`: an RTS reset does not always leave download mode
+(on the C5 it never does).
+
+**ESP32-C5 (XIAO, chip rev v1.0):** uploads work hands-free (`RX_ENV=esp32c5
+tools/flash.sh` or `pio run -e esp32c5 -t upload`). Rev v1.0 silicon has a ROM bug
+([esp-idf#18089](https://github.com/espressif/esp-idf/issues/18089)): after a USB
+(RTS) reset, the chip hangs with USB dead if UART0's clock was gated. The firmware
+re-enables that clock at boot, so this only bites before our firmware is running,
+e.g. on a board flashed with something else. Recover with BOOT + RESET, then
+`RX_ENV=esp32c5 tools/flash.sh --manual`. If a boot step fails, the firmware prints
+`ERR boot <step> <error> heap=… largest=…` every second instead of
+reboot-looping.
 
 Use the PlatformIO Core that pioarduino 55.03.312-1 expects (6.2.x). The
 platform pins ESP-IDF 5.5.5. Before changing the platform version, run
@@ -67,7 +80,20 @@ unresponsive in testing; don't rely on it yet.
 To restore the original WebSDR firmware:
 `esptool --chip esp32s3 -p /dev/ttyACM0 write-flash 0 backup/websdr-s3-flash-4MB.bin`.
 
-## Performance (ESP32-S3, measured)
+## Performance (measured)
+
+ESP32-C5, all 8 channels (4 pair LOs), 4096 samples at 80 MS/s, 4 × 1024-point Welch:
+
+| FFT | Hop | Updates per channel |
+|---|---:|---:|
+| S16R (default) | ~6.6 ms (tune 1.1–1.3, capture 1.9, DSP 3.6) | ~36 /s |
+| S16 | ~8.1 ms | ~28 /s |
+| R2 / R4 (soft float, no FPU) | ~68 ms | ~3.7 /s |
+
+Most of the C5's capture time is a fixed ~1.7 ms wait inside the PHY's capture
+routine (PLAN.md, Status).
+
+ESP32-S3:
 
 | Setup | Updates per channel |
 |---|---:|
@@ -85,13 +111,14 @@ Send these with `tools/rx5808cli.py cmd …` or the UI's Protocol console.
 
 | Command | Purpose |
 |---|---|
-| `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration, band profile, DSP time breakdown, masked board spurs |
+| `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration (including `rawiq_max`), band profile, DSP time breakdown, masked board spurs |
 | `ENABLE <mask>`, `MODE PAIR\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how |
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
-| `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R; R4 is exact float and best for step-on/IMD measurement. On the C5, S16 and S16R use the same rounding (only the S3's SIMD S16 kernel has the truncation bias), and float FFTs are slow (no FPU) |
-| `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples |
+| `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
+| `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
+| `CAPN <samples>`, `FFT <n>` | Capture length and FFT size (S3: up to 2048; C5: up to 1024) |
 | `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
-| `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled). The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
+| `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as one frame. At most `rawiq_max` samples: 16380 on the S3, 9180 on the C5 (smaller link queue). The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `RECAL`, `RECALMODE ONCE\|EVERY`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug) |
 | `REBOOT` | Restart (USB stays connected; the UI re-syncs on `READY`) |
@@ -111,13 +138,18 @@ npm run dev                         # http://localhost:5808 (Chrome/Edge for Web
 - **Bridge**: `python3 tools/serial_bridge.py`, then open
   `http://localhost:5808/?bridge=ws://127.0.0.1:5809`.
 - **Record / Replay**: saves the raw stream to a `.rx5808` file and plays it back.
+  The frame layout is not kept compatible across firmware versions, so
+  recordings only replay with a UI built from the same version.
 
 Only one program can hold `/dev/ttyACM0` at a time: browser tab, bridge,
-`rx5808cli.py` or esptool.
+`rx5808cli.py` or esptool. A connected UI tab reconnects by itself when the
+board comes back (after a flash or reset), so click Disconnect before using
+other tools.
 
 ### Tests
 
 ```sh
+(cd firmware && pio test -e native)        # firmware host tests: radix-4 FFT vs a DFT, metrics
 cd web
 npm test                                   # parser/protocol unit tests
 node e2e/headless.mjs --sim                # headless Chrome vs. the simulator

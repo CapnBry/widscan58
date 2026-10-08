@@ -86,7 +86,7 @@ export interface RawIq {
   q: Int8Array;
 }
 
-const METRICS_HDR = 28; // sizeof(frame_metrics_t)
+const METRICS_HDR = 34; // sizeof(frame_metrics_t)
 const CHANNEL_SIZE = 26; // sizeof(frame_channel_t)
 
 export function parseMetrics(p: DataView): Metrics {
@@ -94,15 +94,15 @@ export function parseMetrics(p: DataView): Metrics {
     seq: p.getUint32(0, true),
     tMs: p.getUint32(4, true),
     loKhz: p.getUint32(8, true),
-    tuneUs: p.getUint16(12, true),
-    captureUs: p.getUint16(14, true),
-    dspUs: p.getUint16(16, true),
-    saturated: p.getUint16(18, true),
-    floorBin: p.getInt16(20, true) / 100,
-    dc: p.getInt16(22, true) / 100,
-    gain: p.getUint8(24),
-    hopIndex: p.getUint8(25),
-    hops: p.getUint8(26),
+    tuneUs: p.getUint32(12, true),
+    captureUs: p.getUint32(16, true),
+    dspUs: p.getUint32(20, true),
+    saturated: p.getUint16(24, true),
+    floorBin: p.getInt16(26, true) / 100,
+    dc: p.getInt16(28, true) / 100,
+    gain: p.getUint8(30),
+    hopIndex: p.getUint8(31),
+    hops: p.getUint8(32),
     channels: [],
   };
   const nch = p.getUint8(METRICS_HDR - 1);
@@ -147,21 +147,21 @@ export function parseTelemetry(p: DataView): Telemetry {
     rotations: p.getUint32(4, true),
     hopsTotal: p.getUint32(8, true),
     rotationHz: p.getUint32(12, true) / 1000,
-    hopUsAvg: p.getUint16(16, true),
-    hopUsMax: p.getUint16(18, true),
-    tuneUsAvg: p.getUint16(20, true),
-    tuneUsMax: p.getUint16(22, true),
-    captureUsAvg: p.getUint16(24, true),
-    dspUsAvg: p.getUint16(26, true),
-    dspUsMax: p.getUint16(28, true),
-    linkFill: p.getUint16(30, true) / 1000,
-    heapFree: p.getUint32(32, true),
-    drops: p.getUint32(36, true),
-    captureErrors: p.getUint32(40, true),
-    running: p.getUint8(44) !== 0,
-    recalMode: p.getUint8(45),
-    gain: p.getUint8(46),
-    filter: p.getInt8(47),
+    hopUsAvg: p.getUint32(16, true),
+    hopUsMax: p.getUint32(20, true),
+    tuneUsAvg: p.getUint32(24, true),
+    tuneUsMax: p.getUint32(28, true),
+    captureUsAvg: p.getUint32(32, true),
+    dspUsAvg: p.getUint32(36, true),
+    dspUsMax: p.getUint32(40, true),
+    linkFill: p.getUint16(44, true) / 1000,
+    heapFree: p.getUint32(46, true),
+    drops: p.getUint32(50, true),
+    captureErrors: p.getUint32(54, true),
+    running: p.getUint8(58) !== 0,
+    recalMode: p.getUint8(59),
+    gain: p.getUint8(60),
+    filter: p.getInt8(61),
   };
 }
 

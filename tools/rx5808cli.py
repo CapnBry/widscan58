@@ -22,10 +22,10 @@ import serial
 from ttyfix import keep_vmin1
 
 FRAME_METRICS, FRAME_SPECTRUM, FRAME_TELEMETRY, FRAME_RAWIQ, FRAME_LOG = 1, 2, 3, 4, 5
-METRICS_HDR = struct.Struct("<IIIHHHHhhBBBB")
+METRICS_HDR = struct.Struct("<IIIIIIHhhBBBB")
 CHANNEL = struct.Struct("<BBhhhhhhiiI")
 SPECTRUM_HDR = struct.Struct("<IIiIHBB")
-TELEMETRY = struct.Struct("<IIIIHHHHHHHHIIIBBBb")
+TELEMETRY = struct.Struct("<IIIIIIIIIIIHIIIBBBb")
 RAWIQ_HDR = struct.Struct("<IIHBB")
 CHF = {1: "SIG", 2: "SAT", 4: "DC", 8: "EDGE", 16: "NOC", 32: "SPUR"}
 

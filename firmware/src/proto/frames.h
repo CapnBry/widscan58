@@ -26,12 +26,12 @@ typedef struct __attribute__((packed)) {
     uint16_t len;
 } frame_header_t;
 
-/* One per hop. Levels in centi-dB (dBFS x 100). */
+/* One per hop: header, then nch channel records. Levels in centi-dB (dBFS x 100). */
 typedef struct __attribute__((packed)) {
     uint32_t seq;
     uint32_t t_ms;
     uint32_t lo_khz;
-    uint16_t tune_us, capture_us, dsp_us;
+    uint32_t tune_us, capture_us, dsp_us;
     uint16_t saturated;
     int16_t floor_bin_cdb;   /* mean noise per FFT bin */
     int16_t dc_cdb;          /* DC (LO leakage) power vs full scale */
@@ -64,27 +64,16 @@ typedef struct __attribute__((packed)) {
     uint8_t detector;        /* 0 mean, 1 max */
     uint8_t reserved;
 } frame_spectrum_t;
-#define SPECTRUM_CODE(db) ((db) <= -127.5f ? 0 : (db) >= 0.0f ? 255 : (uint8_t)(((db) + 127.5f) * 2.0f + 0.5f))
-
-/* 10*log10(x) to about +/-0.03 dB, for display codes (0.5 dB steps). */
-static inline float fast_db(float x) {
-    union { float f; uint32_t u; } v = {.f = x};
-    if (!(x > 1e-20f)) return -200.0f;
-    float e = (float)((int)(v.u >> 23) - 127);
-    v.u = (v.u & 0x7fffffu) | 0x3f800000u;
-    float m = v.f;
-    return 3.0103f * (e + (-0.34484843f * m + 2.02466578f) * m - 0.67487759f);
-}
 
 typedef struct __attribute__((packed)) {
     uint32_t t_ms;
     uint32_t rotations;
     uint32_t hops_total;
     uint32_t rotation_mhz;   /* rotations per second x 1000 */
-    uint16_t hop_us_avg, hop_us_max;
-    uint16_t tune_us_avg, tune_us_max;
-    uint16_t capture_us_avg;
-    uint16_t dsp_us_avg, dsp_us_max;
+    uint32_t hop_us_avg, hop_us_max;
+    uint32_t tune_us_avg, tune_us_max;
+    uint32_t capture_us_avg;
+    uint32_t dsp_us_avg, dsp_us_max;
     uint16_t link_fill_pm;   /* output queue fill, per mille */
     uint32_t heap_free;
     uint32_t drops;
@@ -94,6 +83,11 @@ typedef struct __attribute__((packed)) {
     uint8_t gain;            /* 255 = hardware AGC */
     int8_t filter;           /* -1 = automatic */
 } frame_telemetry_t;
+
+/* web/src/proto/frames.ts and tools/rx5808cli.py hard-code these sizes. */
+_Static_assert(sizeof(frame_metrics_t) == 34, "frame_metrics_t layout");
+_Static_assert(sizeof(frame_channel_t) == 26, "frame_channel_t layout");
+_Static_assert(sizeof(frame_telemetry_t) == 62, "frame_telemetry_t layout");
 
 /* Raw snapshot, signed 8-bit I then Q: the 10-bit samples >> shift, with the
  * smallest shift (0..2) that fits the capture's peak. */

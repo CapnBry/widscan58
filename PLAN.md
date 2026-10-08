@@ -356,6 +356,13 @@ Device → host: binary frames
 `0xA5 'R' type ver | u16 len | payload | u32 crc32` (little-endian). Text replies
 start with an ASCII letter. The parser resynchronises on the magic and CRC.
 
+As built, the layouts are in `firmware/src/proto/frames.h`, mirrored by
+`web/src/proto/frames.ts` and `tools/rx5808cli.py`. That header is authoritative
+over the plan table below, and it static-asserts the sizes the parsers hard-code
+(metrics header 34 bytes, channel record 26, telemetry 62). All µs timings are u32.
+The stream makes no compatibility promise across firmware versions: change all
+three together, and old recordings stop replaying.
+
 | Frame | Contents |
 |---|---|
 | `METRICS` (per hop) | seq, t_us, LO kHz, gain idx, sat count, noise floor (cdB), hop timing (tune / capture / dsp µs), then per channel: `{id, rssi, rssi_ema, snr, clear_floor (cdB), peak_off, centroid_off (Hz/10), obw (kHz), flags}` |
@@ -556,28 +563,41 @@ What exists:
   - Profiles carry a `target`. The firmware boots into the first profile for its chip, and `PROFILE` rejects the other chip's (`ERR profile_target`). The `c5-race` values match the web simulator.
   - `radio_caps_t` has 6 rate slots and `lo_step_khz`. `RAWIQ` and `FFTEVAL LIVE` reject LOs that are not a multiple of it.
   - The link and command tasks were pinned to core 1; they now use the last core (core 0 on the single-core C5).
-- FFT: the S3's S16R kernel is Xtensa assembly. Other targets get a C port of esp-sdr's rounded Q15 radix-2 kernel (`spectrum_fft.h`), checked on the host with a test tone. That arithmetic is identical to esp-dsp's ANSI `dsps_fft2r_sc16`, which is what S16 maps to on the C5. So on the C5, S16 and S16R should give the same result; the truncation bias only exists in the S3 SIMD kernel. The C5 has no FPU, so R2/R4 run in software floating point.
+- FFT: the S3's S16R kernel is Xtensa assembly. Other targets use `dsp/fft_r4_sc16.h`, a rounded Q15 radix-4 kernel (see the DSP section below). The C5 has no FPU, so R2/R4 run in software floating point.
 - `tools/flash.sh` takes `RX_ENV=esp32c5` and writes the C5 bootloader at 0x2000.
 
 Bring-up on hardware (XIAO ESP32-C5, 2026-10-08):
-- **Boot loop, fixed.** `esp_wifi_init` failed with `ESP_ERR_NO_MEM` and `app_main` aborted before `READY`, so the web UI never connected. The C5 heap is only ~125 KB once the capture bank is reserved, and the S3-sized link buffers (72 KiB queue + 16 KiB USB TX) took most of it. The C5 now uses a 36 KiB queue and 4 KiB of USB TX, and `PSD_MAX_FFT` is 1024 (`FFT` rejects 2048). Free heap while scanning is about 11 KB, so watch it when adding anything.
+- **Boot loop, fixed.** `esp_wifi_init` failed with `ESP_ERR_NO_MEM` and `app_main` aborted before `READY`, so the web UI never connected. The C5 heap is only ~125 KB once the capture bank is reserved, and the S3-sized link buffers (72 KiB queue + 16 KiB USB TX) took most of it. The C5 now uses a 36 KiB queue and 4 KiB of USB TX, and `PSD_MAX_FFT` is 1024 (`FFT` rejects 2048). Free heap while scanning was about 11 KB at that point; see the DSP section for where it went.
 - Boot steps after `link_init` use `BOOT_CHECK`: on failure the board prints `ERR boot <step> <error> heap=… largest=…` every second and keeps draining USB RX, instead of reboot-looping silently.
+- **Web Serial "The device has been lost" after a tool used the port:** pyserial (so esptool too) leaves the tty at VMIN=0, termios state outlives the close, and Chrome 153 reads a 0-byte non-blocking read as `DEVICE_LOST` (Chromium main now forces VMIN=1 on open). The failed session also kept the port open, so the retry said "Connection failed". Only a re-enumeration (RESET) cleared it. Our tools now leave VMIN=1 (`tools/ttyfix.py`, `flash.sh`), and the UI closes the port after a fatal read error. This happened on the S3 as well.
 - `RAWIQ` is capped by the link queue: `STATUS` reports `rawiq_max` (9180 on the C5, 16380 on the S3), the command refuses more (`ERR rawiq_args`), and the UI disables larger sizes. RAWIQ frames wait up to 500 ms for queue space (`link_frame_wait`); before that, an 8192-sample capture sometimes failed with `ERR link_full`.
 - **USB reset wedge on rev v1.0 silicon, fixed.** The ROM loops forever after a USB Serial/JTAG (RTS) reset if UART0's clock is gated (esp-idf#18089, IDFGH-17050). IDF 5.5.5 avoids the gating only when USB Serial/JTAG is the *console*. Ours is off (the binary protocol owns the port), so `app_main` turns the UART0 clocks back on. Before the fix, esptool auto-reset failed (`Write timeout`), and closing the port (the UI or the bridge disconnecting) left the board dead until RESET was pressed. Now `pio run -t upload` / `tools/flash.sh` work hands-free, and open/close cycles are fine.
 - Capture: all six rate codes complete. A 48 MHz-crystal harmonic at 5856 MHz shows up at LO+19 MHz (80/40 MS/s) and folds to −1/−1/+3/−1 MHz at 20/10/8/4 MS/s, as expected. The lower rates are plain decimation with no anti-alias filter. That spur's sign confirms `CONJ 1` for the C5 too. Other narrow spurs seen while scanning: 5664 and 5760 MHz (also 48 MHz harmonics), plus lines near 5840 and 5920 MHz. They aren't in `spurs_khz` yet. 5 GHz Wi-Fi is visible around 5860–5915 MHz.
-- Hop timing, all 8 channels in pair mode: **15.3 ms/hop** (15 rotations/s) against the 2.5 ms target.
-  - Tune: 1.23 ms, almost all `phy_set_chanfreq`. `TUNESKIP 2` saves only ~40 µs. `TUNESKIP 4` raises the floor by 21 dB: as on the S3, channel setup resets the gain, so the re-apply stays.
-  - Capture: 1.88 ms. About 1.78 ms of that is fixed overhead inside `adctrig` (1024 samples 1.80 ms, 8192 samples 1.99 ms, filter on or off). Its 10 ms delay is on the TX-tone path, not ours, so the cost is elsewhere in the cert-test routine. Driving the capture registers directly, as the S3 backend does, is the likely fix.
-  - DSP: 12.2 ms. `TIMING`: PSD 8.7 ms (prep 1.1, FFT 3.1, power 3.4), metrics 3.0 ms. The C5 has no FPU, and window/power/metrics are float.
+- Hop timing at bring-up, all 8 channels in pair mode: 15.3 ms/hop (15 rotations/s) against the 2.5 ms target.
+  - Tune: 1.1–1.4 ms, almost all `phy_set_chanfreq`. `TUNESKIP 2` saves only ~40 µs. `TUNESKIP 4` raises the floor by 21 dB: as on the S3, channel setup resets the gain, so the re-apply stays.
+  - Capture: 1.88 ms. About 1.73 ms of that is per-capture latency inside `adctrig` before the done bit (bit 18 of 0x600a9004) sets. The sample count adds only ~10 ns/sample, and fill, filter and restore add < 0.1 ms. A second capture right after the first (no retune) takes the same 1.73 ms, so it is not a post-tune settle. The loop around the done bit is a plain busy-wait; the delay is in the dump engine's setup (0x600a9018 fields?). Driving the capture registers directly, as the S3 backend does, is the likely fix.
+  - DSP: 12.2 ms (PSD 8.7: prep 1.1, FFT 3.1, power 3.4; metrics 3.0). Soft float everywhere.
+
+**DSP on the C5 (2026-10-08): 12.2 → 3.6 ms per hop; 15 → 36–39 rotations/s; heap 11 → 30 KB.**
+- The PSD is integer: `psd_result_t.p` is `uint32_t` power per bin, with one float `scale` for the result. S16/S16R accumulate `|X|²` without floats. Each segment's block-floating-point shift sets an exponent, and the accumulator is rescaled once if a later segment needs a coarser unit, so nothing overflows (bound: `|X/N|² ≤ 2^29`; headroom bits beyond 4 segments). R2/R4 still accumulate floats, then quantise once with the strongest bin at 4e9: 96 dB of range, and the 4e9 (not 2^32) keeps the peak from rounding past `UINT32_MAX`.
+- Metrics run on the integer bins: precomputed bin ranges, `uint64` sums, an integer quickselect for the floor and integer centroid/OBW. Floats appear only once per channel. `metrics_db` is a table-driven log2 (~1e-4 dB) instead of soft-float `log10f`, which cost thousands of cycles and ran ~20 times per hop. The EMA uses the linear RSSI directly, and the centroid threshold ratio is precomputed per configuration. A host test against the float metrics on 20 000 random PSDs: with a signal (SNR ≥ 6 dB), RSSI within 0.0001 dB, floor within 0.002 dB, centroid within 52 Hz, flags identical.
+- Spectrum codes come from an integer log2 (98.4 % identical to the float codes, the rest ±1 code = 0.5 dB).
+- S16R on the C5 is `dsp/fft_r4_sc16.h`, a rounded radix-4 DIT kernel: half the stages, a multiply-free first stage, Q15 twiddles in flash (`tools/gen_twiddle.py`), digit-reversed input written directly by the windowing pass, and natural-order output. Stage 1 rounds ties to even, and twiddle products keep 6 fractional bits (5 in the radix-2 stage used for 2·4^k sizes), so the rounding bias stays at ~0.005–0.03 LSB per bin at the block-scaled input levels (up to ~0.1 LSB on tiny inputs, where twiddle-free butterflies still tie). It is overflow-free for any int16 input. Host test against a double DFT: 0.33 LSB rms error (esp-sdr's radix-2: 0.42). `FFTEVAL` against R4: floor bias +0.002 dB, 0.080 dB rms per bin (the old radix-2 kernel: −0.012 dB and 0.106 dB). `pio test -e native` (test/test_dsp) checks the kernel against a DFT, `metrics_db`, and the integer metrics on a synthetic tone. The kernel runs from IRAM (1 KB of RAM for 7 % of FFT time); the twiddles stay in flash, since moving them to DRAM saved only 60 µs for 3 KB.
+- The S16 pass 1 uses one's-complement magnitudes, so one compare finds both ADC rails. Pass 2 is specialised per output order and conjugation.
+- **DSP region:** the dump only writes the upper half of the reserved bank (0x40830000). Its lower half (0x40820000, 64 KiB) is reserved only because the modem owns the whole bank during a capture, and its contents survive captures (checked: 4000+ captures of every size and rate, `RECALMODE EVERY`, hardware AGC). `radio_dsp_region()` exposes it. On the C5 it holds the R4 table (16 KiB, previously heap for life), the float work buffer, the R2 table and `FFTEVAL`'s buffers. This is what made R2 loadable and `FFTEVAL` work on the C5.
+- `FFTEVAL` crashed on the C5 (R2 couldn't load, and the eval used the result anyway). Now psd errors are reported per type (`FFTEVAL SYNTH R2 ERR …`), types load one at a time, failed esp-dsp inits are rolled back (they leaked their twiddle table), and the float reference is R4 for power-of-4 sizes.
+- Timings above 65.5 ms (R2/R4 on the C5) no longer saturate: all µs fields in the metrics and telemetry frames are u32 (metrics header 34 bytes, telemetry 62). The device→UI stream makes no promise of compatibility with older firmware or recordings.
+- Now (S16R, all 8 channels, pair mode): hop ≈ 6.6 ms = tune 1.1–1.3 + capture 1.9 + DSP 3.6 (prep 0.8, FFT 2.0, power 0.3, metrics 0.4–0.5, spectrum 0.3 every 4th hop). R2/R4: ~68 ms/hop (FFT 50 ms in soft float). S16: 8.1 ms/hop.
 
 Next steps, in order:
-1. **DSP cost.** The biggest item (12 of 15 ms). Move window, power and metrics to fixed point, or at least drop the float work done per bin. `FFTEVAL SYNTH`/`LIVE` for all FFT types: S16 and S16R should match on the C5, and R4 shows the soft-float cost. Step-on/IMD relies on R4, so it needs an affordable path.
-2. **Capture overhead.** Find where `adctrig`'s 1.78 ms goes. Either replace it with direct register writes, or keep only the parts that are needed per capture.
+1. **Capture latency** (1.73 ms per capture, now the largest single item). Find what `adctrig` waits for: try direct register triggering, or another `adctrig` selector or argument.
+2. **DSP**, if still needed: merge FFT stage 1 into the windowing pass, and special-case the twiddle-free butterflies (j = 0); worth ~0.2–0.3 ms. A 512-point FFT (`FFT 512`) roughly halves the FFT, at 156 kHz bins.
 3. **Calibration.** Compare `RECALMODE ONCE` (calibrate at 5787 MHz only) with `EVERY` across R1–R8: DC spike size, noise floor and image level. Decide the default. If `EVERY` is needed and slow, this is where the per-LO calibration cache (§4.4) comes back.
 4. **RF characterisation** (Phase 0-C5 step 2): board spurs by LO sweep (add them to `spurs_khz`), the real width of filter code 0, alias rejection (R3 seen from LO 5677 at −24 MHz), and whether R8 (5917 MHz, above esp-sdr's validated 5150–5895 MHz) is usable.
 5. **Profile.** Finalise `c5-race` (pair vs. single mode, filter code, windows), then run the Phase 1 acceptance criteria with real VTXs.
 6. `BOOTLOADER` is still untested on the C5.
-7. The S3 firmware picked up the shared changes (`BOOT_CHECK`, `rawiq_max`, `link_frame_wait`). It builds but hasn't been reflashed or rerun on the S3.
+7. The S3 firmware picked up the shared changes (`BOOT_CHECK`, `rawiq_max`, `link_frame_wait`, the integer PSD/metrics/spectrum, the u32 frame timings). It builds but hasn't been reflashed or rerun on the S3; its S16R is still the SIMD radix-2 kernel.
+8. USB JTAG debugging (OpenOCD `board/esp32c5-builtin.cfg` from the pioarduino `tool-openocd-esp32` package) needs a udev rule. OpenOCD's `60-openocd.rules` uses `GROUP="plugdev"`, which doesn't exist on this machine; use a group the user is in (e.g. `uucp`).
 
 ## 7. Risks and open questions
 
@@ -593,7 +613,7 @@ Next steps, in order:
 | C5 R8 above the validated range | Measure; document |
 
 **Open questions (defaults assumed):**
-1. S3 board: ESP32-S3 Micro (native USB only, BOOT + EN buttons). C5: ESP32-C5-DevKitC-1 assumed.
+1. S3 board: ESP32-S3 Micro (native USB only, BOOT + EN buttons). C5: Seeed XIAO ESP32-C5 (rev v1.0, 8 MB flash; built as `esp32-c5-devkitc-1` with 4 MB).
 2. ~~testgen~~: deferred by request; the S3 work uses ambient 2.4 GHz traffic.
 3. Raceband only for v1? Assumed yes, with a generic channel table.
 4. Lap and IMD analytics in the browser first, firmware later? Assumed yes.

@@ -44,6 +44,12 @@ extern void force_rx_gain(unsigned, unsigned, unsigned);
 extern unsigned phy_chip_i2c_readReg(unsigned, unsigned, unsigned);
 extern void phy_i2c_writeReg(unsigned, unsigned, unsigned, unsigned);
 
+/* Found with an LO sweep (5600-5975 MHz in 5 MHz steps, dummy load on the
+ * antenna port, gain 40): lines fixed in RF and seen from >= 75 % of the LOs
+ * covering them, ~7-10 dB over the floor in 39 kHz bins. 5600/5680/5760/5920
+ * are multiples of 80 MHz; 5712 and 5760 are 48 MHz crystal harmonics. */
+static const uint32_t c5_spurs_khz[] = {5600000, 5680000, 5712000, 5760000, 5920000};
+
 static radio_caps_t caps = {
     .target = "esp32c5",
     .max_samples = IQ_WORDS,
@@ -51,7 +57,8 @@ static radio_caps_t caps = {
     .rates_hz = {80000000, 40000000, 20000000, 10000000, 8000000, 4000000},
     .lo_step_khz = 1000, /* phy_set_chanfreq takes whole MHz */
     .filter_code_max = 63,
-    /* Board spurs: none known yet; find them with an LO sweep as on the S3. */
+    .spurs_khz = c5_spurs_khz,
+    .nspurs = sizeof(c5_spurs_khz) / sizeof(c5_spurs_khz[0]),
 };
 
 /* The S3 measured which parts of the tune sequence a hop can skip; on the C5

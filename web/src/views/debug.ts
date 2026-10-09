@@ -168,7 +168,8 @@ export class Console implements View {
   private history: string[] = [];
   private hpos = 0;
 
-  constructor(private app: App) {
+  /** sessionRow: connection-source buttons (simulate, replay, record) owned by main. */
+  constructor(private app: App, sessionRow: HTMLElement) {
     const input = el("input", { type: "text", placeholder: "Command, e.g. TIMING?  GAIN MANUAL 50  SPURS?" }) as HTMLInputElement;
     const send = el("button", { class: "primary" }, "Send");
     const go = async () => {
@@ -198,6 +199,7 @@ export class Console implements View {
       el("h2", {}, "Protocol console", quick),
       this.log,
       el("div", { class: "console-row" }, input, send),
+      sessionRow,
       el("h2", { style: "margin-top:10px" }, "Last METRICS frame"),
       this.inspector,
     );

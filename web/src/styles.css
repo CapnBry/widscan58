@@ -83,6 +83,7 @@ header.top {
   top: 0;
   z-index: 5;
 }
+header.top .brand { display: inline-flex; align-items: center; gap: 8px; }
 header.top h1 { font-size: 15px; margin: 0 8px 0 0; letter-spacing: 0.02em; }
 header.top .spacer { flex: 1; }
 .conn-state { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
@@ -262,6 +263,7 @@ main {
 .log .info { color: var(--warning); }
 .console-row { display: flex; gap: 6px; margin-top: 6px; }
 .console-row input { flex: 1; font-family: var(--mono); }
+.session-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .inspector { font: 11px/1.45 var(--mono); white-space: pre; overflow: auto; max-height: 220px; background: var(--surface-2); border-radius: 6px; padding: 6px 8px; }
 .muted { color: var(--muted); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

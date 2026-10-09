@@ -1,6 +1,7 @@
 // Transports (Web Serial, mock, replay) and the command/reply client. GPL-3.0-or-later.
 import { StreamParser, type StreamItem } from "./parser";
 import { FRAME_RAWIQ } from "../proto/frames";
+import { grantedUsbCdcPorts, requestUsbCdcPort } from "./webusb";
 
 export interface Transport {
   readonly name: string;
@@ -11,22 +12,42 @@ export interface Transport {
 
 const ESPRESSIF_VID = 0x303a;
 
+/** The parts of a Web Serial port used here; UsbCdcPort implements the same subset. */
+type Port = Pick<SerialPort, "readable" | "writable" | "open" | "close" | "getInfo">;
+
+/** Chrome on Android only offers wired serial ports on devices with Android's
+ *  newer serial API (elsewhere just Bluetooth RFCOMM), so there the board's
+ *  USB Serial/JTAG is driven as a CDC-ACM device over WebUSB instead. */
+function viaWebUsb(): boolean {
+  return /Android/i.test(navigator.userAgent) && "usb" in navigator;
+}
+
+function requestEspressifPort(): Promise<Port> {
+  if (viaWebUsb()) return requestUsbCdcPort(ESPRESSIF_VID);
+  return navigator.serial.requestPort({ filters: [{ usbVendorId: ESPRESSIF_VID }] });
+}
+
 export class WebSerialTransport implements Transport {
-  readonly name = "Web Serial";
-  private port: SerialPort | null = null;
+  readonly name = viaWebUsb() ? "WebUSB serial" : "Web Serial";
+  private port: Port | null = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private closing = false;
 
   /** port: a previously granted port (navigator.serial.getPorts()); otherwise
    *  open() shows the browser's port chooser. */
-  constructor(private preset: SerialPort | null = null) {}
+  constructor(private preset: Port | null = null) {}
 
   static supported(): boolean {
-    return "serial" in navigator;
+    return viaWebUsb() || "serial" in navigator;
+  }
+
+  /** Fires on page load and whenever a board (re)enumerates. */
+  static onConnectEvent(cb: () => void): void {
+    (viaWebUsb() ? navigator.usb : navigator.serial).addEventListener("connect", cb);
   }
 
   async open(onBytes: (chunk: Uint8Array) => void, onClose: (why: string) => void): Promise<void> {
-    this.port = this.preset ?? (await navigator.serial.requestPort({ filters: [{ usbVendorId: ESPRESSIF_VID }] }));
+    this.port = this.preset ?? (await requestEspressifPort());
     // USB Serial/JTAG ignores the baud rate; a large buffer absorbs bursts.
     await this.port.open({ baudRate: 115200, bufferSize: 1 << 20 });
     this.closing = false;
@@ -54,7 +75,8 @@ export class WebSerialTransport implements Transport {
           if (value) onBytes(value);
         }
       } catch (e) {
-        const err = e as DOMException;
+        // UsbCdcPort may surface non-DOMException errors.
+        const err = e instanceof Error ? e : new Error(String(e));
         if (!WebSerialTransport.RECOVERABLE.has(err.name)) {
           this.reader.releaseLock();
           // Release the port, or the next connect attempt finds it still open.
@@ -281,8 +303,8 @@ export class Device {
 }
 
 /** A port this origin was already granted, if any (no chooser needed). */
-export async function grantedEspressifPort(): Promise<SerialPort | null> {
+export async function grantedEspressifPort(): Promise<Port | null> {
   if (!WebSerialTransport.supported()) return null;
-  const ports = await navigator.serial.getPorts();
+  const ports: Port[] = viaWebUsb() ? await grantedUsbCdcPorts() : await navigator.serial.getPorts();
   return ports.find((p) => p.getInfo().usbVendorId === ESPRESSIF_VID) ?? null;
 }

@@ -40,27 +40,22 @@ document.documentElement.dataset.theme = themeName;
 // ---- Header -----------------------------------------------------------------
 const dot = el("span", { class: "dot" });
 const connText = el("span", {}, "Disconnected");
-const connectBtn = el("button", { class: "primary" }, "Connect device");
+const connectBtn = el("button", { class: "primary" }, "Connect device"); // becomes Disconnect while connected
 const simBtn = el("button", {}, "Simulate");
 const replayInput = el("input", { type: "file", accept: ".rx5808", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
 const recordBtn = el("button", { title: "Record the raw device stream to a .rx5808 file" }, "● Record");
-const disconnectBtn = el("button", {}, "Disconnect");
 const themeBtn = el("button", { title: "Toggle light/dark" }, "◐");
 const header = el(
   "header",
   { class: "top" },
-  el("h1", {}, "RX5808 Scanner"),
+  el("span", { class: "brand" }, themeBtn, el("h1", {}, "RX5808 Scanner")),
   el("span", { class: "conn-state" }, dot, connText),
   el("span", { class: "spacer" }),
   connectBtn,
-  simBtn,
-  replayBtn,
-  replayInput,
-  recordBtn,
-  disconnectBtn,
-  themeBtn,
 );
+// Session sources other than a real device, shown in the protocol console.
+const sessionRow = el("div", { class: "session-row" }, simBtn, replayBtn, replayInput, recordBtn);
 const banner = el("div", { class: "banner", style: "display:none" });
 
 const views: { view: View; minMs: number; last: number; drawn: number }[] = [];
@@ -78,7 +73,7 @@ const main = el(
   addView(new Telemetry(app), 200),
   addView(new Controls(app), 100),
   addView(new RawIqView(app), 100),
-  addView(new Console(app), 200),
+  addView(new Console(app, sessionRow), 200),
 );
 document.getElementById("app")!.append(header, banner, main);
 
@@ -87,10 +82,10 @@ function setState(state: "off" | "ok" | "sim" | "err", text: string) {
   dot.className = `dot ${state === "off" ? "" : state}`;
   connText.textContent = text;
   const connected = state === "ok" || state === "sim";
-  connectBtn.disabled = connected;
+  connectBtn.textContent = connected ? "Disconnect" : "Connect device";
+  connectBtn.classList.toggle("primary", !connected);
   simBtn.disabled = connected;
   replayBtn.disabled = connected;
-  disconnectBtn.disabled = !connected;
   recordBtn.disabled = !connected || app.readOnly;
 }
 
@@ -155,7 +150,16 @@ async function connect(transport: Transport, readOnly = false) {
   updateBanner();
 }
 
-connectBtn.onclick = () => {
+connectBtn.onclick = async () => {
+  if (app.device) {
+    userDisconnected = true;
+    const d = app.device;
+    app.device = null;
+    stopRecording();
+    await d.close();
+    setState("off", "Disconnected");
+    return;
+  }
   if (!WebSerialTransport.supported()) {
     store.addLog("error", "Web Serial is not available: use Chrome, Edge or Opera over https or localhost.");
     setState("err", "Web Serial unsupported in this browser");
@@ -171,14 +175,6 @@ replayInput.onchange = async () => {
   if (!f) return;
   void connect(new ReplayTransport(await f.arrayBuffer(), f.name), true);
   replayInput.value = "";
-};
-disconnectBtn.onclick = async () => {
-  userDisconnected = true;
-  const d = app.device;
-  app.device = null;
-  stopRecording();
-  await d?.close();
-  setState("off", "Disconnected");
 };
 themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
 
@@ -222,7 +218,7 @@ const bridge = params.get("bridge");
 if (bridge) void connect(new WebSocketTransport(bridge));
 else if (params.has("sim")) void connect(new MockTransport());
 else if (WebSerialTransport.supported()) {
-  navigator.serial.addEventListener("connect", () => setTimeout(() => void autoConnect(), 500));
+  WebSerialTransport.onConnectEvent(() => setTimeout(() => void autoConnect(), 500));
   void autoConnect();
 }
 

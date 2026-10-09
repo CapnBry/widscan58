@@ -123,6 +123,7 @@ Send these with `tools/rx5808cli.py cmd …` or the UI's Protocol console.
 | `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as one frame. At most `rawiq_max` samples: 16380 on the S3, 9180 on the C5 (smaller link queue). The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. |
+| `AVG <shift>` | Averaging of the reported most-occupied frequency, centre and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `REBOOT` | Restart (USB stays connected; the UI re-syncs on `READY`) |
 
 ## Web UI

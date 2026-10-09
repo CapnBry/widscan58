@@ -11,6 +11,7 @@
 #include "commands.h"
 #include "frames.h"
 #include "link.h"
+#include "metrics.h"
 #include "radio.h"
 #include "scanner.h"
 #include "psd.h"
@@ -74,13 +75,13 @@ static void send_status(void) {
               "\"capture_samples\":%u,\"nfft\":%u,\"segments\":%u,\"rate_code\":%u,\"filter\":%d,"
               "\"conjugate\":%d,\"settle_us\":%" PRIu32 ",\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
-              "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"spec_every\":%u,\"spec_bins\":%u,"
+              "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"plan\":[",
               c.profile->name, c.running, c.enabled, c.mode == PLAN_PAIR ? "PAIR" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.settle_us,
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, rawiq_max(),
               c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY", c.rssi_hz, c.search_hz, c.dc_guard,
-              (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.spec_every,
+              (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type));
     for (unsigned j = 0; j < plan.nhops; j++) {
         const plan_hop_t *h = &plan.hop[j];
@@ -195,6 +196,11 @@ static void handle(char *line) {
     } else if (sscanf(line, "WIN %" SCNu32 " %" SCNu32 " %c", &a, &b, &extra) == 2 && a > 0 && b >= a && b <= 20000000) {
         c.rssi_hz = a;
         c.search_hz = b;
+        scanner_set_config(&c);
+        link_text("OK\n");
+    } else if (sscanf(line, "AVG %" SCNu32 " %c", &a, &extra) == 1 && a >= METRICS_AVG_SHIFT_MIN &&
+               a <= METRICS_AVG_SHIFT_MAX) {
+        c.avg_shift = (uint8_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (sscanf(line, "EMA %" SCNu32 " %" SCNu32 " %c", &a, &b, &extra) == 2 && a >= 1 && a <= 1000 && b >= 1 && b <= 1000) {

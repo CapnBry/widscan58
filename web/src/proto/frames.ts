@@ -23,10 +23,13 @@ export interface ChannelMetrics {
   floor: number; // noise in the RSSI window, dBFS
   snr: number; // (S+N)/N dB
   clearFloor: number | null;
-  peak: number; // per-bin dBFS
+  peak: number; // per-bin dBFS, this hop
+  // Time-averaged occupancy, vs channel nominal: most occupied frequency,
+  // power-weighted centre, and the band holding 99 % of the excess power.
   peakOffHz: number;
   centroidOffHz: number;
-  obwHz: number;
+  obwLoHz: number;
+  obwHiHz: number;
 }
 
 export interface Metrics {
@@ -121,7 +124,8 @@ export function parseMetrics(p: DataView): Metrics {
       peak: p.getInt16(o + 12, true) / 100,
       peakOffHz: p.getInt32(o + 14, true),
       centroidOffHz: p.getInt32(o + 18, true),
-      obwHz: p.getUint32(o + 22, true),
+      obwLoHz: p.getInt16(o + 22, true) * 1000,
+      obwHiHz: p.getInt16(o + 24, true) * 1000,
     });
   }
   return m;
@@ -225,6 +229,7 @@ export interface Status {
   ema: number;
   clear_ema: number;
   signal_db: number;
+  avg_shift: number;
   spec_every: number;
   spec_bins: number;
   spec_span_hz: number;

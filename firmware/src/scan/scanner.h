@@ -32,6 +32,7 @@ typedef struct {
     float clear_alpha;
     float signal_snr_db;
     float centroid_db;
+    uint8_t avg_shift;       /* time-averaged peak/centre/OBW weight 2^-avg_shift (metrics.h) */
     /* Display spectrum */
     uint8_t spec_every;      /* 0 = off, else every Nth hop */
     uint16_t spec_bins;

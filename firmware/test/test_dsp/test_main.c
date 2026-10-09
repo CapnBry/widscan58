@@ -133,16 +133,68 @@ static void test_metrics_tone(void) {
     metrics_floor(&in, 0.2f, scratch, &fl);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 10 * log10f(1000 * 1e-9f), fl.floor_bin_db);
     metrics_channel_t m;
-    metrics_channel(&in, &fl, -19000000, &m);
+    metrics_channel(&in, &fl, -19000000, NULL, &m);
     TEST_ASSERT_TRUE(m.flags & CHF_SIGNAL);
     TEST_ASSERT_FLOAT_WITHIN(bin / 2, 2e6f, m.peak_off_hz);
     TEST_ASSERT_FLOAT_WITHIN(bin / 2, 2e6f, m.centroid_off_hz);
+    /* -10 dB run: the three tone bins (the side bins are 3 dB down). */
+    const float tone = (kc - N / 2) * bin + 19e6f; /* the tone bin, vs the channel */
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, tone - 1.5f * bin, m.obw_lo_off_hz);
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, tone + 1.5f * bin, m.obw_hi_off_hz);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 10 * log10f(1000000 * 1e-9f), m.peak_db);
     /* RSSI: (3 tone bins + the rest of the window at the floor) / ENBW */
     int r0 = N / 2 + (int)ceilf((-19e6f - 5e6f) / bin), r1 = N / 2 + (int)floorf((-19e6f + 5e6f) / bin);
     double band = 2000000.0 + 1000.0 * (r1 - r0 + 1 - 3);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 10 * log10(band * 1e-9 / 1.5), m.rssi_db);
     TEST_ASSERT_FLOAT_WITHIN(1e-4f * (float)(band * 1e-9 / 1.5), (float)(band * 1e-9 / 1.5), m.rssi);
+}
+
+/* FM-video-like occupancy: one tone that sits at +1.5 MHz on three hops out
+ * of four and at -3.5 MHz (sync) on the fourth. The average sees both: the
+ * peak at +1.5, the centre at the time-weighted mean, and the 99 % band
+ * across both tones. Then noise only: it fades to NO_CENTROID. */
+static void test_metrics_avg(void) {
+    enum { N = 1024 };
+    static uint32_t p[N], scratch[N];
+    static uint8_t valid[N];
+    metrics_init();
+    const float bin = 78125.0f, chan = -19e6f;
+    for (unsigned k = 0; k < N; k++) {
+        unsigned rel = (unsigned)abs((int)k - N / 2);
+        valid[k] = rel > 1 && rel * bin <= 40e6f;
+    }
+    metrics_input_t in = {.p = p, .scale = 1e-9f, .valid = valid, .nfft = N, .bin_hz = bin,
+                          .enbw_bins = 1.5f, .floor_bias = 1.0f, .passband_hz = 24000000,
+                          .rssi_hz = 5000000, .search_hz = 12000000, .signal_snr_db = 6.0f,
+                          .centroid_ratio = 4.0f, .avg_shift = 5};
+    metrics_avg_t avg;
+    memset(&avg, 0, sizeof(avg));
+    metrics_channel_t m;
+    for (int hop = 0; hop < 400; hop++) {
+        for (unsigned k = 0; k < N; k++) p[k] = 1000;
+        int kc = N / 2 + (int)lrintf((chan + (hop % 4 == 3 ? -3.5e6f : 1.5e6f)) / bin);
+        p[kc] = 1000000;
+        metrics_floor_t fl;
+        metrics_floor(&in, 0.2f, scratch, &fl);
+        metrics_channel(&in, &fl, (int32_t)chan, &avg, &m);
+        TEST_ASSERT_TRUE(m.flags & CHF_SIGNAL);
+    }
+    TEST_ASSERT_FALSE(m.flags & CHF_NO_CENTROID);
+    const float w = 24e6f / METRICS_AVG_BINS; /* coarse bin, about 375 kHz */
+    TEST_ASSERT_FLOAT_WITHIN(w, 1.5e6f, m.peak_off_hz);
+    /* The average weights recent hops more: the last hop (399) was a sync hop,
+     * so the sync share is a/(1 - (1-a)^4) with a = 1/32, not exactly 1/4. */
+    const double a = 1.0 / 32, sync = a / (1 - pow(1 - a, 4));
+    TEST_ASSERT_FLOAT_WITHIN(1000.0f, (float)(1.5e6 * (1 - sync) - 3.5e6 * sync), m.centroid_off_hz);
+    TEST_ASSERT_FLOAT_WITHIN(w, -3.5e6f, m.obw_lo_off_hz);
+    TEST_ASSERT_FLOAT_WITHIN(w, 1.5e6f, m.obw_hi_off_hz);
+    for (int hop = 0; hop < 400; hop++) {
+        for (unsigned k = 0; k < N; k++) p[k] = 1000;
+        metrics_floor_t fl;
+        metrics_floor(&in, 0.2f, scratch, &fl);
+        metrics_channel(&in, &fl, (int32_t)chan, &avg, &m);
+    }
+    TEST_ASSERT_TRUE(m.flags & CHF_NO_CENTROID);
 }
 
 int main(void) {
@@ -152,5 +204,6 @@ int main(void) {
     RUN_TEST(test_fft_r4_full_scale_no_overflow);
     RUN_TEST(test_metrics_db);
     RUN_TEST(test_metrics_tone);
+    RUN_TEST(test_metrics_avg);
     return UNITY_END();
 }

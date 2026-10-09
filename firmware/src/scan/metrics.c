@@ -60,8 +60,79 @@ void metrics_floor(const metrics_input_t *in, float q, uint32_t *scratch, metric
     out->floor_bin_db = metrics_db(out->floor_bin);
 }
 
+/* Add one hop: the excess above the floor of bins over the centroid threshold
+ * (the same bins the snapshot centroid uses), binned across [k0, k1] and
+ * normalised to METRICS_AVG_ONE. A hop without a signal (total 0) only
+ * decays the average, so a vanished signal fades out (below 1/8 of full)
+ * after ~2.1 * 2^avg_shift hops. The decay rounds up so a bin always
+ * reaches 0. */
+static void metrics_avg_update(const metrics_input_t *in, int k0, int k1, uint32_t thresh, uint32_t floor_u,
+                               uint64_t total, float centre_hz, metrics_avg_t *avg) {
+    const unsigned shift = in->avg_shift;
+    const float keep = 1.0f - 1.0f / (float)(1u << shift);
+    for (unsigned c = 0; c < METRICS_AVG_BINS; c++) avg->acc[c] -= (avg->acc[c] + (1u << shift) - 1) >> shift;
+    avg->centre_sum *= keep;
+    avg->centre_weight *= keep;
+    if (!total) return;
+    avg->centre_sum += centre_hz;
+    avg->centre_weight += 1.0f;
+    uint64_t sums[METRICS_AVG_BINS] = {0};
+    const unsigned n = (unsigned)(k1 - k0 + 1);
+    for (int k = k0; k <= k1; k++) {
+        uint32_t p = in->p[k];
+        if (!in->valid[k] || p <= thresh || p <= floor_u) continue;
+        sums[(unsigned)(k - k0) * METRICS_AVG_BINS / n] += p - floor_u;
+    }
+    for (unsigned c = 0; c < METRICS_AVG_BINS; c++)
+        if (sums[c]) avg->acc[c] += (uint32_t)((sums[c] * METRICS_AVG_ONE + total / 2) / total);
+}
+
+/* Peak, centre and 99 % band of the averaged occupancy. lo_hz: the low edge
+ * of the window relative to channel nominal; span_hz: its width. */
+static void metrics_avg_read(const metrics_avg_t *avg, unsigned shift, float lo_hz, float span_hz,
+                             metrics_channel_t *out) {
+    uint64_t sum = 0;
+    unsigned peak_c = 0;
+    for (unsigned c = 0; c < METRICS_AVG_BINS; c++) {
+        sum += avg->acc[c];
+        if (avg->acc[c] > avg->acc[peak_c]) peak_c = c;
+    }
+    /* With a signal on every hop the sum settles at METRICS_AVG_ONE << shift;
+     * below 1/8 of that, there has been little lately. */
+    if (sum < ((uint64_t)METRICS_AVG_ONE << shift) / 8) {
+        out->flags |= CHF_NO_CENTROID;
+        out->peak_off_hz = out->centroid_off_hz = out->obw_lo_off_hz = out->obw_hi_off_hz = 0;
+        return;
+    }
+    const float w = span_hz / METRICS_AVG_BINS;
+    float frac = 0;
+    if (peak_c > 0 && peak_c < METRICS_AVG_BINS - 1) {
+        float a = (float)avg->acc[peak_c - 1], b = (float)avg->acc[peak_c], c = (float)avg->acc[peak_c + 1];
+        float den = a - 2 * b + c;
+        if (den < 0) frac = 0.5f * (a - c) / den;
+    }
+    out->peak_off_hz = lo_hz + (peak_c + 0.5f + frac) * w;
+    out->centroid_off_hz = avg->centre_sum / avg->centre_weight;
+    /* Edges where the cumulative share crosses 0.5 % and 99.5 %, interpolated within the bin. */
+    const uint64_t lo_mass = sum / 200, hi_mass = sum - sum / 200;
+    uint64_t cum = 0;
+    bool have_lo = false;
+    for (unsigned c = 0; c < METRICS_AVG_BINS; c++) {
+        uint64_t next = cum + avg->acc[c];
+        if (!have_lo && next > lo_mass) {
+            out->obw_lo_off_hz = lo_hz + (c + (float)(lo_mass - cum) / (float)avg->acc[c]) * w;
+            have_lo = true;
+        }
+        if (next >= hi_mass) {
+            out->obw_hi_off_hz = lo_hz + (c + (float)(hi_mass - cum) / (float)avg->acc[c]) * w;
+            break;
+        }
+        cum = next;
+    }
+}
+
 void metrics_channel(const metrics_input_t *in, const metrics_floor_t *fl, int32_t offset_hz,
-                     metrics_channel_t *out) {
+                     metrics_avg_t *avg, metrics_channel_t *out) {
     memset(out, 0, sizeof(*out));
     const float off = (float)offset_hz;
     const int centre = (int)(in->nfft / 2), last = (int)in->nfft - 1;
@@ -128,13 +199,22 @@ void metrics_channel(const metrics_input_t *in, const metrics_floor_t *fl, int32
         wsum += w;
         ksum += (int64_t)w * (k - centre);
     }
+    if (avg) {
+        const bool add = (out->flags & CHF_SIGNAL) && wsum;
+        metrics_avg_update(in, k0, k1, thresh, floor_u, add ? wsum : 0,
+                           add ? (float)((double)ksum / (double)wsum * in->bin_hz - off) : 0, avg);
+        metrics_avg_read(avg, in->avg_shift, (k0 - centre - 0.5f) * in->bin_hz - off,
+                         (float)(k1 - k0 + 1) * in->bin_hz, out);
+        return;
+    }
     if (wsum > 0) out->centroid_off_hz = (float)((double)ksum / (double)wsum * in->bin_hz - off);
     else out->flags |= CHF_NO_CENTROID;
 
-    /* -10 dB occupied width around the peak, stopping at excluded bins. */
+    /* -10 dB run of bins around the peak, stopping at excluded bins. */
     uint32_t edge = peak / 10;
     int l = peak_k, r = peak_k;
     while (l > k0 && in->valid[l - 1] && in->p[l - 1] > edge) l--;
     while (r < k1 && in->valid[r + 1] && in->p[r + 1] > edge) r++;
-    out->obw_hz = (r - l + 1) * in->bin_hz;
+    out->obw_lo_off_hz = (l - centre - 0.5f) * in->bin_hz - off;
+    out->obw_hi_off_hz = (r - centre + 0.5f) * in->bin_hz - off;
 }

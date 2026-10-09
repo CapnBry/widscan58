@@ -261,10 +261,8 @@ Target: ≤ 2.5 ms per hop, so ≥ 100 Hz per channel with all 8 enabled.
 6. Per channel:
    - **RSSI**: integrated power over ±rssi_window, in dBFS, plus approximate dBm
      via the gain table and a user offset.
-   - **Peak**: highest bin in ±search_window, refined with parabolic interpolation.
-   - **Centroid / video centre**: power-weighted mean of bins more than 6 dB above
-     the noise floor.
-   - **Occupied BW**: −10 dB width.
+   - **Peak level**: highest bin in ±search_window, this hop.
+   - **Most occupied frequency, centre, occupied BW**: time-averaged (`metrics_avg_t`), because one 51 µs snapshot is shorter than a video line and catches the FM carrier at the picture level or the sync tip. Each SIGNAL hop's power more than 6 dB above the floor is normalised and binned into 64 bins across the search window, then averaged with weight 2^-shift (`AVG <shift>`, 4–8; default 7, ~2.3 s at 56 hops/s). Most occupied = the largest averaged bin (interpolated); centre = the same average of each hop's exact power-weighted centroid; occupied BW = the band holding 99 % of the averaged excess (low and high edges are reported). Without SIGNAL hops the average decays, and below 1/8 of its full level (after ~2.1 × 2^shift hops, ~4.8 s at the default) the channel reports no centre.
    - **Noise floor**: 20th percentile of the valid bins in the capture.
    - **Clear-channel floor**: EMA of RSSI, updated only while the channel is empty.
    - **SNR**.
@@ -619,6 +617,11 @@ Bring-up on hardware (XIAO ESP32-C5, 2026-10-08):
 - The 300 µs wait is redundant: right after it, `phy_wait_rfpll_cal_end_new` restarts the PLL calibration itself, waits 20 µs and checks the VCO code (retrying up to 10 times while it reads 125–130). With the wait skipped, spurs land within 4 kHz of their frequency after 50–350 MHz jumps (300 captures, none off; the stock sequence had 2 off-frequency captures in 300, both raised-floor bursts).
 - Now skipped while `radio_tune` runs channel setup (`--wrap` of `ets_delay_us` and `phy_wifi_set_tx_gain_new`, gated by a flag): the 300 µs wait and the TX gain table. `c5_cal_restore` no longer rebuilds the gain table itself, since channel setup does (that was a duplicate ~160 µs per hop in `CACHE` mode). Full-spectrum comparison against the stock sequence at five LOs: floor within 0.07 dB, no new lines, same DC.
 - What remains in channel setup (~560 µs) is mostly the gain-table rebuild (~170 µs) and I2C register traffic. Further cuts would mean a PLL-only retune like the S3's (`phy_set_rf_freq_offset`), which skips the per-frequency settings that channel setup applies (band, pbus memory, RX compensation, the 5831 MHz filter change), so it needs care.
+
+**Peak, centre and occupied BW are time-averaged (2026-10-08).**
+- With a VTX on R1 (SNR ~42 dB), the per-snapshot values scattered: peak sd 1.3 MHz, centroid sd 0.84 MHz, −10 dB width mostly 0.2–1.1 MHz. Recomputing them in Python from raw captures gave the same numbers, so the arithmetic was right; the definitions were the problem. A capture is 51 µs, less than one 64 µs line, and the carrier sat at about +1.5 MHz (picture level) with ~5 µs dips to −3.5 MHz (sync) every line, so each snapshot saw one or two of those.
+- Now (see §4.5): most occupied frequency +1.42 MHz (sd 0.02), centre −0.05 MHz (sd 0.07), 99 % band −4.26 … +4.73 MHz (8.98 MHz, sd 0.09). Channels without a signal report no centre. Cost ~70 µs per hop (metrics 0.33 → 0.40 ms, independent of the weight) and ~4 KB static RAM. Those numbers are at weight 1/32; the default is now 1/128 (`AVG 7`).
+- The frame's `obw_hz` (u32) is now `obw_lo_khz`/`obw_hi_khz` (two int16, vs channel nominal); the UI shows "OBW 99 %" and draws the band in the zoom view.
 
 **Board spurs on the C5 (LO sweep, 2026-10-08).**
 - Method: scanning stopped, dummy load on the antenna port, manual gain 40, `RECALMODE ONCE`. LO 5600–5975 MHz in 5 MHz steps; at each LO, 4 × 9180-sample `RAWIQ` captures at 80 MS/s, 2048-point Hann FFTs (39 kHz bins), averaged. A line is a bin ≥ 6 dB over the median of the surrounding ±1 MHz, with |offset| 0.4–30 MHz from the LO. A board spur is a line fixed in RF that is seen from ≥ 75 % of the LOs that cover it; LO-relative lines and IQ images move with the LO and drop out.

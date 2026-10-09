@@ -131,7 +131,8 @@ export function channelMetrics(m: MetricsInput, floorBin: number, offHz: number)
   if (Math.abs(offHz) + m.rssiHz > m.passbandHz) flags |= CHF.EDGE;
   let peakOff = 0;
   let centroid = 0;
-  let obw = 0;
+  let obwLo = 0;
+  let obwHi = 0;
   if (peakK < 0) flags |= CHF.NO_CENTROID;
   else {
     let frac = 0;
@@ -159,7 +160,9 @@ export function channelMetrics(m: MetricsInput, floorBin: number, offHz: number)
     let r = peakK;
     while (l > k0 && m.valid[l - 1] && m.p[l - 1] > edge) l--;
     while (r < k1 && m.valid[r + 1] && m.p[r + 1] > edge) r++;
-    obw = (r - l + 1) * m.binHz;
+    // The mock reports one snapshot's -10 dB run; the firmware averages over time.
+    obwLo = f(l) - m.binHz / 2 - offHz;
+    obwHi = f(r) + m.binHz / 2 - offHz;
   }
-  return { rssi, floor, snr, peak: db(peak), peakOff, centroid, obw, flags };
+  return { rssi, floor, snr, peak: db(peak), peakOff, centroid, obwLo, obwHi, flags };
 }

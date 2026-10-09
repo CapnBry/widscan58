@@ -23,7 +23,7 @@ from ttyfix import keep_vmin1
 
 FRAME_METRICS, FRAME_SPECTRUM, FRAME_TELEMETRY, FRAME_RAWIQ, FRAME_LOG = 1, 2, 3, 4, 5
 METRICS_HDR = struct.Struct("<IIIIIIHhhBBBB")
-CHANNEL = struct.Struct("<BBhhhhhhiiI")
+CHANNEL = struct.Struct("<BBhhhhhhiihh")
 SPECTRUM_HDR = struct.Struct("<IIiIHBB")
 TELEMETRY = struct.Struct("<IIIIIIIIIIIHIIIBBBb")
 RAWIQ_HDR = struct.Struct("<IIHBB")
@@ -112,7 +112,7 @@ def parse_metrics(p):
     chans = []
     for j in range(m["nch"]):
         c = CHANNEL.unpack_from(p, METRICS_HDR.size + j * CHANNEL.size)
-        chans.append(dict(zip("id flags rssi ema floor snr clear peak peak_off centroid_off obw".split(), c)))
+        chans.append(dict(zip("id flags rssi ema floor snr clear peak peak_off centroid_off obw_lo_khz obw_hi_khz".split(), c)))
     m["channels"] = chans
     return m
 
@@ -172,14 +172,14 @@ def cmd_monitor(link, args):
             last_draw = time.time()
             lines = ["\x1b[2J\x1b[H" if not args.plain else "",
                      f"{'ch':4}{'MHz':>10}{'LO':>11}{'RSSI':>8}{'EMA':>8}{'floor':>8}{'SNR':>7}{'clear':>8}"
-                     f"{'peak':>8}{'pk kHz':>9}{'cen kHz':>9}{'OBW kHz':>9} flags"]
+                     f"{'peak':>8}{'occ kHz':>9}{'cen kHz':>9}{'OBW99 kHz':>11} flags"]
             for cid in sorted(latest):
                 m, c = latest[cid]
                 clear = c["clear"] / 100 if c["clear"] > -32768 else float("nan")
                 lines.append(f"{names[cid]:4}{khz[cid] / 1000:10.3f}{m['lo_khz'] / 1000:11.3f}{c['rssi'] / 100:8.1f}"
                              f"{c['ema'] / 100:8.1f}{c['floor'] / 100:8.1f}{c['snr'] / 100:7.1f}{clear:8.1f}"
                              f"{c['peak'] / 100:8.1f}{c['peak_off'] / 1000:9.0f}{c['centroid_off'] / 1000:9.0f}"
-                             f"{c['obw'] / 1000:9.0f} {flags_str(c['flags'])}")
+                             f"{c['obw_hi_khz'] - c['obw_lo_khz']:11.0f} {flags_str(c['flags'])}")
             if latest:
                 m = next(iter(latest.values()))[0]
                 lines.append(f"floor/bin {m['floor_bin_cdb'] / 100:.1f} dBFS  DC {m['dc_cdb'] / 100:.1f} dBFS  "

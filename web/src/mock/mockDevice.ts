@@ -192,6 +192,7 @@ export class MockTransport implements Transport {
             ema: this.ema,
             clear_ema: this.clearEma,
             signal_db: 6,
+            avg_shift: 7,
             spec_every: this.specEvery,
             spec_bins: this.specBins,
             spec_span_hz: this.specSpanHz,
@@ -246,7 +247,7 @@ export class MockTransport implements Transport {
         return this.text(`SPURS ${p.spursKhz.length} ${p.spursKhz.join(" ")} guard 60000\n`);
       case line === "RECAL":
         return this.text("OK RECAL\n");
-      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "RECALMODE", "WIN", "SPURS", "TUNESKIP", "PROMISC", "REBOOT", "BOOTLOADER"].includes(parts[0]):
+      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "RECALMODE", "WIN", "SPURS", "TUNESKIP", "AVG", "PROMISC", "REBOOT", "BOOTLOADER"].includes(parts[0]):
         return ok();
       case parts[0] === "SYNC":
         return this.text(`SYNC ${parts[1]}\n`);
@@ -407,7 +408,8 @@ export class MockTransport implements Transport {
       buf.setInt16(o + 12, c16(c.m.peak), true);
       buf.setInt32(o + 14, Math.round(c.m.peakOff), true);
       buf.setInt32(o + 18, Math.round(c.m.centroid), true);
-      buf.setUint32(o + 22, Math.round(c.m.obw), true);
+      buf.setInt16(o + 22, Math.round(c.m.obwLo / 1000), true);
+      buf.setInt16(o + 24, Math.round(c.m.obwHi / 1000), true);
     });
     // Same LO rotation as the firmware: one spectrum per specEvery hops.
     if (this.specEvery && this.hop % this.specEvery === this.rotations % this.specEvery) this.spectrum(h.loKhz, psd, binHz);

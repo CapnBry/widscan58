@@ -48,10 +48,14 @@ typedef struct __attribute__((packed)) {
     int16_t floor_cdb;       /* noise power in the RSSI window */
     int16_t snr_cdb;         /* (S+N)/N */
     int16_t clear_floor_cdb; /* slow average of RSSI while the channel is empty */
-    int16_t peak_cdb;        /* strongest bin, per-bin dBFS */
-    int32_t peak_off_hz;     /* vs channel nominal */
+    int16_t peak_cdb;        /* strongest bin this hop, per-bin dBFS */
+    /* Time-averaged occupancy (metrics.h, metrics_avg_t), vs channel nominal:
+     * the most occupied frequency, the power-weighted centre, and the band
+     * holding 99 % of the power above the floor. */
+    int32_t peak_off_hz;
     int32_t centroid_off_hz;
-    uint32_t obw_hz;
+    int16_t obw_lo_khz;
+    int16_t obw_hi_khz;
 } frame_channel_t;
 
 /* Decimated display spectrum for one hop. code -> dBFS/bin = code / 2 - 127.5. */

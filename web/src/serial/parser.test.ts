@@ -29,7 +29,8 @@ function metricsPayload(): Uint8Array {
   dv.setInt16(H + 10, -32768, true);
   dv.setInt32(H + 14, -1234, true);
   dv.setInt32(H + 18, 885000, true);
-  dv.setUint32(H + 22, 59000, true);
+  dv.setInt16(H + 22, -4000, true);
+  dv.setInt16(H + 24, 4400, true);
   return new Uint8Array(dv.buffer);
 }
 
@@ -50,7 +51,7 @@ describe("StreamParser", () => {
     expect(m.loKhz).toBe(2410437);
     expect(m.floorBin).toBeCloseTo(-68.6);
     expect(m.dspUs).toBe(67602);
-    expect(m.channels[0]).toMatchObject({ id: 3, flags: 1, rssi: -36, clearFloor: null, peakOffHz: -1234, centroidOffHz: 885000, obwHz: 59000 });
+    expect(m.channels[0]).toMatchObject({ id: 3, flags: 1, rssi: -36, clearFloor: null, peakOffHz: -1234, centroidOffHz: 885000, obwLoHz: -4000000, obwHiHz: 4400000 });
   });
 
   it("reassembles frames split across chunks", () => {

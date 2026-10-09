@@ -24,8 +24,8 @@ export class Zoom implements View {
         el("span", {}, el("i", { style: `background:${t.ink}` }), "Live"),
         el("span", {}, el("i", { style: `background:${t.warning}` }), "Max hold"),
         el("span", {}, el("i", { style: `background:${t.accent}` }), "Average"),
-        el("span", {}, el("i", { style: `background:${t.good}` }), "Peak"),
-        el("span", {}, el("i", { style: `background:${t.critical}` }), "Centroid (video centre)"),
+        el("span", {}, el("i", { style: `background:${t.good}` }), "Most occupied · 99 % band"),
+        el("span", {}, el("i", { style: `background:${t.critical}` }), "Centre (video centre)"),
         el("span", {}, el("i", { style: `background:${t.ink2}` }), "Nominal"),
       ),
       this.readout,
@@ -125,10 +125,10 @@ export class Zoom implements View {
     if (sig) {
       vline(ch.khz + m.peakOffHz / 1000, t.good);
       if (!(m.flags & CHF.NO_CENTROID)) vline(ch.khz + m.centroidOffHz / 1000, t.critical);
-      // -10 dB occupied bandwidth bracket under the peak.
+      // 99 % occupied band (time-averaged) as a bracket 10 dB under this hop's peak.
       const y = a.sy(Math.min(a.y1, m.peak - 10));
-      const xa = a.sx(ch.khz + m.peakOffHz / 1000 - m.obwHz / 2000);
-      const xb = a.sx(ch.khz + m.peakOffHz / 1000 + m.obwHz / 2000);
+      const xa = a.sx(ch.khz + m.obwLoHz / 1000);
+      const xb = a.sx(ch.khz + m.obwHiHz / 1000);
       ctx.strokeStyle = t.good;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -148,8 +148,9 @@ export class Zoom implements View {
       ["SNR", `${m.snr.toFixed(1)} dB`],
       ["floor", `${m.floor.toFixed(1)} dBFS`],
       ["centre", sig && !(m.flags & CHF.NO_CENTROID) ? off(m.centroidOffHz) : "—"],
-      ["peak", sig ? `${m.peak.toFixed(1)} dBFS/bin @ ${off(m.peakOffHz)}` : "—"],
-      ["OBW", sig ? `${(app.displayOffsetKhz(m.obwHz) / 1000).toFixed(2)} MHz` : "—"],
+      ["peak", sig ? `${m.peak.toFixed(1)} dBFS/bin` : "—"],
+      ["most occupied", sig && !(m.flags & CHF.NO_CENTROID) ? off(m.peakOffHz) : "—"],
+      ["OBW 99 %", sig && !(m.flags & CHF.NO_CENTROID) ? `${(app.displayOffsetKhz(m.obwHiHz - m.obwLoHz) / 1000).toFixed(2)} MHz (${off(m.obwLoHz)} … ${off(m.obwHiHz)})` : "—"],
     ];
     this.readout.replaceChildren(
       ...items.map(([k, v]) => {

@@ -29,6 +29,7 @@ typedef struct {
     float rssi_ema;
     float clear_floor;
     bool clear_init;
+    metrics_avg_t avg; /* time-averaged occupancy: peak, centre, occupied band */
 } channel_state_t;
 
 static struct {
@@ -83,6 +84,7 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->clear_alpha = 0.02f;
     c->signal_snr_db = 6.0f;
     c->centroid_db = 6.0f;
+    c->avg_shift = 7; /* ~2.3 s at 56 hops/s */
     c->spec_every = 4; /* display spectrum costs ~0.5 ms/hop; every 4th keeps ~9% more hop rate */
     c->spec_bins = 256;
     c->spec_span_hz = p->usable_hz;
@@ -233,6 +235,7 @@ static void do_hop(void) {
         .enbw_bins = psd.enbw_bins, .floor_bias = s.floor_bias,
         .passband_hz = p->passband_hz, .rssi_hz = c->rssi_hz, .search_hz = c->search_hz,
         .signal_snr_db = c->signal_snr_db, .centroid_ratio = s.centroid_ratio,
+        .avg_shift = c->avg_shift,
     };
     /* Mask the board's own spurs like the DC bins: excluded from the floor,
      * peak and centroid; RSSI fills them with the window mean. */
@@ -248,14 +251,14 @@ static void do_hop(void) {
     metrics_floor(&in, FLOOR_PERCENTILE, s.scratch, &fl);
     frame_channel_t out[PLAN_MAX_PER_LO];
     for (unsigned j = 0; j < hop->nch; j++) {
+        channel_state_t *st = &s.ch[hop->ch[j]];
         metrics_channel_t m;
-        metrics_channel(&in, &fl, hop->offset_hz[j], &m);
+        metrics_channel(&in, &fl, hop->offset_hz[j], &st->avg, &m);
         if (psd.saturated) m.flags |= CHF_SATURATED;
         for (unsigned k = 0; k < c->nspurs; k++) {
             float d = ((float)c->spurs_khz[k] - (float)hop->lo_khz) * 1000.0f - hop->offset_hz[j];
             if (fabsf(d) <= c->search_hz) m.flags |= CHF_SPUR;
         }
-        channel_state_t *st = &s.ch[hop->ch[j]];
         float lin = m.rssi;
         if (!st->init) { st->rssi_ema = lin; st->init = true; }
         else st->rssi_ema += c->ema_alpha * (lin - st->rssi_ema);
@@ -271,7 +274,8 @@ static void do_hop(void) {
             .peak_cdb = cdb(m.peak_db),
             .peak_off_hz = (int32_t)lrintf(m.peak_off_hz),
             .centroid_off_hz = (int32_t)lrintf(m.centroid_off_hz),
-            .obw_hz = (uint32_t)lrintf(m.obw_hz),
+            .obw_lo_khz = (int16_t)lrintf(m.obw_lo_off_hz / 1000.0f),
+            .obw_hi_khz = (int16_t)lrintf(m.obw_hi_off_hz / 1000.0f),
         };
     }
     float dc = (psd.dc_i * psd.dc_i + psd.dc_q * psd.dc_q) / (RADIO_FULL_SCALE * RADIO_FULL_SCALE);

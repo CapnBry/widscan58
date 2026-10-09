@@ -143,7 +143,7 @@ export class ChannelGrid implements View {
         ["floor", `${m.floor.toFixed(1)}`],
         ["clear", m.clearFloor === null ? "—" : m.clearFloor.toFixed(1)],
         ["centre", sig && !(m.flags & CHF.NO_CENTROID) ? `${this.app.displayOffsetKhz(m.centroidOffHz) >= 0 ? "+" : ""}${this.app.displayOffsetKhz(m.centroidOffHz).toFixed(0)} kHz` : "—"],
-        ["OBW", sig ? `${(this.app.displayOffsetKhz(m.obwHz) / 1000).toFixed(2)} MHz` : "—"],
+        ["OBW 99 %", sig && !(m.flags & CHF.NO_CENTROID) ? `${(this.app.displayOffsetKhz(m.obwHiHz - m.obwLoHz) / 1000).toFixed(2)} MHz` : "—"],
         ["rate", `${cs.rateHz.toFixed(0)} Hz`],
       ];
       tile.kv.replaceChildren(...rows.flatMap(([k, v]) => [el("span", {}, k), el("span", {}, v)]));

@@ -18,6 +18,8 @@ elseif(IDF_TARGET STREQUAL "esp32c5")
     list(APPEND sources "radio/c5/radio_c5.c" "radio/c5/recal_c5.c")
     set(target_dir "radio/c5")
     set(wrapped_chan_ana "phy_chip_set_chan_ana")
+    # Parts of channel setup a receiver does not need (radio_c5.c, radio_tune).
+    set(wrapped_extra "-Wl,--wrap=ets_delay_us" "-Wl,--wrap=phy_wifi_set_tx_gain_new")
 else()
     message(FATAL_ERROR "esp-rx5808: no radio backend for ${IDF_TARGET} yet")
 endif()
@@ -32,3 +34,6 @@ target_link_options(${COMPONENT_LIB} INTERFACE
     "-T${CMAKE_CURRENT_LIST_DIR}/${target_dir}/sram_guard.ld")
 # rx_recalibrate retunes inside the PHY's own channel setup (esp-sdr technique).
 target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=${wrapped_chan_ana}")
+if(wrapped_extra)
+    target_link_options(${COMPONENT_LIB} INTERFACE ${wrapped_extra})
+endif()

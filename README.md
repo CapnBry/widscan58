@@ -8,8 +8,8 @@ Web Serial dashboard shows it all live.
 
 Status: the **ESP32-S3** runs a scaled 2.4 GHz mock-up of Raceband (channels
 S1–S8, see [PLAN.md](PLAN.md) §2.2). The **ESP32-C5** (real 5.8 GHz Raceband)
-target runs on a Seeed XIAO ESP32-C5 and works with the web UI: ~6.6 ms/hop,
-about 36 rotations/s over R1–R8 (PLAN.md, Status, has the breakdown).
+target runs on a Seeed XIAO ESP32-C5 and works with the web UI: ~4.4 ms/hop,
+about 56 rotations/s over R1–R8 (PLAN.md, Status, has the breakdown).
 
 License: GPL-3.0-or-later (see [LICENSE](LICENSE)). Files derived from esp-sdr
 say so in their headers.
@@ -86,12 +86,14 @@ ESP32-C5, all 8 channels (4 pair LOs), 4096 samples at 80 MS/s, 4 × 1024-point 
 
 | FFT | Hop | Updates per channel |
 |---|---:|---:|
-| S16R (default) | ~6.6 ms (tune 1.1–1.3, capture 1.9, DSP 3.6) | ~36 /s |
-| S16 | ~8.1 ms | ~28 /s |
-| R2 / R4 (soft float, no FPU) | ~68 ms | ~3.7 /s |
+| S16R (default) | ~4.4 ms (tune 0.67, capture 0.12, DSP 3.6) | ~56 /s |
+| S16 | ~5.9 ms (DSP 5.2) | ~40 /s |
+| R4 / R2 (soft float, no FPU) | ~65 / ~67 ms | ~3.8 / ~3.7 /s |
+| S16R, `FFT 256` (4 × 256-point, 312.5 kHz bins) | ~1.8 ms (DSP 1.0) | ~131 /s |
+| S16, `FFT 256` | ~2.0 ms (DSP 1.3) | ~120 /s |
 
-Most of the C5's capture time is a fixed ~1.7 ms wait inside the PHY's capture
-routine (PLAN.md, Status).
+The tune includes the per-LO calibration cache restore (`RECALMODE CACHE`, the
+C5 default); DSP is most of the hop (PLAN.md, Status).
 
 ESP32-S3:
 

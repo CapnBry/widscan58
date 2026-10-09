@@ -55,7 +55,8 @@ void c5_recalibrate(unsigned mhz) {
 /* What a 5 GHz calibration changes in phy_param (found by diffing it across
  * calibrations at 5650/5909 MHz): the RX IQ correction (+222, written by
  * phy_set_rx_gain_cal_iq) and the two DC tables (+384, +912, written by
- * phy_set_rx_gain_cal_dc and read by phy_set_rx_gain_table). A few other
+ * phy_set_rx_gain_cal_dc and read by phy_set_rx_gain_table, which channel
+ * setup runs). A few other
  * bytes also change (+288, +714, +1024); restoring the three areas alone
  * matches a fresh calibration (PLAN.md, calibration on the C5). */
 static const struct { uint16_t off, len; } cal_areas[] = {{222, 14}, {384, 272}, {912, 56}};
@@ -80,8 +81,7 @@ bool c5_cal_restore(unsigned mhz) {
     if (!phy_param[42]) return false;
     for (unsigned j = 0; j < CAL_SLOTS; j++) {
         if (cal_cache[j].mhz != mhz) continue;
-        cal_copy(cal_cache[j].data, false);
-        phy_set_rx_gain_table(mhz, 0);
+        cal_copy(cal_cache[j].data, false); /* the channel setup that follows rebuilds the gain table */
         cal_cache[j].used = ++cal_clock;
         return true;
     }

@@ -111,6 +111,32 @@ void radio_force_recal(void) {
     c5_cal_clear();
 }
 
+/* Channel setup is ~1 ms; two parts of it do nothing for a receiver and are
+ * skipped while radio_tune runs it (linker --wrap, see CMakeLists.txt):
+ * - phy_set_rfpll_freq ends with a fixed 300 us wait. The PLL calibration is
+ *   restarted and checked again by phy_wait_rfpll_cal_end_new right after
+ *   (restart, 20 us, VCO code check, retried while out of range), so the
+ *   wait only delays that. Without it, spurs land within 4 kHz of their
+ *   frequency right after 50-350 MHz jumps (300 captures, none off; the
+ *   stock sequence had 2 off-frequency captures, raised-floor bursts).
+ * - phy_wifi_set_tx_gain_new (~85 us): the TX gain table.
+ * Spectra (floor, lines, DC) match the full sequence at 5677-5899 MHz;
+ * PLAN.md, tune time on the C5. */
+static volatile bool rx_tuning;
+extern void __real_ets_delay_us(uint32_t us);
+void __wrap_ets_delay_us(uint32_t us) {
+    if (rx_tuning && us == 300) return;
+    __real_ets_delay_us(us);
+}
+/* Prototype unknown; passes the argument registers through (RV32 ABI). */
+extern uint32_t __real_phy_wifi_set_tx_gain_new(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                                                uint32_t);
+uint32_t __wrap_phy_wifi_set_tx_gain_new(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5,
+                                         uint32_t a6, uint32_t a7) {
+    if (rx_tuning) return 0;
+    return __real_phy_wifi_set_tx_gain_new(a0, a1, a2, a3, a4, a5, a6, a7);
+}
+
 esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     if (lo_khz % 1000u || lo_khz < 100000u || lo_khz > 6000000u) return ESP_ERR_INVALID_ARG;
     unsigned mhz = lo_khz / 1000u;
@@ -128,7 +154,9 @@ esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     if (!full && lo_khz == tuned_lo_khz) return ESP_OK;
     if (full) last_full_tune = now;
     /* Bit 0 (channel setup) cannot be skipped here: it is the tune itself. */
+    rx_tuning = true;
     phy_set_chanfreq(mhz, CHANNEL_MODE);
+    rx_tuning = false;
     if (full || !(tune_skip & 2)) {
         phy_stop_tx_tone(1);
         phy_pbus_workmode();

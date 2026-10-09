@@ -26,7 +26,7 @@ endif()
 
 idf_component_register(SRCS ${sources}
     INCLUDE_DIRS ${includes}
-    REQUIRES esp_driver_usb_serial_jtag esp_wifi esp_phy esp_timer esp_hw_support
+    REQUIRES esp_app_format esp_driver_usb_serial_jtag esp_wifi esp_phy esp_timer esp_hw_support
              nvs_flash esp_rom espressif__esp-dsp)
 
 # The capture SRAM aperture must never hold static data (see sram_guard.ld).

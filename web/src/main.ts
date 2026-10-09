@@ -2,7 +2,14 @@
 import "./styles.css";
 import { App, type View } from "./model/app";
 import { Store } from "./model/store";
-import { Device, WebSerialTransport, WebSocketTransport, grantedEspressifPort, type Transport } from "./serial/device";
+import {
+  Device,
+  WebSerialTransport,
+  WebSocketTransport,
+  grantedEspressifPort,
+  requestEspressifPort,
+  type Transport,
+} from "./serial/device";
 import { Recorder, ReplayTransport } from "./serial/recorder";
 import { MockTransport } from "./mock/mockDevice";
 import { el, invalidateTheme } from "./util/canvas";
@@ -13,6 +20,7 @@ import { History } from "./views/history";
 import { Telemetry, Console } from "./views/debug";
 import { Controls } from "./views/controls";
 import { RawIqView } from "./views/rawiq";
+import { FlashDialog } from "./views/flashDialog";
 
 const store = new Store();
 const app = new App(store);
@@ -40,7 +48,9 @@ document.documentElement.dataset.theme = themeName;
 // ---- Header -----------------------------------------------------------------
 const dot = el("span", { class: "dot" });
 const connText = el("span", {}, "Disconnected");
-const connectBtn = el("button", { class: "primary" }, "Connect device"); // becomes Disconnect while connected
+const fwText = el("span", { class: "fw" }); // firmware version, and whether this page offers another
+const connectBtn = el("button", { class: "primary" }, "Connect"); // becomes Disconnect while connected
+const flashBtn = el("button", { title: "Install the scanner firmware on a board" }, "Flash device");
 const simBtn = el("button", {}, "Simulate");
 const replayInput = el("input", { type: "file", accept: ".rx5808", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
@@ -50,9 +60,10 @@ const header = el(
   "header",
   { class: "top" },
   el("span", { class: "brand" }, themeBtn, el("h1", {}, "RX5808 Scanner")),
-  el("span", { class: "conn-state" }, dot, connText),
+  el("span", { class: "conn-state" }, dot, connText, fwText),
   el("span", { class: "spacer" }),
   connectBtn,
+  flashBtn,
 );
 // Session sources other than a real device, shown in the protocol console.
 const sessionRow = el("div", { class: "session-row" }, simBtn, replayBtn, replayInput, recordBtn);
@@ -82,7 +93,7 @@ function setState(state: "off" | "ok" | "sim" | "err", text: string) {
   dot.className = `dot ${state === "off" ? "" : state}`;
   connText.textContent = text;
   const connected = state === "ok" || state === "sim";
-  connectBtn.textContent = connected ? "Disconnect" : "Connect device";
+  connectBtn.textContent = connected ? "Disconnect" : "Connect";
   connectBtn.classList.toggle("primary", !connected);
   simBtn.disabled = connected;
   replayBtn.disabled = connected;
@@ -103,6 +114,15 @@ function updateBanner() {
     );
   banner.replaceChildren(...parts);
   banner.style.display = parts.length ? "block" : "none";
+  updateFirmwareText();
+}
+
+// INFO is "RX5808 <target> <proto_ver> <fw_ver> <phy_ver>".
+let offeredFw: string | null = null;
+function updateFirmwareText() {
+  const fw = app.device?.transport instanceof WebSerialTransport ? store.info.split(" ")[3] : undefined;
+  const text = !fw ? "" : offeredFw && offeredFw !== fw ? `· firmware ${fw} (${offeredFw} available)` : `· firmware ${fw}`;
+  if (fwText.textContent !== text) fwText.textContent = text;
 }
 
 async function syncDevice(device: Device) {
@@ -117,6 +137,7 @@ async function syncDevice(device: Device) {
 
 async function connect(transport: Transport, readOnly = false) {
   const device = new Device(transport);
+  store.info = "";
   device.onItem((item) => {
     store.ingest(item);
     // The firmware announces READY after every boot; its settings are back
@@ -150,16 +171,17 @@ async function connect(transport: Transport, readOnly = false) {
   updateBanner();
 }
 
+async function disconnect() {
+  userDisconnected = true;
+  const d = app.device!;
+  app.device = null;
+  stopRecording();
+  await d.close();
+  setState("off", "Disconnected");
+}
+
 connectBtn.onclick = async () => {
-  if (app.device) {
-    userDisconnected = true;
-    const d = app.device;
-    app.device = null;
-    stopRecording();
-    await d.close();
-    setState("off", "Disconnected");
-    return;
-  }
+  if (app.device) return disconnect();
   if (!WebSerialTransport.supported()) {
     store.addLog("error", "Web Serial is not available: use Chrome, Edge or Opera over https or localhost.");
     setState("err", "Web Serial unsupported in this browser");
@@ -176,6 +198,47 @@ replayInput.onchange = async () => {
   void connect(new ReplayTransport(await f.arrayBuffer(), f.name), true);
   replayInput.value = "";
 };
+// ---- Flashing -------------------------------------------------------------------
+let flashing = false; // keeps auto-reconnect off the port meanwhile
+const flashDialog = new FlashDialog({
+  async takePort() {
+    const t = app.device?.transport;
+    if (t instanceof WebSerialTransport && t.currentPort) {
+      // Flash the connected board. Quiet its stream first, so the reset into
+      // download mode does not race it (tools/flash.sh does the same).
+      const port = t.currentPort;
+      await app.device!.command("SCAN STOP", 500).catch(() => {});
+      flashing = true;
+      await disconnect();
+      return port;
+    }
+    if (app.device) await disconnect(); // simulator or replay
+    const port = await requestEspressifPort();
+    flashing = true;
+    return port;
+  },
+  finished(ok) {
+    flashing = false;
+    if (!ok) return;
+    // The board re-enumerates after its reset; autoConnect also runs on that event.
+    userDisconnected = false;
+    setTimeout(() => void autoConnect(), 1500);
+  },
+});
+document.body.append(flashDialog.el);
+flashBtn.onclick = () => {
+  if (!WebSerialTransport.supported()) {
+    store.addLog("error", "Flashing needs Web Serial (Chrome, Edge or Opera on a computer) or WebUSB (Chrome on Android).");
+    setState("err", "Web Serial unsupported in this browser");
+    return;
+  }
+  flashDialog.open();
+};
+void flashDialog.offeredVersion().then((v) => {
+  offeredFw = v;
+  updateFirmwareText();
+});
+
 themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
 
 function stopRecording() {
@@ -204,7 +267,7 @@ recordBtn.onclick = () => {
 // (reset, reflash, replug).
 let userDisconnected = false;
 async function autoConnect() {
-  if (app.device || userDisconnected) return;
+  if (app.device || userDisconnected || flashing) return;
   const port = await grantedEspressifPort();
   if (port && !app.device) {
     store.addLog("info", "reconnecting to previously granted port");

@@ -14,6 +14,7 @@ firmware/managed_components/
 web/node_modules/
 web/dist/
 web/e2e-out/
+web/public/firmware/
 
 *.rx5808
 __pycache__/

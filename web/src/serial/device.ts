@@ -12,8 +12,9 @@ export interface Transport {
 
 const ESPRESSIF_VID = 0x303a;
 
-/** The parts of a Web Serial port used here; UsbCdcPort implements the same subset. */
-type Port = Pick<SerialPort, "readable" | "writable" | "open" | "close" | "getInfo">;
+/** The parts of a Web Serial port used here (setSignals by the flasher);
+ *  UsbCdcPort implements the same subset. */
+export type Port = Pick<SerialPort, "readable" | "writable" | "open" | "close" | "getInfo" | "setSignals">;
 
 /** Chrome on Android only offers wired serial ports on devices with Android's
  *  newer serial API (elsewhere just Bluetooth RFCOMM), so there the board's
@@ -22,7 +23,7 @@ function viaWebUsb(): boolean {
   return /Android/i.test(navigator.userAgent) && "usb" in navigator;
 }
 
-function requestEspressifPort(): Promise<Port> {
+export function requestEspressifPort(): Promise<Port> {
   if (viaWebUsb()) return requestUsbCdcPort(ESPRESSIF_VID);
   return navigator.serial.requestPort({ filters: [{ usbVendorId: ESPRESSIF_VID }] });
 }
@@ -36,6 +37,11 @@ export class WebSerialTransport implements Transport {
   /** port: a previously granted port (navigator.serial.getPorts()); otherwise
    *  open() shows the browser's port chooser. */
   constructor(private preset: Port | null = null) {}
+
+  /** The open port, for handing over to the flasher after close(). */
+  get currentPort(): Port | null {
+    return this.port;
+  }
 
   static supported(): boolean {
     return viaWebUsb() || "serial" in navigator;

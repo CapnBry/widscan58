@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "esp_app_desc.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -15,10 +16,6 @@
 #include "radio.h"
 #include "scanner.h"
 #include "psd.h"
-
-#ifndef FW_VERSION
-#define FW_VERSION "0.1.0-dev"
-#endif
 
 /* Multi-part replies are assembled here and queued as one item: the scanner
  * task queues frames concurrently, and a frame landing between the pieces of
@@ -113,7 +110,10 @@ static void handle(char *line) {
     char extra;
 
     if (!strcmp(line, "INFO")) {
-        link_printf("INFO RX5808 %s %d %s %s\n", radio_caps()->target, PROTO_VERSION, FW_VERSION, radio_phy_version());
+        /* fw_ver is PROJECT_VER (git describe, see firmware/CMakeLists.txt); the
+         * web UI compares it with the build it offers to flash. */
+        link_printf("INFO RX5808 %s %d %s %s\n", radio_caps()->target, PROTO_VERSION,
+                    esp_app_get_description()->version, radio_phy_version());
     } else if (!strcmp(line, "PROFILE?")) {
         send_profile(&c);
     } else if (sscanf(line, "PROFILE %31s %c", arg, &extra) == 1) {

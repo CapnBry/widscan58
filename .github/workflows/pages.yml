@@ -1,0 +1,88 @@
+# Build the firmware and the web UI, and publish both to GitHub Pages. The page
+# flashes the firmware it was deployed with (web/src/serial/flasher.ts), so the
+# binaries never go into git. GPL-3.0-or-later.
+#
+# One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; let a running one finish.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # PlatformIO envs to publish. The S3 is held back until its USB flashing is
+  # reliable; to add it, list it here and enable it in flasher.ts.
+  FW_ENVS: esp32c5 # esp32s3
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags, for git describe
+
+      - name: Firmware version
+        id: version
+        run: echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini', 'firmware/dependencies.lock') }}
+
+      - name: Build firmware
+        run: |
+          pip install platformio
+          for env in $FW_ENVS; do pio run -d firmware -e "$env"; done
+
+      - name: Stage firmware for the flasher
+        run: tools/pages_firmware.py --version "${{ steps.version.outputs.version }}" web/public/firmware $FW_ENVS
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/dist
+
+  deploy:
+    # Pull requests only check that everything builds.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

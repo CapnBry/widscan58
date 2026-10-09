@@ -91,6 +91,38 @@ header.top .spacer { flex: 1; }
 .dot.ok { background: var(--good); }
 .dot.sim { background: var(--warning); }
 .dot.err { background: var(--critical); }
+.conn-state .fw { color: var(--muted); }
+
+.flash-dialog {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.flash-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.flash-dialog h2 { font-size: 15px; margin: 0 0 8px; }
+.flash-dialog p { margin: 0 0 8px; color: var(--ink-2); }
+.flash-dialog ol { margin: 0 0 12px; padding-left: 20px; color: var(--ink-2); }
+.flash-dialog li { margin-bottom: 6px; }
+.flash-dialog li strong { color: var(--ink); }
+.flash-progress progress { width: 100%; accent-color: var(--accent); }
+.flash-status { min-height: 1.4em; margin: 4px 0 8px; color: var(--ink-2); }
+.flash-status.ok { color: var(--good); }
+.flash-status.err { color: var(--critical); }
+.flash-dialog summary { cursor: pointer; color: var(--muted); }
+.flash-log {
+  max-height: 180px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font: 11px/1.4 var(--mono);
+  white-space: pre-wrap;
+}
+.flash-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .banner {
   margin: 10px 16px 0;
   padding: 8px 12px;

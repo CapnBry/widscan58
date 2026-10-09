@@ -12,6 +12,7 @@ export class UsbCdcPort {
   readable: ReadableStream<Uint8Array> | null = null;
   writable: WritableStream<Uint8Array> | null = null;
   private controlIface = 0;
+  private lineState = 0; // bit 0 DTR, bit 1 RTS
 
   constructor(private device: USBDevice) {}
 
@@ -43,7 +44,7 @@ export class UsbCdcPort {
       await dev.claimInterface(data.interfaceNumber);
       this.controlIface = control.interfaceNumber;
       // DTR on, RTS off: the host is present, and no reset or boot-mode strap.
-      await this.setLineState(1);
+      await this.setSignals({ dataTerminalReady: true, requestToSend: false });
 
       const size = Math.min(Math.max(options.bufferSize ?? epIn.packetSize, epIn.packetSize), MAX_TRANSFER);
       this.readable = new ReadableStream<Uint8Array>({
@@ -75,16 +76,20 @@ export class UsbCdcPort {
   async close(): Promise<void> {
     this.readable = this.writable = null;
     if (!this.device.opened) return;
-    await this.setLineState(0).catch(() => {});
+    await this.setSignals({ dataTerminalReady: false, requestToSend: false }).catch(() => {});
     await this.device.close(); // also aborts a pending transferIn
   }
 
-  private setLineState(value: number) {
-    return this.device.controlTransferOut({
+  /** USB Serial/JTAG maps DTR/RTS onto the chip's boot strap and reset, which
+   *  esptool-js toggles to enter download mode. */
+  async setSignals(signals: SerialOutputSignals): Promise<void> {
+    if (signals.dataTerminalReady !== undefined) this.lineState = (this.lineState & ~1) | (signals.dataTerminalReady ? 1 : 0);
+    if (signals.requestToSend !== undefined) this.lineState = (this.lineState & ~2) | (signals.requestToSend ? 2 : 0);
+    await this.device.controlTransferOut({
       requestType: "class",
       recipient: "interface",
       request: SET_CONTROL_LINE_STATE,
-      value,
+      value: this.lineState,
       index: this.controlIface,
     });
   }

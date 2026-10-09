@@ -26,9 +26,9 @@ await page.evaluate(() => {
 // Worst cases per state: every channel quiet, or every channel showing a
 // signal with the longest readouts and badge combinations.
 const states = {
-  quiet: { flags: 0, peak: -80, peakOffHz: 0, centroidOffHz: 0, obwHz: 0 },
-  signal: { flags: 1 | 32, peak: -12.3, peakOffHz: -12345678, centroidOffHz: -12345678, obwHz: 12345678 },
-  "signal+clip": { flags: 1 | 2 | 32, peak: -12.3, peakOffHz: -12345678, centroidOffHz: -12345678, obwHz: 12345678 },
+  quiet: { flags: 0, peak: -80, peakOffHz: 0, centroidOffHz: 0, obwLoHz: 0, obwHiHz: 0 },
+  signal: { flags: 1 | 32, peak: -12.3, peakOffHz: -12345678, centroidOffHz: -12345678, obwLoHz: -12345000, obwHiHz: 12345000 },
+  "signal+clip": { flags: 1 | 2 | 32, peak: -12.3, peakOffHz: -12345678, centroidOffHz: -12345678, obwLoHz: -12345000, obwHiHz: 12345000 },
 };
 const measure = (state) =>
   page.evaluate(async (st) => {

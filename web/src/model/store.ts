@@ -55,11 +55,9 @@ export interface ChannelState {
   latest: ChannelMetrics | null;
   loKhz: number;
   updated: number; // performance.now() of the last metrics
-  rateHz: number; // measured update rate
   rssi: Series;
   ema: Series;
   floor: Series;
-  updates: number[]; // recent arrival times for rate estimation
 }
 
 export interface Segment {
@@ -74,8 +72,6 @@ export interface LogLine {
   dir: "rx" | "tx" | "info" | "error";
   text: string;
 }
-
-const RATE_WINDOW = 20;
 
 export class Store {
   version = 0;
@@ -119,11 +115,9 @@ export class Store {
         latest: null,
         loKhz: 0,
         updated: 0,
-        rateHz: 0,
         rssi: new Series(cap),
         ema: new Series(cap),
         floor: new Series(cap),
-        updates: [],
       }));
       this.segments.clear();
     }
@@ -195,10 +189,6 @@ export class Store {
       st.latest = c;
       st.loKhz = m.loKhz;
       st.updated = wall;
-      st.updates.push(wall);
-      if (st.updates.length > RATE_WINDOW) st.updates.shift();
-      if (st.updates.length > 1)
-        st.rateHz = ((st.updates.length - 1) * 1000) / (st.updates[st.updates.length - 1] - st.updates[0]);
       st.rssi.push(t, c.rssi);
       st.ema.push(t, c.rssiEma);
       st.floor.push(t, c.floor);

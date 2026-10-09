@@ -205,7 +205,7 @@ main {
 /* Metric readout: a fixed 3-row grid filled column by column (level metrics
  * left, signal shape right). Cells never wrap, so values appearing with a
  * signal don't change its height. */
-.readout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, auto); grid-auto-flow: column; gap: 2px 12px; font-size: 11px; color: var(--ink-2); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.readout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, auto); grid-auto-flow: column; gap: 2px 12px; font-size: 11px; color: var(--ink-2); margin-top: 6px; font-variant-numeric: tabular-nums; }
 .readout span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 520px) { .readout { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-flow: row; } }
 .tooltip {

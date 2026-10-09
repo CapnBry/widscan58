@@ -24,6 +24,7 @@ typedef struct {
      * sweeping the LO: fixed in RF, present at every LO. */
     const uint32_t *spurs_khz;
     uint8_t nspurs;
+    uint8_t recal_default; /* radio_recal_t the scanner starts with */
 } radio_caps_t;
 
 typedef enum { RADIO_GAIN_MANUAL, RADIO_GAIN_HARDWARE } radio_gain_mode_t;
@@ -31,6 +32,8 @@ typedef enum { RADIO_GAIN_MANUAL, RADIO_GAIN_HARDWARE } radio_gain_mode_t;
 typedef enum {
     RADIO_RECAL_EVERY_LO,   /* full DC/IQ/gain-table calibration whenever the LO changes */
     RADIO_RECAL_ONCE,       /* calibrate once at the band centre, then tune only */
+    RADIO_RECAL_CACHE,      /* calibrate each LO once, then restore its saved calibration (C5, 5 GHz);
+                             * elsewhere the same as EVERY_LO */
 } radio_recal_t;
 
 esp_err_t radio_init(void);

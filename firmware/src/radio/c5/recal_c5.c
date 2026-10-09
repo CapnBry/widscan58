@@ -9,6 +9,7 @@
  * analog channel setup redirects them to the measurement frequency only
  * during this synchronous call. */
 #include <stdint.h>
+#include <string.h>
 #include "soc/soc.h"
 #include "recal_c5.h"
 
@@ -50,3 +51,53 @@ void c5_recalibrate(unsigned mhz) {
     phy_set_rx_gain_table(mhz, 0);
     measurement_mhz = 0;
 }
+
+/* What a 5 GHz calibration changes in phy_param (found by diffing it across
+ * calibrations at 5650/5909 MHz): the RX IQ correction (+222, written by
+ * phy_set_rx_gain_cal_iq) and the two DC tables (+384, +912, written by
+ * phy_set_rx_gain_cal_dc and read by phy_set_rx_gain_table). A few other
+ * bytes also change (+288, +714, +1024); restoring the three areas alone
+ * matches a fresh calibration (PLAN.md, calibration on the C5). */
+static const struct { uint16_t off, len; } cal_areas[] = {{222, 14}, {384, 272}, {912, 56}};
+#define CAL_BYTES (14 + 272 + 56)
+#define CAL_SLOTS 16
+static struct {
+    uint16_t mhz; /* 0 = empty */
+    uint32_t used;
+    uint8_t data[CAL_BYTES];
+} cal_cache[CAL_SLOTS];
+static uint32_t cal_clock;
+
+static void cal_copy(uint8_t *data, bool save) {
+    for (unsigned j = 0, o = 0; j < sizeof(cal_areas) / sizeof(cal_areas[0]); o += cal_areas[j++].len) {
+        uint8_t *p = phy_param + cal_areas[j].off;
+        if (save) memcpy(data + o, p, cal_areas[j].len);
+        else memcpy(p, data + o, cal_areas[j].len);
+    }
+}
+
+bool c5_cal_restore(unsigned mhz) {
+    if (!phy_param[42]) return false;
+    for (unsigned j = 0; j < CAL_SLOTS; j++) {
+        if (cal_cache[j].mhz != mhz) continue;
+        cal_copy(cal_cache[j].data, false);
+        phy_set_rx_gain_table(mhz, 0);
+        cal_cache[j].used = ++cal_clock;
+        return true;
+    }
+    return false;
+}
+
+void c5_cal_save(unsigned mhz) {
+    if (!phy_param[42]) return;
+    unsigned victim = 0;
+    for (unsigned j = 0; j < CAL_SLOTS; j++) {
+        if (cal_cache[j].mhz == mhz || !cal_cache[j].mhz) { victim = j; break; }
+        if (cal_cache[j].used < cal_cache[victim].used) victim = j;
+    }
+    cal_cache[victim].mhz = (uint16_t)mhz;
+    cal_cache[victim].used = ++cal_clock;
+    cal_copy(cal_cache[victim].data, true);
+}
+
+void c5_cal_clear(void) { memset(cal_cache, 0, sizeof(cal_cache)); }

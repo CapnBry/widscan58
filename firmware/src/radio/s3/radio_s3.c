@@ -49,6 +49,7 @@ static radio_caps_t caps = {
     .filter_code_max = 63,
     .spurs_khz = s3_spurs_khz,
     .nspurs = sizeof(s3_spurs_khz) / sizeof(s3_spurs_khz[0]),
+    .recal_default = RADIO_RECAL_ONCE,
 };
 /* Measured on hardware: channel setup (bit 0) resets the RX gain to AGC, so a
  * full tune must re-apply it; the PLL offset alone retunes correctly to
@@ -100,7 +101,7 @@ void radio_force_recal(void) { calibrated_mhz = 0; }
 esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     unsigned mhz = lo_khz / 1000u;
     int offset_khz = (int)(lo_khz % 1000u);
-    unsigned cal_mhz = recal_mode == RADIO_RECAL_EVERY_LO ? mhz : recal_centre_khz / 1000u;
+    unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_centre_khz / 1000u : mhz; /* CACHE: as EVERY_LO */
     bool recalibrated = calibrated_mhz != cal_mhz;
     if (recalibrated) {
         s3_recalibrate(cal_mhz);

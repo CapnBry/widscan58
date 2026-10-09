@@ -218,7 +218,7 @@ export interface Status {
   gain: number;
   gain_max: number;
   rawiq_max?: number; // largest RAWIQ the link can carry in one frame
-  recal: "ONCE" | "EVERY";
+  recal: "ONCE" | "EVERY" | "CACHE";
   rssi_hz: number;
   search_hz: number;
   dc_guard: number;

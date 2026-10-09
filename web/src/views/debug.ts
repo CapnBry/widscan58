@@ -93,7 +93,7 @@ export class Telemetry implements View {
         "radio",
         tel.gain === 255 ? "AGC" : `G${tel.gain}`,
         "",
-        `filter ${tel.filter < 0 ? "auto" : tel.filter} · recal ${tel.recalMode ? "once" : "every LO"}`,
+        `filter ${tel.filter < 0 ? "auto" : tel.filter} · recal ${["every LO", "once", "per-LO cache"][tel.recalMode] ?? tel.recalMode}`,
       );
     }
     if (dev) {

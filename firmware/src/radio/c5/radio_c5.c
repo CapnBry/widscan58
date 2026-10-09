@@ -1,5 +1,5 @@
 /* ESP32-C5 snapshot receiver backend.
- * Capture (adctrig), RX path setup, gain and analog filter control derived
+ * Capture (the PHY I/Q dump engine), RX path setup, gain and analog filter control derived
  * from esp-sdr main/families/c5_c6_c61/receiver.c, main/targets/esp32c5/ and
  * main/common/burst_gain.h (https://github.com/ESPARGOS/esp-sdr),
  * GPL-3.0-or-later.
@@ -18,7 +18,7 @@
 #include "radio.h"
 #include "recal_c5.h"
 
-/* adctrig dumps into 0x40830000, but the SRAM ownership bit hands the modem
+/* The dump engine writes 0x40830000, but the SRAM ownership bit hands the modem
  * the whole 128 KiB bank. Keep it out of the heap; sram_guard.ld keeps it out
  * of static sections. */
 SOC_RESERVE_MEMORY_REGION(0x40820000, 0x40840000, rx5808_rf_dump);
@@ -33,7 +33,6 @@ SOC_RESERVE_MEMORY_REGION(0x40820000, 0x40840000, rx5808_rf_dump);
  * ~48..22 MHz); mode 0 covers 23..11 MHz. Raceband pair mode needs wide. */
 #define CHANNEL_MODE 1u
 
-extern void adctrig(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 extern void phy_set_chanfreq(unsigned mhz, unsigned mode);
 extern void phy_stop_tx_tone(unsigned);
 extern void phy_pbus_workmode(void);
@@ -59,6 +58,10 @@ static radio_caps_t caps = {
     .filter_code_max = 63,
     .spurs_khz = c5_spurs_khz,
     .nspurs = sizeof(c5_spurs_khz) / sizeof(c5_spurs_khz[0]),
+    /* Calibrated once at 5787 MHz, the DC offset grows to ~70 counts at the
+     * band edges and some LOs see bursts of raised floor; the cache costs
+     * ~0.2 ms/hop (PLAN.md, calibration on the C5). */
+    .recal_default = RADIO_RECAL_CACHE,
 };
 
 /* The S3 measured which parts of the tune sequence a hop can skip; on the C5
@@ -103,15 +106,21 @@ void radio_set_recal(radio_recal_t mode, uint32_t centre_khz) {
     calibrated_mhz = 0;
 }
 
-void radio_force_recal(void) { calibrated_mhz = 0; }
+void radio_force_recal(void) {
+    calibrated_mhz = 0;
+    c5_cal_clear();
+}
 
 esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     if (lo_khz % 1000u || lo_khz < 100000u || lo_khz > 6000000u) return ESP_ERR_INVALID_ARG;
     unsigned mhz = lo_khz / 1000u;
-    unsigned cal_mhz = recal_mode == RADIO_RECAL_EVERY_LO ? mhz : recal_centre_khz / 1000u;
+    unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_centre_khz / 1000u : mhz;
     bool recalibrated = calibrated_mhz != cal_mhz;
     if (recalibrated) {
-        c5_recalibrate(cal_mhz);
+        if (recal_mode != RADIO_RECAL_CACHE || !c5_cal_restore(cal_mhz)) {
+            c5_recalibrate(cal_mhz);
+            if (recal_mode == RADIO_RECAL_CACHE) c5_cal_save(cal_mhz);
+        }
         calibrated_mhz = cal_mhz;
     }
     int64_t now = esp_timer_get_time();
@@ -164,6 +173,35 @@ static void filter_restore(void) {
         for (unsigned j = 0; j < 2; j++) phy_i2c_writeReg(0x67, 1, 6 + j, filter_saved[j]);
 }
 
+/* The dump engine, driven directly: adctrig(n - 1, 0, 0, 2 * rate, 0, ...)
+ * (librftest mac_common.o, IDF 5.5.5) unrolled for selector 0 (raw source 15,
+ * software trigger, no tone). adctrig also clears bit 0 of 0x600a20b4, a
+ * register outside any clocked block here: each read or write of it stalls
+ * the bus ~840 us (it reads 0), which was 1.65 ms of every 1.79 ms capture.
+ * Without it the trigger-to-done wait is ~52 us for 4096 samples. */
+#define DUMP_CTRL_REG 0x600a9004u /* [16:0] length, 17, 18 done, 19 trigger, [21:20], 31 enable */
+#define DUMP_CONF_REG 0x600a9008u /* [20:17] source, [23:21] rate code */
+#define DUMP_PACK_REG 0x600a9018u /* four 6-bit lane selectors, 24 enable */
+static bool dump_capture(unsigned n, unsigned rate_code) {
+    REG_WRITE(DUMP_CONF_REG, (REG_READ(DUMP_CONF_REG) & ~(7u << 21)) | ((rate_code & 7u) << 21));
+    REG_WRITE(0x600a9c04u, 0xffffffffu);
+    REG_SET_BIT(0x600a0800u, 4u);
+    REG_WRITE(DUMP_CTRL_REG, (REG_READ(DUMP_CTRL_REG) & ~0x3ffffu) | n);
+    REG_WRITE(DUMP_PACK_REG, (REG_READ(DUMP_PACK_REG) & ~0xffffffu) | (27u << 18) | (26u << 12) | (25u << 6) | 24u);
+    REG_SET_BIT(DUMP_PACK_REG, 1u << 24);
+    REG_WRITE(SRAM_OWNER_REG, (REG_READ(SRAM_OWNER_REG) & ~(15u << 8)) | (2u << 8) | (1u << 16));
+    REG_CLR_BIT(DUMP_CTRL_REG, 3u << 20);
+    REG_SET_BIT(DUMP_CONF_REG, 15u << 17);
+    REG_SET_BIT(DUMP_CTRL_REG, 1u << 31);
+    REG_SET_BIT(DUMP_CTRL_REG, 1u << 19);
+    REG_CLR_BIT(DUMP_CTRL_REG, 1u << 19);
+    int64_t start = esp_timer_get_time();
+    while (!(REG_READ(DUMP_CTRL_REG) & (1u << 18)) && esp_timer_get_time() - start < 20000) {}
+    bool done = (REG_READ(DUMP_CTRL_REG) & (1u << 18)) != 0;
+    REG_CLR_BIT(DUMP_CTRL_REG, 1u << 31);
+    return done;
+}
+
 esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, uint32_t *elapsed_us) {
     if (n < 16 || n > IQ_WORDS || rate_code >= RADIO_MAX_RATES) return ESP_ERR_INVALID_ARG;
     for (unsigned j = 0; j < n; j++) IQ_BUFFER[j] = FILL_WORD;
@@ -171,13 +209,13 @@ esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, 
     filter_apply();
     uint32_t owner = REG_READ(SRAM_OWNER_REG);
     int64_t start = esp_timer_get_time();
-    /* Stock cert-test trigger: selector 0 is raw source 15 with a software
-     * pulse. esp-sdr: do NOT set CTRL bit 17 as on the C61; on the C5 that
-     * gave a short, incomplete snapshot. adctrig blocks until done. */
-    adctrig(n - 1, 0, 0, rate_code * 2u, 0, 0, 0, 0, 0);
+    /* esp-sdr: do NOT set CTRL bit 17 as on the C61; on the C5 that gave a
+     * short, incomplete snapshot. */
+    bool done = dump_capture(n, rate_code);
     uint32_t elapsed = (uint32_t)(esp_timer_get_time() - start);
     REG_WRITE(SRAM_OWNER_REG, owner);
     filter_restore();
+    if (!done) return ESP_ERR_TIMEOUT;
     /* An unwritten fill word means the dump stopped early; a changed guard
      * word means it ran past n. */
     if (IQ_BUFFER[n - 1] == FILL_WORD || IQ_BUFFER[n / 2] == FILL_WORD || IQ_BUFFER[0] == FILL_WORD)

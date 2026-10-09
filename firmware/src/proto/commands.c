@@ -79,7 +79,7 @@ static void send_status(void) {
               c.profile->name, c.running, c.enabled, c.mode == PLAN_PAIR ? "PAIR" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.settle_us,
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, rawiq_max(),
-              c.recal == RADIO_RECAL_ONCE ? "ONCE" : "EVERY", c.rssi_hz, c.search_hz, c.dc_guard,
+              c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY", c.rssi_hz, c.search_hz, c.dc_guard,
               (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type));
     for (unsigned j = 0; j < plan.nhops; j++) {
@@ -185,8 +185,8 @@ static void handle(char *line) {
         c.conjugate = a;
         scanner_set_config(&c);
         link_text("OK\n");
-    } else if (!strcmp(line, "RECALMODE ONCE") || !strcmp(line, "RECALMODE EVERY")) {
-        c.recal = line[10] == 'O' ? RADIO_RECAL_ONCE : RADIO_RECAL_EVERY_LO;
+    } else if (!strcmp(line, "RECALMODE ONCE") || !strcmp(line, "RECALMODE EVERY") || !strcmp(line, "RECALMODE CACHE")) {
+        c.recal = line[10] == 'O' ? RADIO_RECAL_ONCE : line[10] == 'C' ? RADIO_RECAL_CACHE : RADIO_RECAL_EVERY_LO;
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (!strcmp(line, "RECAL")) {

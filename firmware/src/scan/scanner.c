@@ -71,12 +71,12 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->settle_us = 100;
     c->gain_mode = RADIO_GAIN_MANUAL;
     c->gain = 60;
-    c->recal = RADIO_RECAL_ONCE;
     c->rssi_hz = p->rssi_hz;
     c->search_hz = p->search_hz;
     c->dc_guard = 1;
     c->spur_guard_hz = 60000;
     const radio_caps_t *rc = radio_caps();
+    c->recal = (radio_recal_t)rc->recal_default;
     c->nspurs = rc->nspurs > 16 ? 16 : rc->nspurs;
     for (unsigned j = 0; j < c->nspurs; j++) c->spurs_khz[j] = rc->spurs_khz[j];
     c->ema_alpha = 0.25f;

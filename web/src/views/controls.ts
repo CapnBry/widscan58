@@ -140,7 +140,7 @@ export class Controls implements View {
     recal.onclick = () => void this.apply("RECAL");
     this.ctl(
       "RX calibration · settle µs after tune",
-      this.seg([["ONCE", "Once"], ["EVERY", "Every LO"]], (v) => void this.apply(`RECALMODE ${v}`), (st) => st.recal),
+      this.seg([["CACHE", "Cache"], ["ONCE", "Once"], ["EVERY", "Every LO"]], (v) => void this.apply(`RECALMODE ${v}`), (st) => st.recal),
       recal,
       settle,
     );

@@ -621,7 +621,10 @@ Bring-up on hardware (XIAO ESP32-C5, 2026-10-08):
 
 Next steps, in order:
 1. ~~**Capture latency**~~ (done 2026-10-08: 1.79 → 0.13 ms per capture, see "Capture latency on the C5" above).
-2. **DSP**, if still needed: merge FFT stage 1 into the windowing pass, and special-case the twiddle-free butterflies (j = 0); worth ~0.2–0.3 ms. A 512-point FFT (`FFT 512`) roughly halves the FFT, at 156 kHz bins.
+2. ~~**DSP**: merge FFT stage 1 into the windowing pass, and special-case the twiddle-free butterflies (j = 0)~~ (tried 2026-10-08, not kept: together they saved ~50 µs of a 4.9 ms hop, not the ~0.2–0.3 ms estimated).
+   - Merging stage 1 into the windowing pass (bit-exact on the host at 64–1024 points) moved its cost instead of removing it: FFT 1935 → 1576 µs, but prep 881 → 1185 µs, and the same with the merged loop in IRAM. Stage 1's cost is its arithmetic, not the extra pass over memory.
+   - Exact j = 0 butterflies (no multiplies, ties to even): FFT 1935 → ~1915 µs; host bias at 1024 points 0.0042 → 0.0029 LSB; `FFTEVAL` vs R4 unchanged (+0.002 dB, 0.080 dB rms).
+   - The kernel is near its limit for scalar code: ~90 cycles per radix-4 butterfly at 240 MHz (12 multiplies plus loads/stores). Real savings would come from doing less work: `FFT 512` (roughly halves the FFT, 156 kHz bins) or fewer Welch segments (`SEGMENTS`), or from the 1.2 ms tune (`phy_set_chanfreq`).
 3. ~~**Calibration.**~~ (done 2026-10-08: per-LO calibration cache, now the C5 default; see "Calibration on the C5" above). Image level is still unmeasured: it needs a test signal.
 4. **RF characterisation** (Phase 0-C5 step 2): ~~board spurs by LO sweep~~, ~~the real width of filter code 0~~ and ~~whether R8 (5917 MHz, above esp-sdr's validated 5150–5895 MHz) is usable~~ (done 2026-10-08, see "Analog filter and R8 on the C5" above). Still open: alias rejection (R3 seen from LO 5677 at −24 MHz), which needs a strong signal 40–80 MHz from the LO (a VTX).
 5. **Profile.** Finalise `c5-race` (pair vs. single mode, filter code, windows), then run the Phase 1 acceptance criteria with real VTXs.

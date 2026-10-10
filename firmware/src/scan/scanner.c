@@ -37,6 +37,7 @@ static struct {
     plan_t plan;
     unsigned hop;
     channel_state_t ch[PROFILE_MAX_CHANNELS];
+    psd_iq_t iq[PROFILE_MAX_CHANNELS]; /* per plan hop (one LO each) */
     float floor_bias;
     float centroid_ratio;
     uint32_t *scratch;
@@ -71,6 +72,7 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->rate_code = p->rate_code;
     c->filter = p->filter_code;
     c->conjugate = p->iq_conjugate;
+    c->iq_corr = true;
     c->settle_us = 100;
     c->gain_mode = RADIO_GAIN_MANUAL;
     c->gain = 60;
@@ -132,6 +134,7 @@ static void apply_config(void) {
     dirty = false;
     xSemaphoreGive(lock);
     if (measure_changed) memset(s.ch, 0, sizeof(s.ch));
+    memset(s.iq, 0, sizeof(s.iq)); /* the plan, gain or calibration may have changed */
     if (s.hop >= s.plan.nhops) s.hop = 0;
     psd_set_fft((psd_fft_t)s.cfg.fft_type);
     psd_release_unused();
@@ -225,7 +228,7 @@ static void do_hop(void) {
     const float rate = radio_caps()->rates_hz[c->rate_code];
     psd_result_t psd;
     esp_err_t err = psd_compute(words, c->capture_samples, c->nfft, c->segments, rate, c->conjugate,
-                                p->usable_hz, c->dc_guard, &psd);
+                                p->usable_hz, c->dc_guard, c->iq_corr ? &s.iq[s.hop] : NULL, &psd);
     if (err != ESP_OK) {
         s.capture_errors++;
         /* Say so once per configuration; otherwise the scanner just goes quiet. */
@@ -457,6 +460,7 @@ static void scanner_task(void *arg) {
             else if (req.type == SCAN_REQ_FFTEVAL_SYNTH || req.type == SCAN_REQ_FFTEVAL_LIVE) do_fft_eval(&req);
             else if (req.type == SCAN_REQ_RECAL) {
                 radio_force_recal();
+                memset(s.iq, 0, sizeof(s.iq));
                 link_text("OK RECAL\n");
             }
         }

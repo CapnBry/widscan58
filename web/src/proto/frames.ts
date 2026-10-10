@@ -217,6 +217,7 @@ export interface Status {
   rate_code: number;
   filter: number;
   conjugate: number;
+  iq_corr: number;
   settle_us: number;
   gain_mode: "MANUAL" | "HARDWARE";
   gain: number;

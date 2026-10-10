@@ -158,6 +158,7 @@ export class MockTransport implements Transport {
             rate_code: 1,
             filter: 60,
             conjugate: 1,
+            iq_corr: 1,
             settle_us: 100,
             gain_mode: this.gainManual ? "MANUAL" : "HARDWARE",
             gain: this.gain,
@@ -236,7 +237,7 @@ export class MockTransport implements Transport {
         return this.text(`SPURS ${p.spursKhz.length} ${p.spursKhz.join(" ")} guard 60000\n`);
       case line === "RECAL":
         return this.text("OK RECAL\n");
-      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "RECALMODE", "WIN", "SPURS", "TUNESKIP", "AVG", "PROMISC", "REBOOT", "BOOTLOADER"].includes(parts[0]):
+      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "WIN", "SPURS", "TUNESKIP", "AVG", "PROMISC", "REBOOT", "BOOTLOADER"].includes(parts[0]):
         return ok();
       case parts[0] === "SYNC":
         return this.text(`SYNC ${parts[1]}\n`);

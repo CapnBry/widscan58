@@ -9,8 +9,8 @@ Web Serial dashboard shows it all live.
 
 Status: the **ESP32-S3** runs a scaled 2.4 GHz mock-up of the 5.8 GHz band (see
 [PLAN.md](PLAN.md) §2.2). The **ESP32-C5** (real 5.8 GHz Raceband)
-target runs on a Seeed XIAO ESP32-C5 and works with the web UI: ~4.4 ms/hop,
-about 56 rotations/s over R1–R8 (PLAN.md, Status, has the breakdown).
+target runs on a Seeed XIAO ESP32-C5 and works with the web UI: ~4.75 ms/hop,
+about 53 rotations/s over R1–R8 (PLAN.md, Status, has the breakdown).
 
 License: GPL-3.0-or-later (see [LICENSE](LICENSE)). Files derived from esp-sdr
 say so in their headers.
@@ -86,14 +86,16 @@ ESP32-C5, all 8 channels (4 pair LOs), 4096 samples at 80 MS/s, 4 × 1024-point 
 
 | FFT | Hop | Updates per channel |
 |---|---:|---:|
-| S16R (default) | ~4.4 ms (tune 0.67, capture 0.12, DSP 3.6) | ~56 /s |
-| S16 | ~5.9 ms (DSP 5.2) | ~40 /s |
+| S16R (default) | ~4.75 ms (tune 0.70, capture 0.12, DSP 3.9) | ~53 /s |
+| S16 | ~6.4 ms (DSP 5.6) | ~39 /s |
 | R4 / R2 (soft float, no FPU) | ~65 / ~67 ms | ~3.8 / ~3.7 /s |
-| S16R, `FFT 256` (4 × 256-point, 312.5 kHz bins) | ~1.8 ms (DSP 1.0) | ~131 /s |
-| S16, `FFT 256` | ~2.0 ms (DSP 1.3) | ~120 /s |
+| S16R, `FFT 256` (4 × 256-point, 312.5 kHz bins) | ~2.1 ms (DSP 1.2) | ~122 /s |
+| S16, `FFT 256` | ~2.35 ms (DSP 1.6) | ~106 /s |
 
 The tune includes the per-LO calibration cache restore (`RECALMODE CACHE`, the
-C5 default); DSP is most of the hop (PLAN.md, Status).
+C5 default); DSP is most of the hop (PLAN.md, Status). The DSP includes the
+digital IQ correction (`IQCORR`, on by default): ~0.17 ms per hop at 1024
+points, ~0.07 ms at 256. The R4/R2 rows predate it.
 
 ESP32-S3:
 
@@ -123,6 +125,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
 | `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as one frame. At most `rawiq_max` samples: 16380 on the S3, 9180 on the C5 (smaller link queue). The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
+| `IQCORR 0\|1` | Digital IQ imbalance correction before the FFT (default 1). Removes the mirror image of strong signals, e.g. R1 showing on R2 in pair mode. |
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, centre and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `REBOOT` | Restart (USB stays connected; the UI re-syncs on `READY`) |

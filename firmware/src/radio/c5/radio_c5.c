@@ -8,7 +8,9 @@
  * receiver, but the hop-time shortcuts the S3 backend uses (PLL-only retune,
  * calibrate once per band) are unmeasured here, so every LO change runs the
  * PHY's full channel setup. */
+#include <sys/lock.h>
 #include "esp_phy_init.h"
+#include "esp_private/phy.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -137,8 +139,26 @@ uint32_t __wrap_phy_wifi_set_tx_gain_new(uint32_t a0, uint32_t a1, uint32_t a2, 
     return __real_phy_wifi_set_tx_gain_new(a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
+/* Under the PHY lock: PHY tracking (an esp_timer callback every second) takes
+ * it, and its calibration interleaved with ours hung the scanner within
+ * seconds (PLAN.md, PHY tracking on the C5). */
+static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us);
 esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     if (lo_khz % 1000u || lo_khz < 100000u || lo_khz > 6000000u) return ESP_ERR_INVALID_ARG;
+    _lock_t lock = phy_get_lock();
+    _lock_acquire(&lock);
+    esp_err_t err = tune_locked(lo_khz, settle_us);
+    _lock_release(&lock);
+    return err;
+}
+
+static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us) {
+    /* Tracking recalibrated at its reference channels: our tables, cached
+     * ones included, are stale (they also predate a temperature change). */
+    if (c5_cal_replaced()) {
+        calibrated_mhz = 0;
+        c5_cal_clear();
+    }
     unsigned mhz = lo_khz / 1000u;
     unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_centre_khz / 1000u : mhz;
     bool recalibrated = calibrated_mhz != cal_mhz;

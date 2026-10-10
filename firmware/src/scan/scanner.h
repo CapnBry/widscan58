@@ -20,6 +20,7 @@ typedef struct {
     uint8_t rate_code;
     int8_t filter;
     bool conjugate;
+    bool iq_corr;            /* digital IQ imbalance correction (psd_iq_t) */
     uint32_t settle_us;
     radio_gain_mode_t gain_mode;
     uint8_t gain;

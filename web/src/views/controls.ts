@@ -166,6 +166,10 @@ export class Controls implements View {
       "Spectrum orientation",
       this.seg([["1", "Conjugate (default)"], ["0", "Raw"]], (v) => void this.apply(`CONJ ${v}`), (st) => String(st.conjugate)),
     );
+    this.ctl(
+      "Digital IQ correction (removes mirror images, e.g. R1 on R2 in pair mode)",
+      this.seg([["1", "On"], ["0", "Off"]], (v) => void this.apply(`IQCORR ${v}`), (st) => String(st.iq_corr)),
+    );
     // Display range (UI only)
     const dmin = this.num(-160, 0, 5, 64);
     const dmax = this.num(-160, 0, 5, 64);

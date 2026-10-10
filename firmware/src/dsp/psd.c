@@ -181,14 +181,19 @@ static void window_setup(unsigned n, bool natural) {
     }
 }
 
-/* S16 pass 2: remove the mean, Q15 window, optional conjugate, and store at
- * the FFT's input position. Specialised per (natural, conj) by the callers. */
+/* S16 pass 2: remove the mean, IQ correction (Q14 c1, c2: q' = c1 q + c2 i;
+ * 1, 0 is exact), Q15 window, optional conjugate, and store at the FFT's
+ * input position. Specialised per (natural, conj) by the callers. */
 static inline __attribute__((always_inline)) void window_s16(const uint32_t *seg, unsigned n, int shift,
-                                                             int32_t m_i, int32_t m_q, bool natural, bool conj) {
+                                                             int32_t m_i, int32_t m_q, int32_t c1, int32_t c2,
+                                                             bool natural, bool conj) {
     for (unsigned j = 0; j < n; j++) {
         int32_t w = window16[j];
-        int32_t vi = (((radio_word_i(seg[j]) << shift) - m_i) * w + 16384) >> 15;
-        int32_t vq = (((radio_word_q(seg[j]) << shift) - m_q) * w + 16384) >> 15;
+        int32_t ci = (radio_word_i(seg[j]) << shift) - m_i;
+        int32_t cq = (radio_word_q(seg[j]) << shift) - m_q;
+        cq = (cq * c1 + ci * c2 + 8192) >> 14;
+        int32_t vi = (ci * w + 16384) >> 15;
+        int32_t vq = (cq * w + 16384) >> 15;
         int16_t *at = work16 + 2 * (natural ? dest[j] : j);
         at[0] = (int16_t)vi;
         at[1] = (int16_t)(conj ? -vq : vq);
@@ -206,9 +211,25 @@ static inline void accf_add(unsigned k, float v) {
     memcpy(&acc[k], &f, sizeof(f));
 }
 
+/* Correction from the averaged moments: q' = c1 q + c2 i has q's power equal
+ * to i's and no correlation with it. Implausible estimates (no signal at all,
+ * or far beyond any real imbalance) leave the samples as they are. */
+static void iq_coefficients(const psd_iq_t *iq, float *c1, float *c2) {
+    *c1 = 1.0f;
+    *c2 = 0.0f;
+    if (!iq || !(iq->ii > 0.0f) || !(iq->qq > 0.0f)) return;
+    float ratio = sqrtf(iq->qq / iq->ii);     /* Q gain relative to I */
+    float rho = iq->iq / sqrtf(iq->ii * iq->qq); /* sin(phase error) */
+    if (ratio < 0.7f || ratio > 1.4f || fabsf(rho) > 0.3f) return;
+    float s = sqrtf(1.0f - rho * rho);
+    *c1 = 1.0f / (ratio * s);
+    *c2 = -rho / s;
+}
+#define IQ_AVG 0.0625f /* per segment: ~4 captures of 4 segments */
+
 esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned max_segments,
                       float rate_hz, bool conjugate, float usable_hz, unsigned dc_guard,
-                      psd_result_t *out) {
+                      psd_iq_t *iq, psd_result_t *out) {
     if (nfft < 64 || nfft > PSD_MAX_FFT || (nfft & (nfft - 1))) return ESP_ERR_INVALID_ARG;
     unsigned segments = n / nfft;
     if (segments > max_segments) segments = max_segments;
@@ -240,24 +261,61 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
          * 511, map to 511, so one compare finds them. The S16 shift bound
          * below has room for the 1 it can under-read. */
         int32_t si = 0, sq = 0, peak = 0;
-        for (unsigned j = 0; j < nfft; j++) {
-            int32_t i = radio_word_i(seg[j]), q = radio_word_q(seg[j]);
-            si += i;
-            sq += q;
-            int32_t ai = i ^ (i >> 31), aq = q ^ (q >> 31);
-            int32_t m = ai > aq ? ai : aq;
-            saturated += m >= 511;
-            if (m > peak) peak = m;
+        int64_t sii = 0, sqq = 0, siq = 0;
+        if (iq) {
+            /* Products of 10-bit values: 2^18 each, so a segment's sums fit 2^29. */
+            int32_t pii = 0, pqq = 0, piq = 0;
+            for (unsigned j = 0; j < nfft; j++) {
+                int32_t i = radio_word_i(seg[j]), q = radio_word_q(seg[j]);
+                si += i;
+                sq += q;
+                pii += i * i;
+                pqq += q * q;
+                piq += i * q;
+                int32_t ai = i ^ (i >> 31), aq = q ^ (q >> 31);
+                int32_t m = ai > aq ? ai : aq;
+                saturated += m >= 511;
+                if (m > peak) peak = m;
+            }
+            sii = pii;
+            sqq = pqq;
+            siq = piq;
+        } else {
+            for (unsigned j = 0; j < nfft; j++) {
+                int32_t i = radio_word_i(seg[j]), q = radio_word_q(seg[j]);
+                si += i;
+                sq += q;
+                int32_t ai = i ^ (i >> 31), aq = q ^ (q >> 31);
+                int32_t m = ai > aq ? ai : aq;
+                saturated += m >= 511;
+                if (m > peak) peak = m;
+            }
         }
         float mi = (float)si / nfft, mq = (float)sq / nfft;
         dci += mi;
         dcq += mq;
+        float c1 = 1.0f, c2 = 0.0f;
+        if (iq) {
+            float ii = (float)sii / nfft - mi * mi, qq = (float)sqq / nfft - mq * mq, iqm = (float)siq / nfft - mi * mq;
+            if (!iq->init) {
+                iq->ii = ii;
+                iq->qq = qq;
+                iq->iq = iqm;
+                iq->init = true;
+            } else {
+                iq->ii += IQ_AVG * (ii - iq->ii);
+                iq->qq += IQ_AVG * (qq - iq->qq);
+                iq->iq += IQ_AVG * (iqm - iq->iq);
+            }
+            iq_coefficients(iq, &c1, &c2);
+        }
         /* Pass 2: remove the mean (DC/LO leakage), window, optional conjugate. */
         unsigned power_shift = 0;
         if (is_s16(type)) {
-            /* |v - mean| <= peak + |mean|; keep that below 2^14 after the shift.
+            /* |v - mean| <= peak + |mean|, and the IQ correction can grow Q by
+             * up to |c1| + |c2|; keep that below 2^14 after the shift.
              * Windowed values then stay within int16 without clamping. */
-            int32_t bound = peak + (int32_t)ceilf(fmaxf(fabsf(mi), fabsf(mq)));
+            int32_t bound = (int32_t)ceilf((peak + fmaxf(fabsf(mi), fabsf(mq))) * fmaxf(1.0f, fabsf(c1) + fabsf(c2)));
             int shift = 0;
             while (shift < S16_MAX_SHIFT && (bound << (shift + 1)) <= 16383) shift++;
             int e = 2 * (S16_MAX_SHIFT - shift) + (int)headroom;
@@ -268,18 +326,20 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
             }
             power_shift = (unsigned)(acc_exp - 2 * (S16_MAX_SHIFT - shift));
             const int32_t m_i = (int32_t)lrintf(ldexpf(mi, shift)), m_q = (int32_t)lrintf(ldexpf(mq, shift));
+            const int32_t k1 = (int32_t)lrintf(c1 * 16384.0f), k2 = (int32_t)lrintf(c2 * 16384.0f);
             if (natural) {
-                if (conjugate) window_s16(seg, nfft, shift, m_i, m_q, true, true);
-                else window_s16(seg, nfft, shift, m_i, m_q, true, false);
+                if (conjugate) window_s16(seg, nfft, shift, m_i, m_q, k1, k2, true, true);
+                else window_s16(seg, nfft, shift, m_i, m_q, k1, k2, true, false);
             } else {
-                if (conjugate) window_s16(seg, nfft, shift, m_i, m_q, false, true);
-                else window_s16(seg, nfft, shift, m_i, m_q, false, false);
+                if (conjugate) window_s16(seg, nfft, shift, m_i, m_q, k1, k2, false, true);
+                else window_s16(seg, nfft, shift, m_i, m_q, k1, k2, false, false);
             }
         } else {
             for (unsigned j = 0; j < nfft; j++) {
                 float w = window[j];
-                work[2 * j] = (radio_word_i(seg[j]) - mi) * w;
-                work[2 * j + 1] = qsign * (radio_word_q(seg[j]) - mq) * w;
+                float ci = radio_word_i(seg[j]) - mi, cq = radio_word_q(seg[j]) - mq;
+                work[2 * j] = ci * w;
+                work[2 * j + 1] = qsign * (c1 * cq + c2 * ci) * w;
             }
         }
         t2 = esp_timer_get_time(); t_prep += t2 - t; t = t2;

@@ -79,7 +79,7 @@ void fft_eval_run(const uint32_t *words, unsigned n, unsigned nfft, unsigned seg
         psd_release_unused(); /* one type's tables at a time: the C5 has no room for all */
         psd_result_t r;
         int64_t t0 = esp_timer_get_time();
-        esp_err_t err = psd_compute(words, n, nfft, segments, rate_hz, false, usable_hz, DC_GUARD, &r);
+        esp_err_t err = psd_compute(words, n, nfft, segments, rate_hz, false, usable_hz, DC_GUARD, NULL, &r);
         uint32_t psd_us = (uint32_t)(esp_timer_get_time() - t0);
         fft_eval_result_t *o = &results[t];
         memset(o, 0, sizeof(*o));

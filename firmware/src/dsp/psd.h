@@ -42,10 +42,22 @@ typedef struct {
  * buffer in its first PSD_REGION_BYTES; the rest is free for others. */
 #define PSD_REGION_BYTES (28 * 1024)
 
+/* Digital IQ imbalance correction, one state per LO. The I/Q gain ratio and
+ * correlation are averaged over segments (each segment's mean removed) and Q
+ * is rebuilt orthogonal to I with I's power before the FFT. Valid for proper
+ * (circular) signals, which noise, FM video and pairs of independent signals
+ * all are. The PHY's own IQ calibration leaves ~20-40 dB of image rejection;
+ * this gave 55-58 dB on the C5 (PLAN.md, image rejection). */
+typedef struct {
+    float ii, qq, iq; /* averaged centred moments, counts^2 */
+    bool init;
+} psd_iq_t;
+
 esp_err_t psd_init(void);
 /* words: packed I/Q (radio.h). Uses floor(n/nfft) non-overlapping Hann
  * segments (at most max_segments). Each segment has its mean removed.
- * Bins within +/-dc_guard of the LO and beyond +/-usable_hz are marked invalid. */
+ * Bins within +/-dc_guard of the LO and beyond +/-usable_hz are marked invalid.
+ * iq: IQ correction state for this LO, updated and applied; NULL = off. */
 esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned max_segments,
                       float rate_hz, bool conjugate, float usable_hz, unsigned dc_guard,
-                      psd_result_t *out);
+                      psd_iq_t *iq, psd_result_t *out);

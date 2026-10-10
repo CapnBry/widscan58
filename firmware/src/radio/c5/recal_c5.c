@@ -15,7 +15,7 @@
 
 extern unsigned char phy_param[];
 extern void __real_phy_chip_set_chan_ana(unsigned);
-extern void phy_set_rx_gain_cal_dc(unsigned, unsigned, void *, void *);
+extern void phy_set_rx_gain_cal_dc(unsigned, unsigned, void *, void *); /* linked to the wrapper below */
 extern void phy_set_rx_gain_cal_iq(unsigned, unsigned, void *, unsigned, unsigned, unsigned);
 extern void phy_adc_rate_cal_rxdc(void);
 extern void phy_set_rx_gain_table(unsigned, unsigned);
@@ -26,6 +26,27 @@ static unsigned measurement_mhz;
 
 void __wrap_phy_chip_set_chan_ana(unsigned mhz) {
     __real_phy_chip_set_chan_ana(measurement_mhz ? measurement_mhz : mhz);
+}
+
+/* Counts DC measurements made by anyone but c5_recalibrate. PHY tracking
+ * (phy_param_track_tot, every CONFIG_ESP_PHY_PLL_TRACK_PERIOD_MS) redoes the
+ * whole RX calibration at its reference channels once the temperature has
+ * moved ~30 units since the last one: the DC tables and IQ correction that
+ * c5_recalibrate and the cache manage (esp-sdr rx_calibration_state.c).
+ * Prototype unknown; passes the argument registers through. */
+static volatile unsigned foreign_dc;
+extern void __real_phy_set_rx_gain_cal_dc(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+void __wrap_phy_set_rx_gain_cal_dc(uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d) {
+    __real_phy_set_rx_gain_cal_dc(a, b, c, d);
+    if (!measurement_mhz) foreign_dc++;
+}
+
+bool c5_cal_replaced(void) {
+    static unsigned seen;
+    unsigned now = foreign_dc;
+    bool replaced = now != seen;
+    seen = now;
+    return replaced;
 }
 
 void c5_recalibrate(unsigned mhz) {

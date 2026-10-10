@@ -260,6 +260,12 @@ Plan:
 - Hop with option 3, or option 2 if 3 turns out to be unsafe.
 - Recalibrate in the background periodically, or when the temperature drifts.
 
+Done on the C5 (`RECALMODE CACHE`, the default). Temperature drift is covered by
+the PHY's own tracking: when it recalibrates (≥ 30 units of temperature change),
+the next tune clears the cache and recalibrates; tunes run under the PHY lock
+(Status, "PHY tracking on the C5"). Image rejection left by the PHY's IQ
+calibration is fixed up digitally (§4.5).
+
 Target: ≤ 2.5 ms per hop, so ≥ 100 Hz per channel with all 8 enabled.
 
 ### 4.5 Per-hop DSP (`psd.c`, `metrics.c`). All sizes come from the profile.
@@ -270,6 +276,11 @@ Target: ≤ 2.5 ms per hop, so ≥ 100 Hz per channel with all 8 enabled.
    linear float accumulation. Optional halfband ÷2 first (S3 alias-emulation
    profile).
 4. Per-FFT DC removal. Bins [−1, 0, +1] are excluded from metrics.
+   Digital IQ imbalance correction (`IQCORR`, default on): I/Q gain ratio and
+   correlation averaged per LO, Q rebuilt orthogonal to I before the window.
+   Takes image rejection from the PHY's 20–40 dB to 50+ dB, which pair mode
+   needs (a channel at −19 MHz images 1 MHz from its partner at +18). Status,
+   "Image rejection vs IQ calibration on the C5".
 5. **Response EQ:** subtract the per-LO median noise baseline stored by `CALFLAT`.
 6. Per channel:
    - **RSSI**: integrated power over ±rssi_window, in dBFS, plus approximate dBm
@@ -615,7 +626,23 @@ Bring-up on hardware (XIAO ESP32-C5, 2026-10-08):
 - What a 5 GHz calibration changes in `phy_param` (diffed across calibrations): the RX IQ correction (+222, 14 bytes) and the two DC tables (+384, 272 bytes; +912, 56 bytes). `phy_set_rx_gain_table` rebuilds the RX gain memory from the DC tables in ~160 µs. A few other bytes (+288, +714, +1024) change too but are not needed.
 - `RECALMODE CACHE` (`recal_c5.c`): the first visit to an LO calibrates and saves those three areas (16 LRU slots × 342 bytes, 5.5 KB static, so ~24 KB heap free while scanning); later visits restore them and rebuild the gain table. `RECAL` clears the cache. 2.4 GHz on the C5 has other areas and falls back to calibrating every LO; the S3 keeps `ONCE` as its default.
 - Results: DC offset ≤ 9 counts at every LO on restore-only passes, the same as `EVERY`; no stuck LOs over 20 fresh calibrations; the remaining ≤ 1 % events are at 5724/5761, whose windows include the 5736–5752 MHz bump seen with the dummy load (probably real RF; it matches a 20 MHz Wi-Fi channel 149). Cost: tune 1.04 → 1.22 ms, hop 4.73 → 4.92 ms (pair mode).
-- Not covered: temperature drift (the cache is never refreshed except by `RECAL`), and image rejection (needs a test signal).
+- Not covered: image rejection (needs a test signal). Temperature drift: see "PHY tracking on the C5" below.
+- Rechecked 2026-10-10 (scanner metrics, 8 calibrations per mode, GROUP and SINGLE, run twice): hop time the same (4263 vs 4270 µs); under `ONCE` R1/R2/R7/R8 have RSSI sd 0.9–3.5 dB with 1.5–7 % of frames > 3 dB over the median (99th percentile +7.5–9 dB, below the 6 dB SIG threshold so no flags), vs 0.3–0.45 dB and ≤ 0.2 % under `CACHE`. R3–R6 match. R3's ~1.5 dB sd in both modes is Wi-Fi channel 149.
+
+**PHY tracking on the C5 (2026-10-10, after esp-sdr 5ede49b/77ffc12).**
+- `CONFIG_ESP_PHY_PLL_TRACK_PERIOD_MS=1000`: an esp_timer callback runs `phy_param_track_tot` every second under the PHY lock (~50 µs). Its `phy_cal_param_track` compares the temperature (`phy_param` +0) with the one at the last calibration (+1024); from a difference of 30 (or `phy_param[1068]` when bit 1 of [1067] is set) it redoes the RX calibration at its reference channels (~45 ms): 2.4 GHz DC, gain table at 2432 MHz, 5 GHz DC (+384/+912) and IQ at 5520 MHz (+222), the areas `CACHE` saves. Idle at room temperature the readings were 51–55 against 52, so it had not fired.
+- Forced every second (threshold 0): our calibration interleaved with it hung the scanner task (commands still answered) after 2.4 s in `EVERY`, and after ~20 s in a run with repeated `RECAL`. With a single LO (one channel enabled), its reference-channel tables stayed in place: DC −44 → −28 dB, RSSI sd 0.3 → 4–7 dB in `CACHE` and `ONCE`. With four LOs `CACHE` restored them on the next hop.
+- Now `radio_tune` runs under `phy_get_lock()`, and a `--wrap` of `phy_set_rx_gain_cal_dc` counts DC measurements outside `c5_recalibrate`; after one, the next tune clears the cache and recalibrates. Forced every second: no hang in 3 min (2471 `EVERY` calibrations against 120 tracker runs), single-LO RSSI sd 0.3–0.5 dB. This also refreshes the cache after a 30-unit temperature change. A tracker run during a capture can still spoil that capture (as in esp-sdr, the lock is not held across acquisition).
+- The S3 has the same tracker and no lock yet.
+
+**Image rejection vs IQ calibration on the C5 (2026-10-10).** esp-sdr 77ffc12 stops redoing the (transmitting) loopback IQ calibration on retune and keeps the startup IQ. Tested with an analog VTX at low power on R7 and R1, antenna on the C5, gain 66, `RECALMODE EVERY`; LO stepped so the VTX sat at ±4…±36 MHz, 8 × 9180-sample captures per point, image rejection = VTX power in ±4 MHz around its offset vs the mirrored band (floor subtracted). The VTX was only ~23–28 dB over the floor in that band, so values above ~30 dB are floor-limited.
+- Per-LO IQ (current): R7 27–34 dB, R1 24–33 dB.
+- Startup IQ only (esp-sdr): ~20 dB at every offset at both channels (R7 18–21, R1 20–22). The startup words (+222: `f5 04 f4 04 f0 07 f0 06 ee 09 ec 0d e9 11`) are far from the per-LO ones at 5.6–5.9 GHz (`00 12 … 01 12`), which barely change across the band. In pair mode R7's image lands 1 MHz from R8 (and R1's from R2), so this would put a ~−20 dBc ghost on the partner channel.
+- IQ zeroed: about as good as per-LO at R7 (not tried at R1).
+- IQ measured once at 5795 MHz, then DC-only per LO: R7 28–35 dB, R1 25–31 dB, the same as per-LO within the measurement. The −20 MHz point at R7 (22 dB in every mode) has the 5920 MHz board spur in its mirror band.
+- Pair-mode ghost (VTX close on R1, gain 50, R1 at about −8 dBFS): in GROUP R2 read ~20 dB below R1 (SNR 14, SIG 99 %); in SINGLE R2 was at the floor. It is R1's image (−19 → +19 MHz, inside R2's ±5 MHz window). Image rejection vs offset at fresh LOs was 40–50 dB, but 20.7 dB at the cached LO 5677. In 4 of 8 reboots the first calibration of 5677 had ~20 dB; `RECAL` gave 30–32 dB in every case (10 fresh calibrations at 5677: 37–40 dB by the raw-capture measure). Even then R2 stays ~13 dB over its floor with a VTX this strong. A moment-based digital IQ correction (E[I²], E[Q²], E[IQ] per capture) applied offline gave 55–58 dB at the same captures, the bad-calibration one included.
+- Now in the DSP (`IQCORR`, default on; `psd_iq_t`): pass 1 also sums I², Q², I·Q per segment; the centred moments are averaged per plan hop (weight 1/16 per segment, reset on config change and `RECAL`), and pass 2 rebuilds Q as c1·Q + c2·I (Q14; 1, 0 is bit-exact with it off). Estimates beyond a 0.7–1.4 gain ratio or |ρ| > 0.3 are ignored. A Python model of the integer path on the bad-calibration captures: 20.7 → 49–55 dB from the first capture (that calibration's error was mostly gain, Q ≈ 1.2 × I). Cost on the C5: DSP 3.72 → 3.90 ms per hop, hop 4.54 → 4.71 ms. No signal: floors, RSSI and its sd unchanged on all channels.
+- With the VTX on R1 (SNR 35–40 dB), GROUP, a bad first calibration after boot: R2 SNR 15.5–18.5 dB, SIG 100 % with it off; −0.7 dB, SIG 0 % with it on (toggled twice). With a good calibration: 0.5–2.2 dB off, −0.6 dB on. SINGLE (R2 on its own LO): −0.2 dB either way. `RAWIQ` stays uncorrected. Why the first calibration after boot is bad about half the time is still open.
 
 **Analog filter and R8 on the C5 (2026-10-08).**
 - The noise floor (dummy load) is flat to ±37 MHz at LOs up to 5830 MHz, but from 5831 MHz up it follows the filter skirt: −2.5 dB at ±22–28 MHz and −9.5 dB at ±34–40 MHz relative to the centre, with the centre level unchanged. The switch sits exactly between LO 5830 and 5831 MHz and is repeatable; recalibrating (`RECALMODE EVERY`) does not change it, and `FILTER 60` moves the skirt inward. So it is a PHY setting that changes with frequency (most likely inside `phy_set_chanfreq`; 5830 MHz is Wi-Fi channel 166, near the top of UNII-3), not RF roll-off. In Raceband it only affects the R7/R8 LO.
@@ -649,13 +676,16 @@ Next steps, in order:
    - Merging stage 1 into the windowing pass (bit-exact on the host at 64–1024 points) moved its cost instead of removing it: FFT 1935 → 1576 µs, but prep 881 → 1185 µs, and the same with the merged loop in IRAM. Stage 1's cost is its arithmetic, not the extra pass over memory.
    - Exact j = 0 butterflies (no multiplies, ties to even): FFT 1935 → ~1915 µs; host bias at 1024 points 0.0042 → 0.0029 LSB; `FFTEVAL` vs R4 unchanged (+0.002 dB, 0.080 dB rms).
    - The kernel is near its limit for scalar code: ~90 cycles per radix-4 butterfly at 240 MHz (12 multiplies plus loads/stores). Real savings would come from doing less work: `FFT 512` (roughly halves the FFT, 156 kHz bins) or fewer Welch segments (`SEGMENTS`), or from the tune (`phy_set_chanfreq`; 1.2 → 0.68 ms since, see "Tune time on the C5" above).
-3. ~~**Calibration.**~~ (done 2026-10-08: per-LO calibration cache, now the C5 default; see "Calibration on the C5" above). Image level is still unmeasured: it needs a test signal.
+3. ~~**Calibration.**~~ (done 2026-10-08: per-LO calibration cache, now the C5 default; see "Calibration on the C5" above). ~~Image level~~ (measured 2026-10-10 with a VTX, and now corrected digitally; see "Image rejection vs IQ calibration on the C5" above).
 4. **RF characterisation** (Phase 0-C5 step 2): ~~board spurs by LO sweep~~, ~~the real width of filter code 0~~ and ~~whether R8 (5917 MHz, above esp-sdr's validated 5150–5895 MHz) is usable~~ (done 2026-10-08, see "Analog filter and R8 on the C5" above). Still open: alias rejection (R3 seen from LO 5677 at −24 MHz), which needs a strong signal 40–80 MHz from the LO (a VTX).
 5. **Profile.** Finalise `c5-race` (pair vs. single mode, filter code, windows), then run the Phase 1 acceptance criteria with real VTXs.
 6. ~~`BOOTLOADER` on the C5~~ (done 2026-10-08): the board enters ROM download mode, esptool connects with `--before no-reset`, and `--after watchdog-reset` returns to the app.
 7. The S3 firmware picked up the shared changes (`BOOT_CHECK`, `rawiq_max`, `link_frame_wait`, the integer PSD/metrics/spectrum, the u32 frame timings). It builds but hasn't been reflashed or rerun on the S3; its S16R is still the SIMD radix-2 kernel.
+   - **PHY lock and stale-calibration detection on the S3.** The S3 runs the same 1 Hz PHY tracking, and `radio_s3.c` tunes and calibrates without `phy_get_lock()`, so the hang seen on the C5 (see "PHY tracking on the C5") can happen there too. Take the lock in `radio_tune`; for stale detection, esp-sdr wraps `set_rx_gain_cal_dc` (10 word arguments) on the S3. Check first whether the S3's tracker recalibrates RX (its `phy_param_track_tot` callees), and reproduce with the threshold forced low as on the C5.
    - **Test whether `RECALMODE CACHE` would help the S3.** On the S3, `CACHE` currently behaves like `EVERY` (no cache; its calibration snapshot layout is uninvestigated, §4.4). First repeat the C5 comparison of `ONCE` vs `EVERY` there: DC offset per LO across the band, and bursts of raised floor (dummy load, single mode, several `RECAL`s). If `EVERY` is clearly better, find what the S3 calibration writes (diff its `phy_param` areas as on the C5) and port the cache; if not, keep `ONCE`.
-8. USB JTAG debugging (OpenOCD `board/esp32c5-builtin.cfg` from the pioarduino `tool-openocd-esp32` package) needs a udev rule. OpenOCD's `60-openocd.rules` uses `GROUP="plugdev"`, which doesn't exist on this machine; use a group the user is in (e.g. `uucp`).
+8. **Bad first calibration after boot on the C5.** In 4 of 8 reboots the first calibration of LO 5677 left ~20 dB image rejection (mostly an I/Q gain error, Q ≈ 1.2 × I); `RECAL` always fixed it (37–40 dB). `CACHE` keeps a bad entry until `RECAL` or a tracking recalibration. `IQCORR` hides it from the scanner, but `RAWIQ` still shows it, and it may be related to the bursts of raised floor seen in the first ~20 calibrations of a session under `ONCE` ("Calibration on the C5"). Find out whether it is the first calibration after boot or the first per LO (log the IQ words at +222 per calibration), then fix it (e.g. a throw-away calibration in `radio_init`, or recalibrate when the IQ words are implausible).
+9. **IQ correction cost.** `IQCORR` adds ~0.17 ms per hop at 1024 points (3 multiplies per sample for the moments in pass 1, 2 in pass 2). Once a hop's estimate has settled, the moments could be updated on every Nth capture only, leaving just the pass-2 multiplies.
+10. **Revisit the IQ part of the PHY calibration.** With `IQCORR`, per-LO IQ calibration (a transmitted loopback tone each time) matters less. Options measured with the VTX: IQ once at the band centre then DC-only per LO matched per-LO IQ; startup IQ only (esp-sdr's policy) gave ~20 dB, which `IQCORR` should now fix up as well (untested). Either would also shrink cache entries to the DC tables.
 
 ## 7. Risks and open questions
 
@@ -669,6 +699,8 @@ Next steps, in order:
 | Uncalibrated absolute power | dBFS is the primary unit; dBm uses the gain table plus a user offset |
 | Our own receiver produces IMD and pollutes the IMD statistics | Gain-step discrimination (§4.8), saturation tracking |
 | C5 R8 above the validated range | Measure; document |
+| PHY background tracking recalibrates under us | Tune under `phy_get_lock()`; detect its DC measurements and recalibrate (C5 done, S3 open) |
+| Pair-mode images (a strong channel shows on its partner) | Digital IQ correction (`IQCORR`); per-LO PHY IQ calibration |
 
 **Open questions (defaults assumed):**
 1. S3 board: ESP32-S3 Micro (native USB only, BOOT + EN buttons). C5: Seeed XIAO ESP32-C5 (rev v1.0, 8 MB flash; built as `esp32-c5-devkitc-1` with 4 MB).

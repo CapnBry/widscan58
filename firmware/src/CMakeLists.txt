@@ -19,7 +19,8 @@ elseif(IDF_TARGET STREQUAL "esp32c5")
     set(target_dir "radio/c5")
     set(wrapped_chan_ana "phy_chip_set_chan_ana")
     # Parts of channel setup a receiver does not need (radio_c5.c, radio_tune).
-    set(wrapped_extra "-Wl,--wrap=ets_delay_us" "-Wl,--wrap=phy_wifi_set_tx_gain_new")
+    set(wrapped_extra "-Wl,--wrap=ets_delay_us" "-Wl,--wrap=phy_wifi_set_tx_gain_new"
+        "-Wl,--wrap=phy_set_rx_gain_cal_dc") # counts PHY tracking's recalibrations (recal_c5.c)
 else()
     message(FATAL_ERROR "Widscan58: no radio backend for ${IDF_TARGET} yet")
 endif()

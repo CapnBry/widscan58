@@ -12,7 +12,7 @@ const race24: ProfileDef = {
   description: "Raceband scaled to 2.4 GHz (k=0.2821), ESP32-S3 mock-up [SIMULATED]",
   target: "esp32s3",
   bandLoKhz: 2400000,
-  bandHiKhz: 2483500,
+  bandHiKhz: 2486500,
   baseKhz: 2400000,
   equivBaseKhz: 5639500,
   scale: K24,
@@ -23,38 +23,15 @@ const race24: ProfileDef = {
   passbandHz: 6.77e6,
   rssiHz: 1.41e6,
   searchHz: 3.39e6,
-  pairMaxSpacingKhz: 11000,
+  hopMaxSpanKhz: 11290,
   singleLoOffsetKhz: -2260,
   loStepKhz: 1,
   channels: [2405219, 2415656, 2426094, 2436531, 2446969, 2457406, 2467844, 2478281].map((khz, i) => ({
-    name: `S${i + 1}`,
+    name: `R${i + 1}`,
     khz,
   })),
   spursKhz: [2400000, 2440000, 2448000, 2480000],
 };
-const race58: ProfileDef = {
-  name: "c5-race",
-  description: "Raceband R1-R8, ESP32-C5 [SIMULATED]",
-  target: "esp32c5",
-  bandLoKhz: 5645000,
-  bandHiKhz: 5945000,
-  baseKhz: 5639500,
-  equivBaseKhz: 5639500,
-  scale: 1,
-  rateHz: 80e6,
-  nfft: 1024,
-  segments: 4,
-  usableHz: 40e6,
-  passbandHz: 24e6,
-  rssiHz: 5e6,
-  searchHz: 12e6,
-  pairMaxSpacingKhz: 40000,
-  singleLoOffsetKhz: -8000,
-  loStepKhz: 1000,
-  channels: [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917].map((mhz, i) => ({ name: `R${i + 1}`, khz: mhz * 1000 })),
-  spursKhz: [],
-};
-const PROFILES = [race24, race58];
 
 interface Vtx {
   ch: number;
@@ -76,8 +53,9 @@ export class MockTransport implements Transport {
   private timer = 0;
   private rx = "";
   private profile = race24;
+  private channels = race24.channels;
   private enabled = 0xff;
-  private pair = true;
+  private group = true;
   private running = true;
   private gainManual = true;
   private gain = 60;
@@ -124,11 +102,11 @@ export class MockTransport implements Transport {
 
   private reset() {
     const p = this.profile;
-    this.plan = planBuild(p, this.enabled, this.pair);
+    this.plan = planBuild(p, this.channels, this.enabled, this.group);
     this.specSpanHz = p.usableHz;
     this.state.clear();
     const now = performance.now();
-    this.vtx = p.channels.map((_, ch) => ({
+    this.vtx = this.channels.map((_, ch) => ({
       ch,
       on: ch === 1 || ch === 5,
       powerDb: -22 - Math.random() * 14,
@@ -164,7 +142,7 @@ export class MockTransport implements Transport {
             passband_hz: p.passbandHz,
             rssi_hz: p.rssiHz,
             search_hz: p.searchHz,
-            channels: p.channels.map((c, id) => ({ id, name: c.name, khz: c.khz })),
+            channels: this.channels.map((c, id) => ({ id, name: c.name, khz: c.khz })),
           })}\n`,
         );
       case line === "STATUS?":
@@ -173,7 +151,7 @@ export class MockTransport implements Transport {
             profile: p.name,
             running: +this.running,
             enabled: this.enabled,
-            mode: this.pair ? "PAIR" : "SINGLE",
+            mode: this.group ? "GROUP" : "SINGLE",
             capture_samples: p.nfft * p.segments,
             nfft: p.nfft,
             segments: p.segments,
@@ -200,23 +178,34 @@ export class MockTransport implements Transport {
             plan: this.plan.map((h) => ({ lo_khz: h.loKhz, ch: h.ch, offset_hz: h.offsetHz })),
           })}\n`,
         );
-      case parts[0] === "PROFILE": {
-        const np = PROFILES.find((x) => x.name === parts[1]);
-        if (!np) return this.text("ERR profile\n");
-        this.profile = np;
+      case line === "CHANNELS DEFAULT":
+        this.channels = p.channels;
+        this.enabled = (1 << this.channels.length) - 1;
+        this.reset();
+        return ok();
+      case parts[0] === "CHANNELS": {
+        // Same mapping as the firmware: 5.8 GHz MHz into the profile's band.
+        const list = parts.slice(1).map((t) => {
+          const [name, mhz] = t.split("=");
+          const khz = Math.round(p.baseKhz + (Number(mhz) * 1000 - p.equivBaseKhz) * p.scale);
+          return /^[A-Za-z0-9]{1,5}$/.test(name ?? "") && khz >= p.bandLoKhz && khz <= p.bandHiKhz ? { name, khz } : null;
+        });
+        if (!list.length || list.length > 8 || list.some((c) => !c)) return this.text("ERR channels\n");
+        this.channels = list as { name: string; khz: number }[];
+        this.enabled = (1 << this.channels.length) - 1;
         this.reset();
         return ok();
       }
       case line === "ENABLE?":
         return this.text(`ENABLE ${this.enabled}\n`);
       case parts[0] === "ENABLE":
-        this.enabled = num(1) & 0xff;
-        this.plan = planBuild(p, this.enabled, this.pair);
+        this.enabled = num(1) & ((1 << this.channels.length) - 1);
+        this.plan = planBuild(p, this.channels, this.enabled, this.group);
         this.hop = 0;
         return this.text(`OK ENABLE ${this.enabled}\n`);
-      case line === "MODE PAIR" || line === "MODE SINGLE":
-        this.pair = line === "MODE PAIR";
-        this.plan = planBuild(p, this.enabled, this.pair);
+      case line === "MODE GROUP" || line === "MODE SINGLE":
+        this.group = line === "MODE GROUP";
+        this.plan = planBuild(p, this.channels, this.enabled, this.group);
         this.hop = 0;
         return ok();
       case line === "SCAN START" || line === "SCAN STOP":
@@ -269,14 +258,14 @@ export class MockTransport implements Transport {
     const on = this.vtx.filter((v) => v.on);
     for (const v of on) {
       const wobble = Math.sin(now / 1700 + v.ch) * 40e3 * (p.scale < 1 ? p.scale : 1);
-      out.push({ hz: p.channels[v.ch].khz * 1000 + v.offsetHz + wobble, powerDb: v.powerDb, kind: "vtx" });
+      out.push({ hz: this.channels[v.ch].khz * 1000 + v.offsetHz + wobble, powerDb: v.powerDb, kind: "vtx" });
     }
     // Third-order intermodulation between every pair of active carriers.
     for (const a of on)
       for (const b of on) {
         if (a === b) continue;
-        const fa = p.channels[a.ch].khz * 1000 + a.offsetHz;
-        const fb = p.channels[b.ch].khz * 1000 + b.offsetHz;
+        const fa = this.channels[a.ch].khz * 1000 + a.offsetHz;
+        const fb = this.channels[b.ch].khz * 1000 + b.offsetHz;
         out.push({ hz: 2 * fa - fb, powerDb: 2 * a.powerDb + b.powerDb + 62, kind: "imd" });
       }
     return out;

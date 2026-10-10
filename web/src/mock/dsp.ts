@@ -18,7 +18,7 @@ export interface ProfileDef {
   passbandHz: number;
   rssiHz: number;
   searchHz: number;
-  pairMaxSpacingKhz: number;
+  hopMaxSpanKhz: number;
   singleLoOffsetKhz: number;
   loStepKhz: number;
   channels: { name: string; khz: number }[];
@@ -31,23 +31,47 @@ export interface Hop {
   offsetHz: number[];
 }
 
-export function planBuild(p: ProfileDef, mask: number, pair: boolean): Hop[] {
-  const order = p.channels.map((c, i) => ({ i, khz: c.khz })).filter((c) => mask & (1 << c.i));
+function roundStep(khz: number, step: number): number {
+  return step <= 1 ? Math.trunc(khz) : Math.floor((khz + step / 2) / step) * step;
+}
+
+/** firmware place_lo(): the LO farthest from every channel's centre, keeping
+ *  all of them within max(span limit / 2, single offset) of it. */
+function placeLo(p: ProfileDef, khz: number[]): number {
+  const d = Math.abs(p.singleLoOffsetKhz);
+  const reach = Math.max(Math.trunc(p.hopMaxSpanKhz / 2), d) + p.loStepKhz;
+  const lo = khz[0];
+  const hi = khz[khz.length - 1];
+  const cand = p.singleLoOffsetKhz <= 0 ? [lo - d, hi + d] : [hi + d, lo - d];
+  for (let j = 1; j < khz.length; j++) cand.push(Math.trunc((khz[j - 1] + khz[j]) / 2));
+  const step = Math.max(p.loStepKhz, 1);
+  cand.push(Math.ceil((hi - reach) / step) * step, Math.floor((lo + reach) / step) * step);
+  let best = roundStep(Math.trunc((lo + hi) / 2), p.loStepKhz);
+  let bestNear = -1;
+  let bestFar = 0;
+  for (const c of cand) {
+    const f = roundStep(c, p.loStepKhz);
+    const offs = khz.map((k) => Math.abs(k - f));
+    const near = Math.min(Math.min(...offs), d);
+    const far = Math.max(...offs);
+    if (far > reach) continue;
+    if (near > bestNear || (near === bestNear && far < bestFar)) [best, bestNear, bestFar] = [f, near, far];
+  }
+  return best;
+}
+
+export function planBuild(p: ProfileDef, channels: { khz: number }[], mask: number, group: boolean): Hop[] {
+  const order = channels.map((c, i) => ({ i, khz: c.khz })).filter((c) => mask & (1 << c.i));
   order.sort((a, b) => a.khz - b.khz);
-  const round = (khz: number) => (p.loStepKhz <= 1 ? Math.trunc(khz) : Math.floor((khz + p.loStepKhz / 2) / p.loStepKhz) * p.loStepKhz);
   const hops: Hop[] = [];
   for (let j = 0; j < order.length; ) {
-    const a = order[j];
-    if (pair && j + 1 < order.length && order[j + 1].khz - a.khz <= p.pairMaxSpacingKhz) {
-      const b = order[j + 1];
-      const lo = round(Math.trunc((a.khz + b.khz) / 2));
-      hops.push({ loKhz: lo, ch: [a.i, b.i], offsetHz: [(a.khz - lo) * 1000, (b.khz - lo) * 1000] });
-      j += 2;
-    } else {
-      const lo = round(a.khz + p.singleLoOffsetKhz);
-      hops.push({ loKhz: lo, ch: [a.i], offsetHz: [(a.khz - lo) * 1000] });
-      j += 1;
-    }
+    let m = 1;
+    if (group) while (j + m < order.length && order[j + m].khz - order[j].khz <= p.hopMaxSpanKhz) m++;
+    const members = order.slice(j, j + m);
+    const khz = members.map((c) => c.khz);
+    const lo = m === 1 && !group ? roundStep(khz[0] + p.singleLoOffsetKhz, p.loStepKhz) : placeLo(p, khz);
+    hops.push({ loKhz: lo, ch: members.map((c) => c.i), offsetHz: khz.map((k) => (k - lo) * 1000) });
+    j += m;
   }
   return hops;
 }

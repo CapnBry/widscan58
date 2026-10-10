@@ -106,9 +106,14 @@ export class Store {
     return (performance.now() - this.t0) / 1000;
   }
 
+  /** Changes with the profile or its channel plan; per-channel state is keyed by plan index. */
+  planKey = "";
+
   setProfile(p: Profile) {
-    const changed = !this.profile || this.profile.name !== p.name;
+    const key = `${p.name}/${p.channels.map((c) => `${c.name}=${c.khz}`).join(",")}`;
+    const changed = key !== this.planKey;
     this.profile = p;
+    this.planKey = key;
     if (changed) {
       const cap = HISTORY_SECONDS * 120;
       this.channels = p.channels.map(() => ({

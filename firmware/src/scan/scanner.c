@@ -60,8 +60,10 @@ static uint16_t clamp_u16(uint32_t v) { return v > 65535 ? 65535 : (uint16_t)v; 
 void scanner_defaults(const profile_t *p, scan_config_t *c) {
     memset(c, 0, sizeof(*c));
     c->profile = p;
+    c->nch = p->nch;
+    memcpy(c->ch, p->ch, sizeof(c->ch));
     c->enabled = (1u << p->nch) - 1;
-    c->mode = PLAN_PAIR;
+    c->mode = PLAN_GROUP;
     c->running = true;
     c->capture_samples = p->capture_samples;
     c->nfft = p->nfft;
@@ -104,7 +106,7 @@ void scanner_get_config(scan_config_t *c) {
 void scanner_set_config(const scan_config_t *c) {
     xSemaphoreTake(lock, portMAX_DELAY);
     shared = *c;
-    plan_build(shared.profile, shared.enabled, shared.mode, &shared_plan);
+    plan_build(shared.profile, shared.ch, shared.nch, shared.enabled, shared.mode, &shared_plan);
     dirty = true;
     xSemaphoreGive(lock);
 }
@@ -120,7 +122,10 @@ bool scanner_request(const scan_request_t *r) { return xQueueSend(requests, r, 0
 static void apply_config(void) {
     xSemaphoreTake(lock, portMAX_DELAY);
     bool profile_changed = s.cfg.profile != shared.profile;
-    bool measure_changed = profile_changed || s.cfg.nfft != shared.nfft || s.cfg.rssi_hz != shared.rssi_hz;
+    /* Channel state is per plan index: a new channel list starts afresh. */
+    bool channels_changed = s.cfg.nch != shared.nch || memcmp(s.cfg.ch, shared.ch, sizeof(shared.ch));
+    bool measure_changed = profile_changed || channels_changed || s.cfg.nfft != shared.nfft ||
+                           s.cfg.rssi_hz != shared.rssi_hz;
     s.cfg = shared;
     s.plan = shared_plan;
     s.psd_error_reported = false;
@@ -483,7 +488,7 @@ esp_err_t scanner_init(void) {
     s.scratch = heap_caps_malloc(PSD_MAX_FFT * sizeof(*s.scratch), MALLOC_CAP_INTERNAL);
     if (!s.scratch) return ESP_ERR_NO_MEM;
     scanner_defaults(profile_default(radio_caps()->target), &shared);
-    plan_build(shared.profile, shared.enabled, shared.mode, &shared_plan);
+    plan_build(shared.profile, shared.ch, shared.nch, shared.enabled, shared.mode, &shared_plan);
     s.cfg.profile = NULL; /* force a full apply */
     esp_err_t err = psd_init();
     if (err != ESP_OK) return err;

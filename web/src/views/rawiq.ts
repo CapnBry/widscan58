@@ -197,7 +197,7 @@ export class RawIqView implements View {
       const lo = Math.floor(Math.min(...dbs) / 10) * 10;
       const hi = Math.ceil(Math.max(...dbs) / 10) * 10 + 5;
       const a = axes(s, f0, f1, lo, hi, { top: 16 });
-      drawGrid(s, a, (v) => this.app.displayMHz(v).toFixed(1), (v) => `${v}`, 8, 4);
+      drawGrid(s, a, (v) => (v / 1000).toFixed(1), (v) => `${v}`, 8, 4);
       s.ctx.strokeStyle = t.ink;
       s.ctx.lineWidth = 1.2;
       s.ctx.beginPath();

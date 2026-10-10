@@ -55,16 +55,33 @@ export class Controls implements View {
     this.ctl(
       "Scan",
       this.seg([["1", "Running"], ["0", "Stopped"]], (v) => void this.apply(v === "1" ? "SCAN START" : "SCAN STOP"), (st) => String(st.running)),
-      this.seg([["PAIR", "Pair LOs"], ["SINGLE", "One LO per channel"]], (v) => void this.apply(`MODE ${v}`), (st) => st.mode),
+      this.seg(
+        [["GROUP", "Group LOs"], ["SINGLE", "One LO per channel"]],
+        (v) => {
+          app.updateDeviceSettings({ mode: v as "GROUP" | "SINGLE" });
+          void this.apply(`MODE ${v}`);
+        },
+        (st) => st.mode,
+      ),
     );
     // Gain
     const gain = el("input", { type: "range", min: "0", max: "82", step: "1" }) as HTMLInputElement;
     const gainVal = el("span", { class: "val" });
     gain.oninput = () => (gainVal.textContent = gain.value);
-    gain.onchange = () => void this.apply(`GAIN MANUAL ${gain.value}`);
+    gain.onchange = () => {
+      app.updateDeviceSettings({ gainMode: "MANUAL", gain: Number(gain.value) });
+      void this.apply(`GAIN MANUAL ${gain.value}`);
+    };
     this.ctl(
       "RX gain (PHY table index, not dB)",
-      this.seg([["MANUAL", "Manual"], ["HARDWARE", "AGC"]], (v) => void this.apply(v === "MANUAL" ? `GAIN MANUAL ${gain.value}` : "GAIN HARDWARE"), (st) => st.gain_mode),
+      this.seg(
+        [["MANUAL", "Manual"], ["HARDWARE", "AGC"]],
+        (v) => {
+          app.updateDeviceSettings({ gainMode: v as "MANUAL" | "HARDWARE", gain: Number(gain.value) });
+          void this.apply(v === "MANUAL" ? `GAIN MANUAL ${gain.value}` : "GAIN HARDWARE");
+        },
+        (st) => st.gain_mode,
+      ),
       gain,
       gainVal,
     );
@@ -149,16 +166,6 @@ export class Controls implements View {
       "Spectrum orientation",
       this.seg([["1", "Conjugate (default)"], ["0", "Raw"]], (v) => void this.apply(`CONJ ${v}`), (st) => String(st.conjugate)),
     );
-    // Profile
-    const prof = el("select") as HTMLSelectElement;
-    for (const v of ["s3-race24", "c5-race"]) prof.append(new Option(v, v));
-    prof.onchange = async () => {
-      await app.send(`PROFILE ${prof.value}`);
-      await app.send("PROFILE?");
-      await app.refreshStatus();
-    };
-    this.ctl("Band profile", prof);
-    this.syncs.push((st) => (prof.value = st.profile));
     // Display range (UI only)
     const dmin = this.num(-160, 0, 5, 64);
     const dmax = this.num(-160, 0, 5, 64);

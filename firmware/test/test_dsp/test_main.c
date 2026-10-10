@@ -1,13 +1,17 @@
 /* Host tests for the target-independent DSP: the radix-4 FFT kernel against
- * a double-precision DFT, metrics_db, and integer metrics on a synthetic PSD.
+ * a double-precision DFT, metrics_db, integer metrics on a synthetic PSD, and
+ * the LO planner.
  * pio test -e native. GPL-3.0-or-later. */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unity.h>
 #include "fft_r4_sc16.h"
 #include "metrics.h"
 #include "../../src/scan/metrics.c"
+#include "../../src/scan/planner.c"
+#include "../../src/scan/profile.c"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -197,6 +201,100 @@ static void test_metrics_avg(void) {
     TEST_ASSERT_TRUE(m.flags & CHF_NO_CENTROID);
 }
 
+/* Channel list from 5.8 GHz MHz values, as the CHANNELS command builds it. */
+static unsigned chans(const profile_t *p, const uint32_t *mhz, unsigned n, profile_channel_t *ch) {
+    for (unsigned j = 0; j < n; j++) {
+        snprintf(ch[j].name, sizeof(ch[j].name), "C%u", j);
+        TEST_ASSERT_TRUE(profile_from_equiv_khz(p, mhz[j] * 1000, &ch[j].khz));
+    }
+    return n;
+}
+
+static void test_plan_default_raceband(void) {
+    const profile_t *p = profile_default("esp32c5");
+    plan_t plan;
+    plan_build(p, p->ch, p->nch, 0xff, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(4, plan.nhops);
+    const uint32_t lo[] = {5677000, 5751000, 5825000, 5899000};
+    for (unsigned j = 0; j < 4; j++) {
+        TEST_ASSERT_EQUAL(lo[j], plan.hop[j].lo_khz);
+        TEST_ASSERT_EQUAL(2, plan.hop[j].nch);
+        TEST_ASSERT_EQUAL(-19000000, plan.hop[j].offset_hz[0]);
+        TEST_ASSERT_EQUAL(18000000, plan.hop[j].offset_hz[1]);
+    }
+    plan_build(p, p->ch, p->nch, 0xff, PLAN_SINGLE, &plan);
+    TEST_ASSERT_EQUAL(8, plan.nhops);
+    TEST_ASSERT_EQUAL(5650000, plan.hop[0].lo_khz);
+    TEST_ASSERT_EQUAL(8000000, plan.hop[0].offset_hz[0]);
+    /* The scaled S3 profile pairs the same way. */
+    p = profile_default("esp32s3");
+    plan_build(p, p->ch, p->nch, 0xff, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(4, plan.nhops);
+}
+
+static void test_plan_groups(void) {
+    const profile_t *p = profile_default("esp32c5");
+    profile_channel_t ch[PROFILE_MAX_CHANNELS];
+    plan_t plan;
+    /* A8, R3, B1 within 8 MHz: one LO, DC 8 MHz below all three rather than
+     * in the 1 MHz gap between R3 and B1. */
+    const uint32_t close[] = {5732, 5725, 5733};
+    plan_build(p, ch, chans(p, close, 3, ch), 0x7, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(1, plan.nhops);
+    TEST_ASSERT_EQUAL(3, plan.hop[0].nch);
+    TEST_ASSERT_EQUAL(5717000, plan.hop[0].lo_khz);
+    TEST_ASSERT_EQUAL(1, plan.hop[0].ch[0]); /* sorted by frequency */
+    /* F1 F2 F3 (40 MHz span): one LO, 1 MHz off F2 since no gap is within reach. */
+    const uint32_t f[] = {5740, 5760, 5780};
+    plan_build(p, ch, chans(p, f, 3, ch), 0x7, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(1, plan.nhops);
+    TEST_ASSERT_EQUAL(3, plan.hop[0].nch);
+    TEST_ASSERT_EQUAL(5759000, plan.hop[0].lo_khz);
+    /* Whole bands: A, B and F take 3 LOs, R and E still 4. */
+    const uint32_t bands[5][8] = {
+        {5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917}, {5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725},
+        {5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866}, {5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945},
+        {5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880}};
+    const unsigned hops[5] = {4, 3, 3, 4, 3};
+    for (unsigned b = 0; b < 5; b++) {
+        plan_build(p, ch, chans(p, bands[b], 8, ch), 0xff, PLAN_GROUP, &plan);
+        TEST_ASSERT_EQUAL(hops[b], plan.nhops);
+    }
+    /* B1, R3, B2, F2 (5733 5732 5752 5760, span 28): one LO in the 19 MHz gap. */
+    const uint32_t four[] = {5733, 5732, 5752, 5760};
+    plan_build(p, ch, chans(p, four, 4, ch), 0xf, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(1, plan.nhops);
+    TEST_ASSERT_EQUAL(4, plan.hop[0].nch);
+    TEST_ASSERT_EQUAL(5743000, plan.hop[0].lo_khz);
+    /* 41 MHz is wider than the limit: two LOs. */
+    const uint32_t wide[] = {5733, 5774};
+    plan_build(p, ch, chans(p, wide, 2, ch), 0x3, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(2, plan.nhops);
+    /* F8 and R7 share 5880 MHz: one LO, off the channel. */
+    const uint32_t same[] = {5880, 5880};
+    plan_build(p, ch, chans(p, same, 2, ch), 0x3, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(1, plan.nhops);
+    TEST_ASSERT_EQUAL(5872000, plan.hop[0].lo_khz);
+    /* Disabled channels are left out. */
+    plan_build(p, ch, chans(p, four, 4, ch), 0x5, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL(1, plan.nhops);
+    TEST_ASSERT_EQUAL(2, plan.hop[0].nch);
+}
+
+static void test_profile_equiv(void) {
+    const profile_t *p = profile_default("esp32s3");
+    uint32_t khz;
+    TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5658000, &khz));
+    TEST_ASSERT_EQUAL(2405219, khz);
+    TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5645000, &khz)); /* E4 */
+    TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5945000, &khz)); /* E8 */
+    TEST_ASSERT_FALSE(profile_from_equiv_khz(p, 5960000, &khz));
+    p = profile_default("esp32c5");
+    TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5945000, &khz));
+    TEST_ASSERT_EQUAL(5945000, khz);
+    TEST_ASSERT_FALSE(profile_from_equiv_khz(p, 5600000, &khz));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_fft_r4_input_pos_is_permutation);
@@ -205,5 +303,8 @@ int main(void) {
     RUN_TEST(test_metrics_db);
     RUN_TEST(test_metrics_tone);
     RUN_TEST(test_metrics_avg);
+    RUN_TEST(test_plan_default_raceband);
+    RUN_TEST(test_plan_groups);
+    RUN_TEST(test_profile_equiv);
     return UNITY_END();
 }

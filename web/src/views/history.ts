@@ -50,7 +50,7 @@ export class History implements View {
     const p = store.profile;
     const s = prepare(this.canvas);
     if (!p) return;
-    const legendKey = `${p.name}/${app.settings.equivAxis}`;
+    const legendKey = store.planKey;
     if (this.legendFor !== legendKey) {
       this.legendFor = legendKey;
       this.legend.replaceChildren(

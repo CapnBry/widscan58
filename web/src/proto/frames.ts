@@ -210,7 +210,7 @@ export interface Status {
   profile: string;
   running: number;
   enabled: number;
-  mode: "PAIR" | "SINGLE";
+  mode: "GROUP" | "SINGLE";
   capture_samples: number;
   nfft: number;
   segments: number;
@@ -235,8 +235,4 @@ export interface Status {
   spec_span_hz: number;
   spec_detector: number;
   plan: PlanHop[];
-}
-
-export function equivKhz(p: Profile, khz: number): number {
-  return p.equiv_base_khz + (khz - p.base_khz) / p.scale;
 }

@@ -93,7 +93,7 @@ header.top .spacer { flex: 1; }
 .dot.err { background: var(--critical); }
 .conn-state .fw { color: var(--muted); }
 
-.flash-dialog {
+.flash-dialog, .plan-dialog {
   width: min(560px, calc(100vw - 32px));
   background: var(--surface);
   color: var(--ink);
@@ -101,9 +101,9 @@ header.top .spacer { flex: 1; }
   border-radius: 10px;
   padding: 16px 18px;
 }
-.flash-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
-.flash-dialog h2 { font-size: 15px; margin: 0 0 8px; }
-.flash-dialog p { margin: 0 0 8px; color: var(--ink-2); }
+.flash-dialog::backdrop, .plan-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.flash-dialog h2, .plan-dialog h2 { font-size: 15px; margin: 0 0 8px; }
+.flash-dialog p, .plan-dialog p { margin: 0 0 8px; color: var(--ink-2); }
 .flash-dialog ol { margin: 0 0 12px; padding-left: 20px; color: var(--ink-2); }
 .flash-dialog li { margin-bottom: 6px; }
 .flash-dialog li strong { color: var(--ink); }
@@ -123,6 +123,26 @@ header.top .spacer { flex: 1; }
   white-space: pre-wrap;
 }
 .flash-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.plan-dialog { width: min(680px, calc(100vw - 32px)); }
+.plan-scroll { overflow-x: auto; }
+.plan-chart { border-collapse: separate; border-spacing: 3px; margin: 0 auto; }
+.plan-chart thead th { font-size: 11px; font-weight: 500; color: var(--muted); }
+.plan-chart button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 4px 6px;
+  line-height: 1.2;
+}
+.plan-chart button span { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.plan-chart button.on span { color: inherit; }
+.plan-chan { min-width: 54px; }
+.plan-band { min-width: 76px; background: var(--surface-2); }
+.plan-band span { white-space: nowrap; }
+.plan-buttons { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.plan-buttons .spacer { flex: 1; }
+.plan-count { color: var(--muted); }
 .banner {
   margin: 10px 16px 0;
   padding: 8px 12px;

@@ -4,7 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PROFILE_MAX_CHANNELS 16
+/* Channels scanned at once: the profile's default plan or a CHANNELS list. */
+#define PROFILE_MAX_CHANNELS 8
 
 typedef struct {
     char name[6];
@@ -34,17 +35,16 @@ typedef struct {
     uint32_t rssi_hz;       /* channel power integration half-width */
     uint32_t search_hz;     /* peak/centroid search half-width */
     /* LO planning */
-    uint32_t pair_max_spacing_khz;
+    uint32_t hop_max_span_khz;    /* widest channel spread one LO covers */
     int32_t single_lo_offset_khz; /* LO = channel + this in single mode */
     uint32_t lo_step_khz;   /* LO tuning resolution */
-    uint8_t nch;
+    uint8_t nch;            /* default channel plan */
     profile_channel_t ch[PROFILE_MAX_CHANNELS];
 } profile_t;
 
-const profile_t *profile_find(const char *name);
-/* First profile for the target. */
+/* The profile for the target (radio_caps()->target); fixed per build. */
 const profile_t *profile_default(const char *target);
-size_t profile_count(void);
-const profile_t *profile_at(size_t index);
 /* Equivalent 5.8 GHz frequency for display. */
 double profile_equiv_khz(const profile_t *p, double khz);
+/* Profile frequency of a 5.8 GHz channel; false outside the profile's band. */
+bool profile_from_equiv_khz(const profile_t *p, uint32_t equiv_khz, uint32_t *khz);

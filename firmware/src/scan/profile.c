@@ -5,6 +5,9 @@
  * Every width (filter, spans, windows) is the C5 value times k, so one
  * snapshot sees the same fraction of the band, in channels, as on the C5.
  *
+ * The band runs on to 2486.5 MHz, past the ISM edge, so that CHANNELS can
+ * place every A/B/E/F/R channel: E8 (5945 MHz) lands at 2486.2 MHz.
+ *
  * c5-race: the real thing (PLAN.md section 2.1). The C5 tunes in whole MHz, so
  * pair LOs land half a MHz off the channel midpoint; offsets stay exact. */
 #include <string.h>
@@ -17,7 +20,7 @@ static const profile_t profiles[] = {
         .name = "s3-race24",
         .description = "Raceband scaled to 2.4 GHz (k=0.2821), ESP32-S3 mock-up",
         .target = "esp32s3",
-        .band_lo_khz = 2400000, .band_hi_khz = 2483500,
+        .band_lo_khz = 2400000, .band_hi_khz = 2486500,
         .base_khz = 2400000, .equiv_base_khz = 5639500, .scale = K24,
         .rate_code = 1, .rate_hz = 40000000,
         .capture_samples = 4096, .nfft = 1024, .segments = 4, /* 39 kHz bins; 2048-pt halves the hop rate */
@@ -28,13 +31,13 @@ static const profile_t profiles[] = {
         .passband_hz = 6770000,  /* C5 +/-24 MHz x k; measured flat to ~6.5 MHz */
         .rssi_hz = 1410000,      /* C5 +/-5 MHz x k */
         .search_hz = 3390000,    /* C5 +/-12 MHz x k */
-        .pair_max_spacing_khz = 11000,
+        .hop_max_span_khz = 11290, /* 40 MHz x k, with rounding slack */
         .single_lo_offset_khz = -2260, /* C5 -8 MHz x k */
         .lo_step_khz = 1,
         .nch = 8,
         .ch = {
-            {"S1", 2405219}, {"S2", 2415656}, {"S3", 2426094}, {"S4", 2436531},
-            {"S5", 2446969}, {"S6", 2457406}, {"S7", 2467844}, {"S8", 2478281},
+            {"R1", 2405219}, {"R2", 2415656}, {"R3", 2426094}, {"R4", 2436531},
+            {"R5", 2446969}, {"R6", 2457406}, {"R7", 2467844}, {"R8", 2478281},
         },
     },
     {
@@ -52,7 +55,7 @@ static const profile_t profiles[] = {
         .passband_hz = 24000000,
         .rssi_hz = 5000000,
         .search_hz = 12000000,
-        .pair_max_spacing_khz = 40000,
+        .hop_max_span_khz = 40000,
         .single_lo_offset_khz = -8000,
         .lo_step_khz = 1000,
         .nch = 8,
@@ -63,21 +66,19 @@ static const profile_t profiles[] = {
     },
 };
 
-size_t profile_count(void) { return sizeof(profiles) / sizeof(profiles[0]); }
-const profile_t *profile_at(size_t index) { return index < profile_count() ? &profiles[index] : NULL; }
-
 const profile_t *profile_default(const char *target) {
-    for (size_t j = 0; j < profile_count(); j++)
+    for (size_t j = 0; j < sizeof(profiles) / sizeof(profiles[0]); j++)
         if (!strcmp(profiles[j].target, target)) return &profiles[j];
     return &profiles[0];
 }
 
-const profile_t *profile_find(const char *name) {
-    for (size_t j = 0; j < profile_count(); j++)
-        if (!strcmp(profiles[j].name, name)) return &profiles[j];
-    return NULL;
-}
-
 double profile_equiv_khz(const profile_t *p, double khz) {
     return p->equiv_base_khz + (khz - p->base_khz) / p->scale;
+}
+
+bool profile_from_equiv_khz(const profile_t *p, uint32_t equiv_khz, uint32_t *khz) {
+    double v = p->base_khz + ((double)equiv_khz - p->equiv_base_khz) * p->scale;
+    if (v < p->band_lo_khz || v > p->band_hi_khz) return false;
+    *khz = (uint32_t)(v + 0.5);
+    return true;
 }

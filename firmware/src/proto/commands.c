@@ -57,8 +57,8 @@ static void send_profile(const scan_config_t *c) {
               p->name, p->description, radio_caps()->target, p->band_lo_khz, p->band_hi_khz,
               p->base_khz, p->equiv_base_khz, (double)p->scale, radio_caps()->rates_hz[c->rate_code],
               p->usable_hz, p->passband_hz, c->rssi_hz, c->search_hz);
-    for (unsigned j = 0; j < p->nch; j++)
-        reply_add("%s{\"id\":%u,\"name\":\"%s\",\"khz\":%" PRIu32 "}", j ? "," : "", j, p->ch[j].name, p->ch[j].khz);
+    for (unsigned j = 0; j < c->nch; j++)
+        reply_add("%s{\"id\":%u,\"name\":\"%s\",\"khz\":%" PRIu32 "}", j ? "," : "", j, c->ch[j].name, c->ch[j].khz);
     reply_add("]}\n");
     reply_send();
 }
@@ -74,7 +74,7 @@ static void send_status(void) {
               "\"recal\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"plan\":[",
-              c.profile->name, c.running, c.enabled, c.mode == PLAN_PAIR ? "PAIR" : "SINGLE",
+              c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.settle_us,
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, rawiq_max(),
               c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY", c.rssi_hz, c.search_hz, c.dc_guard,
@@ -82,12 +82,11 @@ static void send_status(void) {
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type));
     for (unsigned j = 0; j < plan.nhops; j++) {
         const plan_hop_t *h = &plan.hop[j];
-        if (h->nch > 1)
-            reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[%u,%u],\"offset_hz\":[%" PRId32 ",%" PRId32 "]}",
-                      j ? "," : "", h->lo_khz, h->ch[0], h->ch[1], h->offset_hz[0], h->offset_hz[1]);
-        else
-            reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[%u],\"offset_hz\":[%" PRId32 "]}",
-                      j ? "," : "", h->lo_khz, h->ch[0], h->offset_hz[0]);
+        reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[", j ? "," : "", h->lo_khz);
+        for (unsigned k = 0; k < h->nch; k++) reply_add("%s%u", k ? "," : "", h->ch[k]);
+        reply_add("],\"offset_hz\":[");
+        for (unsigned k = 0; k < h->nch; k++) reply_add("%s%" PRId32, k ? "," : "", h->offset_hz[k]);
+        reply_add("]}");
     }
     reply_add("]}\n");
     reply_send();
@@ -98,6 +97,29 @@ static bool parse_u32(const char *s, uint32_t *v) {
     unsigned long x = strtoul(s, &end, 0);
     if (end == s || *end) return false;
     *v = (uint32_t)x;
+    return true;
+}
+
+/* CHANNELS <name>=<MHz> ...: up to PROFILE_MAX_CHANNELS channels, each given
+ * by its 5.8 GHz frequency; a scaled profile maps it into its own band. */
+static bool parse_channels(char *args, const profile_t *p, scan_config_t *c) {
+    unsigned n = 0;
+    char *save;
+    for (char *tok = strtok_r(args, " ", &save); tok; tok = strtok_r(NULL, " ", &save)) {
+        char *eq = strchr(tok, '=');
+        uint32_t mhz;
+        if (n == PROFILE_MAX_CHANNELS || !eq || eq == tok || eq - tok >= (int)sizeof(c->ch[0].name)) return false;
+        *eq = 0;
+        for (const char *q = tok; *q; q++)
+            if (!((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') || (*q >= '0' && *q <= '9'))) return false;
+        if (!parse_u32(eq + 1, &mhz) || mhz > 100000 || !profile_from_equiv_khz(p, mhz * 1000, &c->ch[n].khz))
+            return false;
+        strcpy(c->ch[n].name, tok);
+        n++;
+    }
+    if (!n) return false;
+    c->nch = (uint8_t)n;
+    c->enabled = (1u << n) - 1;
     return true;
 }
 
@@ -116,13 +138,14 @@ static void handle(char *line) {
                     esp_app_get_description()->version, radio_phy_version());
     } else if (!strcmp(line, "PROFILE?")) {
         send_profile(&c);
-    } else if (sscanf(line, "PROFILE %31s %c", arg, &extra) == 1) {
-        const profile_t *p = profile_find(arg);
-        if (!p) { link_text("ERR profile\n"); return; }
-        if (strcmp(p->target, radio_caps()->target)) { link_text("ERR profile_target\n"); return; }
-        bool running = c.running;
-        scanner_defaults(p, &c);
-        c.running = running;
+    } else if (!strcmp(line, "CHANNELS DEFAULT")) {
+        c.nch = c.profile->nch;
+        memcpy(c.ch, c.profile->ch, sizeof(c.ch));
+        c.enabled = (1u << c.nch) - 1;
+        scanner_set_config(&c);
+        link_text("OK\n");
+    } else if (!strncmp(line, "CHANNELS ", 9)) {
+        if (!parse_channels(line + 9, c.profile, &c)) { link_text("ERR channels\n"); return; }
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (!strcmp(line, "STATUS?")) {
@@ -130,11 +153,11 @@ static void handle(char *line) {
     } else if (!strcmp(line, "ENABLE?")) {
         link_printf("ENABLE %" PRIu32 "\n", c.enabled);
     } else if (sscanf(line, "ENABLE %31s %c", arg, &extra) == 1 && parse_u32(arg, &a)) {
-        c.enabled = a & ((1u << c.profile->nch) - 1);
+        c.enabled = a & ((1u << c.nch) - 1);
         scanner_set_config(&c);
         link_printf("OK ENABLE %" PRIu32 "\n", c.enabled);
-    } else if (!strcmp(line, "MODE PAIR") || !strcmp(line, "MODE SINGLE")) {
-        c.mode = line[5] == 'P' ? PLAN_PAIR : PLAN_SINGLE;
+    } else if (!strcmp(line, "MODE GROUP") || !strcmp(line, "MODE SINGLE")) {
+        c.mode = line[5] == 'G' ? PLAN_GROUP : PLAN_SINGLE;
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (!strcmp(line, "SCAN START") || !strcmp(line, "SCAN STOP")) {

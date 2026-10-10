@@ -1,11 +1,7 @@
 // Shared UI context passed to every view. GPL-3.0-or-later.
 import type { Device } from "../serial/device";
 import type { Store } from "./store";
-import { equivKhz } from "../proto/frames";
-
-// Raceband R1-R8 (MHz). A scaled profile's channel takes the Raceband name
-// its 5.8 GHz equivalent lands on.
-const RACEBAND_MHZ = [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917];
+import { loadDeviceSettings, restoreCommands, saveDeviceSettings, type DeviceSettings } from "./channelPlan";
 
 export interface View {
   el: HTMLElement;
@@ -14,7 +10,6 @@ export interface View {
 
 export interface UiSettings {
   selected: number; // channel id for zoom / raw IQ
-  equivAxis: boolean; // label scaled profiles in their 5.8 GHz equivalent
   showMaxHold: boolean;
   showAverage: boolean;
   historyMetric: "ema" | "rssi";
@@ -28,7 +23,6 @@ export class App {
   readOnly = false; // replay
   settings: UiSettings = {
     selected: 0,
-    equivAxis: false,
     showMaxHold: true,
     showAverage: true,
     historyMetric: "ema",
@@ -36,6 +30,8 @@ export class App {
     dbMin: -100,
     dbMax: -20,
   };
+  /** Channel plan, hop mode and gain, restored on every connect. */
+  deviceSettings: DeviceSettings = loadDeviceSettings();
   private listeners = new Set<() => void>();
 
   constructor(readonly store: Store) {
@@ -77,6 +73,23 @@ export class App {
     }
   }
 
+  updateDeviceSettings(patch: Partial<DeviceSettings>) {
+    Object.assign(this.deviceSettings, patch);
+    saveDeviceSettings(this.deviceSettings);
+  }
+
+  /** Put the device in the stored state (channel plan, mode, gain). */
+  async restoreDevice(device: Device) {
+    for (const cmd of restoreCommands(this.deviceSettings)) {
+      this.store.addLog("tx", cmd);
+      try {
+        await device.command(cmd);
+      } catch (e) {
+        this.store.addLog("error", (e as Error).message);
+      }
+    }
+  }
+
   /** Re-read STATUS after a configuration change. */
   async refreshStatus() {
     if (!this.device || this.readOnly) return;
@@ -87,29 +100,8 @@ export class App {
     }
   }
 
-  /** Display frequency in MHz for an absolute kHz value (optionally 5.8 GHz equivalent). */
-  displayMHz(khz: number): number {
-    const p = this.store.profile;
-    if (!p || !this.settings.equivAxis || p.scale === 1) return khz / 1000;
-    return equivKhz(p, khz) / 1000;
-  }
-
-  /** Channel name for display: the Raceband name (R1-R8) of a scaled channel
-   *  on the 5.8 GHz axis, otherwise the profile's own name. */
+  /** Channel name for display (band and number, e.g. R1). */
   channelName(id: number): string {
-    const p = this.store.profile;
-    const c = p?.channels[id];
-    if (!c) return "";
-    if (!this.settings.equivAxis || p.scale === 1) return c.name;
-    const mhz = equivKhz(p, c.khz) / 1000;
-    const r = RACEBAND_MHZ.findIndex((f) => Math.abs(f - mhz) < 1);
-    return r >= 0 ? `R${r + 1}` : c.name;
-  }
-
-  /** Display a frequency offset (Hz) in kHz, scaled back to the 5.8 GHz equivalent if requested. */
-  displayOffsetKhz(hz: number): number {
-    const p = this.store.profile;
-    const s = p && this.settings.equivAxis ? p.scale : 1;
-    return hz / 1000 / s;
+    return this.store.profile?.channels[id]?.name ?? "";
   }
 }

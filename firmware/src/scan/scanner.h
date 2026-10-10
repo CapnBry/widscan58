@@ -8,6 +8,8 @@
 
 typedef struct {
     const profile_t *profile;
+    uint8_t nch;             /* channel plan: the profile's, or set by CHANNELS */
+    profile_channel_t ch[PROFILE_MAX_CHANNELS];
     uint32_t enabled;
     plan_mode_t mode;
     bool running;

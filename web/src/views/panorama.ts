@@ -108,11 +108,9 @@ export class Panorama implements View {
     holdBtn.onclick = () => app.store.resetHolds();
     const maxBtn = el("button", {}, "Max hold");
     const avgBtn = el("button", {}, "Average");
-    const equivBtn = el("button", { title: "Label the scaled 2.4 GHz band in its 5.8 GHz Raceband equivalent" }, "5.8 GHz axis");
     const sync = () => {
       maxBtn.classList.toggle("on", app.settings.showMaxHold);
       avgBtn.classList.toggle("on", app.settings.showAverage);
-      equivBtn.classList.toggle("on", app.settings.equivAxis);
     };
     maxBtn.onclick = () => {
       app.settings.showMaxHold = !app.settings.showMaxHold;
@@ -120,10 +118,6 @@ export class Panorama implements View {
     };
     avgBtn.onclick = () => {
       app.settings.showAverage = !app.settings.showAverage;
-      app.changed();
-    };
-    equivBtn.onclick = () => {
-      app.settings.equivAxis = !app.settings.equivAxis;
       app.changed();
     };
     app.onChange(sync);
@@ -145,7 +139,7 @@ export class Panorama implements View {
     this.el = el(
       "section",
       { class: "card span-12" },
-      el("h2", {}, "Band panorama", el("span", { class: "tools" }, equivBtn, maxBtn, avgBtn, autoBtn, holdBtn)),
+      el("h2", {}, "Band panorama", el("span", { class: "tools" }, maxBtn, avgBtn, autoBtn, holdBtn)),
       chart,
       legend,
       el("h2", { style: "margin-top:10px" }, "Waterfall", el("span", { class: "tools muted" }, "newest at top · live trace per rotation")),
@@ -225,7 +219,7 @@ export class Panorama implements View {
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     });
-    drawGrid(s, a, (v) => app.displayMHz(v).toFixed(app.settings.equivAxis && p.scale !== 1 ? 0 : 1), (v) => `${v}`, 10, 5);
+    drawGrid(s, a, (v) => (v / 1000).toFixed(1), (v) => `${v}`, 10, 5);
     // Channel labels and the LO markers of the current plan.
     ctx.font = "600 11px system-ui";
     ctx.textAlign = "center";
@@ -301,7 +295,7 @@ export class Panorama implements View {
       return r;
     };
     const head = el("div", { class: "head" });
-    head.textContent = `${this.app.displayMHz(khz).toFixed(3)} MHz${chId >= 0 ? ` · ${this.app.channelName(chId)}` : ""}`;
+    head.textContent = `${(khz / 1000).toFixed(3)} MHz${chId >= 0 ? ` · ${this.app.channelName(chId)}` : ""}`;
     this.tip.replaceChildren(
       head,
       row(t.ink, fmt(comp.live[i]), "live"),

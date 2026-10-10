@@ -45,7 +45,7 @@ export class Zoom implements View {
     const half = search * 1.6;
     const f0 = ch.khz - half;
     const f1 = ch.khz + half;
-    this.title.textContent = `${app.channelName(id)} · ${app.displayMHz(ch.khz).toFixed(3)} MHz`;
+    this.title.textContent = `${app.channelName(id)} · ${(ch.khz / 1000).toFixed(3)} MHz`;
     const a = axes(s, f0, f1, app.settings.dbMin, app.settings.dbMax, { top: 16 });
     const ctx = s.ctx;
     const t = theme();
@@ -58,7 +58,7 @@ export class Zoom implements View {
       s,
       a,
       (v) => {
-        const off = app.displayOffsetKhz((v - ch.khz) * 1000) / 1000;
+        const off = (v - ch.khz) / 1000;
         return `${off >= 0 ? "+" : ""}${off.toFixed(1)}`;
       },
       (v) => `${v}`,
@@ -109,7 +109,7 @@ export class Zoom implements View {
     ctx.font = "10px system-ui";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText("dBFS/bin · x: offset from nominal, MHz" + (app.settings.equivAxis && p.scale !== 1 ? " (5.8 GHz equiv)" : ""), 2, 1);
+    ctx.fillText("dBFS/bin · x: offset from nominal, MHz", 2, 1);
     if (!m) return;
     const floorBin = app.store.floorByLo.get(app.store.channels[id].loKhz);
     if (floorBin !== undefined) {
@@ -140,7 +140,7 @@ export class Zoom implements View {
       ctx.lineWidth = 1;
     }
     const off = (hz: number) => {
-      const k = app.displayOffsetKhz(hz);
+      const k = hz / 1000;
       return `${k >= 0 ? "+" : ""}${k.toFixed(0)} kHz`;
     };
     const items: [string, string][] = [
@@ -150,7 +150,7 @@ export class Zoom implements View {
       ["centre", sig && !(m.flags & CHF.NO_CENTROID) ? off(m.centroidOffHz) : "—"],
       ["peak", sig ? `${m.peak.toFixed(1)} dBFS/bin` : "—"],
       ["most occupied", sig && !(m.flags & CHF.NO_CENTROID) ? off(m.peakOffHz) : "—"],
-      ["OBW 99 %", sig && !(m.flags & CHF.NO_CENTROID) ? `${(app.displayOffsetKhz(m.obwHiHz - m.obwLoHz) / 1000).toFixed(2)} MHz (${off(m.obwLoHz)} … ${off(m.obwHiHz)})` : "—"],
+      ["OBW 99 %", sig && !(m.flags & CHF.NO_CENTROID) ? `${((m.obwHiHz - m.obwLoHz) / 1e6).toFixed(2)} MHz (${off(m.obwLoHz)} … ${off(m.obwHiHz)})` : "—"],
     ];
     this.readout.replaceChildren(
       ...items.map(([k, v]) => {

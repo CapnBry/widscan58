@@ -217,13 +217,26 @@ framed `LOG` messages.
 
 ### 4.3 LO planner (profile-driven)
 
-**Pair mode (default):** the LO sits halfway between neighbouring channels. The DC
-spike lands in the gap between channels, and 8 channels take 4 hops.
-**Single mode:** LO = channel centre + profile `single_offset_hz`.
+**Group mode (default):** one LO covers every channel within the
+profile's `hop_max_span_khz` (40 MHz; 11.29 MHz on the S3). Raceband pairs as
+before: the LO sits halfway, the DC spike lands in the gap, and 8 channels
+take 4 hops. Bands A, B and F (19–20 MHz spacing) put three channels on one
+LO and take 3 hops; E takes 4. Custom plans can group more (e.g. A8, R3, B1
+within 8 MHz). Three channels evenly over 40 MHz leave no gap within reach,
+so the LO sits 1 MHz off the middle channel; the outer channels sit 20 MHz
+out, so their ±5 MHz RSSI windows reach 25 MHz, past the ±24 MHz passband
+(and into the skirt measured above LO 5831 MHz, Status below).
+**Single mode:** LO = channel centre + profile `single_lo_offset_khz`.
 
-The planner takes the enabled-channel mask and greedily pairs neighbours whose
-spacing is ≤ the profile's `pair_max_spacing_hz`. It outputs LOs with
-`(channel_id, offset_hz)` lists. A panorama mode sweeps the whole profile band in
+The planner sorts the enabled channels by frequency and groups them greedily
+from the lowest (minimum hop count for fixed-width windows). For each group it
+tries an LO in the middle of every gap, at the single-mode offset outside
+either end, and at both ends of the allowed range; keeps those with every
+channel within max(span/2, single offset) of the LO; and picks the one
+farthest from the nearest channel centre, counting at most the single offset
+(ties: the smallest farthest offset). It outputs LOs with `(channel_id, offset_hz)`
+lists. The channel plan itself is the profile's default (R1–R8) or a
+`CHANNELS` list from the host. A panorama mode sweeps the whole profile band in
 steps of the usable span as a background pass:
 - C5: 5600–5975 MHz in about 36 MHz steps
 - S3: 2400–2483.5 MHz in about 10 MHz steps
@@ -335,10 +348,10 @@ Host → device: ASCII lines; each replies `OK …` or `ERR <reason>`.
 | Command | Purpose |
 |---|---|
 | `INFO` | `widscan58 <target> <proto_ver> <fw_ver> <phy_ver>` |
-| `PROFILE?` / `PROFILE <name>` | Dump the active band profile as JSON (channels, windows, LOs, rate, filter, span), or switch profile (e.g. `s3-race24`, `s3-race24-alias`, `c5-race`) |
-| `CHANNELS?` / `CHANNELS <id:kHz>,…` | Read or override the channel table |
+| `PROFILE?` | Dump the band profile as JSON (channel plan, windows, rate, span); one profile per target, no switching |
+| `CHANNELS <name>=<MHz> …` / `CHANNELS DEFAULT` | Replace the channel plan (up to 8, 5.8 GHz equivalent MHz); `PROFILE?` reports it |
 | `ENABLE <mask>` / `ENABLE?` | Enabled-channel bitmask |
-| `MODE PAIR\|SINGLE\|AUTO` | Hop strategy |
+| `MODE GROUP\|SINGLE` | Hop strategy |
 | `SCAN START\|STOP` | Start/stop round robin and streaming |
 | `PANO <every_n_rotations>` / `PANO OFF` | Background panorama sweep |
 | `GAIN MANUAL <idx>\|AUTO\|HARDWARE`, `GAIN?` | Gain |
@@ -383,9 +396,10 @@ localhost.
 
 **Fully profile-driven:** on connect, the UI calls `INFO` and `PROFILE?`. Channel
 names, frequencies, windows, panorama span and axis labels all come from the
-profile, so the same UI shows "S1–S8 @ 2.4 GHz" for the S3 and "R1–R8 @ 5.8 GHz"
-for the C5. A banner marks the S3 as a scaled mock-up and offers a "show equivalent
-5.8 GHz frequencies" toggle (axes multiplied back by 1/k).
+profile, so the same UI shows R1–R8 at 2.4 GHz on the S3 and at 5.8 GHz on
+the C5. The channel plan (Channels → Edit), hop mode and gain are kept in
+localStorage and sent on every connect. A banner marks the S3 as a scaled
+mock-up; its frequencies are always shown as tuned (2.4 GHz).
 
 **Transport:** `requestPort` filtered to `303A:1001`. Stream parser splits text
 lines from frames, checks CRC, counts resyncs. One outstanding command at a time
@@ -558,7 +572,7 @@ What exists:
   - Gain: `force_rx_gain`; the maximum index is read from 0x600a702c (< 90).
   - `BOOTLOADER` sets `LP_AON_FORCE_DOWNLOAD_BOOT`.
 - Shared code:
-  - Profiles carry a `target`. The firmware boots into the first profile for its chip, and `PROFILE` rejects the other chip's (`ERR profile_target`). The `c5-race` values match the web simulator.
+  - Profiles carry a `target`. The firmware uses the profile for its chip (the `PROFILE <name>` switch was later removed: each chip has only one). The `c5-race` values match the web simulator.
   - `radio_caps_t` has 6 rate slots and `lo_step_khz`. `RAWIQ` and `FFTEVAL LIVE` reject LOs that are not a multiple of it.
   - The link and command tasks were pinned to core 1; they now use the last core (core 0 on the single-core C5).
 - FFT: the S3's S16R kernel is Xtensa assembly. Other targets use `dsp/fft_r4_sc16.h`, a rounded Q15 radix-4 kernel (see the DSP section below). The C5 has no FPU, so R2/R4 run in software floating point.

@@ -2,12 +2,13 @@
 
 FPV channel scanner using the ESP32's built-in radio as an SDR, through the raw
 I/Q debug path found by [ESPARGOS/esp-sdr](https://github.com/ESPARGOS/esp-sdr).
-The firmware steps through FPV channels (Raceband) and reports RSSI, noise floor,
+The firmware steps through FPV channels (Raceband by default, or any eight of
+the A/B/E/F/R bands) and reports RSSI, noise floor,
 SNR, peak and video-centre frequency per channel, plus a decimated spectrum. A
 Web Serial dashboard shows it all live.
 
-Status: the **ESP32-S3** runs a scaled 2.4 GHz mock-up of Raceband (channels
-S1–S8, see [PLAN.md](PLAN.md) §2.2). The **ESP32-C5** (real 5.8 GHz Raceband)
+Status: the **ESP32-S3** runs a scaled 2.4 GHz mock-up of the 5.8 GHz band (see
+[PLAN.md](PLAN.md) §2.2). The **ESP32-C5** (real 5.8 GHz Raceband)
 target runs on a Seeed XIAO ESP32-C5 and works with the web UI: ~4.4 ms/hop,
 about 56 rotations/s over R1–R8 (PLAN.md, Status, has the breakdown).
 
@@ -37,9 +38,8 @@ pio run -e esp32s3 -t upload      # esptool resets via USB (usb-reset); usually 
 pio run -e esp32c5 -t upload      # ESP32-C5 (tested on a XIAO ESP32-C5), native USB port
 ```
 
-Each target boots into its own band profile: `s3-race24` on the S3, `c5-race`
-on the C5. `PROFILE <name>` refuses the other target's profile
-(`ERR profile_target`).
+Each target has one band profile, fixed at build time: `s3-race24` on the S3,
+`c5-race` on the C5. `PROFILE?` reports it, with the active channel plan.
 
 **Flashing is not fully reliable yet** (see PLAN.md, "Open: flashing reliability"). Uploads sometimes fail partway through, and a failure after the erase step leaves the board unbootable (the ROM prints `invalid header: 0xffffffff`). The reliable path:
 
@@ -114,7 +114,8 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | Command | Purpose |
 |---|---|
 | `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration (including `rawiq_max`), band profile, DSP time breakdown, masked board spurs |
-| `ENABLE <mask>`, `MODE PAIR\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how |
+| `CHANNELS <name>=<MHz> …`, `CHANNELS DEFAULT` | Channel plan: up to 8 channels by their 5.8 GHz frequency, e.g. `CHANNELS R1=5658 A8=5725` (the S3 maps them into its scaled band). Ids follow the order given; all are enabled. The UI's Channels → Edit sends this on every connect |
+| `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R and E take 4), keeping it clear of every channel centre where it can; `SINGLE` gives each channel its own LO |
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |

@@ -110,7 +110,7 @@ function updateBanner() {
     add(
       `${p.name}:`,
       `Raceband scaled into ${p.band_khz[0] / 1000}–${p.band_khz[1] / 1000} MHz (k = ${p.scale.toFixed(4)}). ` +
-        "Widths and windows are scaled by k; use “5.8 GHz axis” to read frequencies as their Raceband equivalent.",
+        "Widths and windows are scaled by k.",
     );
   banner.replaceChildren(...parts);
   banner.style.display = parts.length ? "block" : "none";
@@ -126,6 +126,7 @@ function updateFirmwareText() {
 }
 
 async function syncDevice(device: Device) {
+  await app.restoreDevice(device);
   for (const cmd of ["INFO", "PROFILE?", "STATUS?", "SPURS?"]) {
     try {
       await device.command(cmd);

@@ -45,7 +45,7 @@ jobs:
           path: |
             ~/.platformio
             ~/.cache/pip
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini', 'firmware/dependencies.lock') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini', 'firmware/dependencies.lock.*') }}
 
       - name: Build firmware
         run: |

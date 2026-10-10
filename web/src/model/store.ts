@@ -2,10 +2,12 @@
 // redraw when `version` changes. GPL-3.0-or-later.
 import {
   FRAME_LOG,
+  FRAME_LEVELS,
   FRAME_METRICS,
   FRAME_RAWIQ,
   FRAME_SPECTRUM,
   FRAME_TELEMETRY,
+  parseLevels,
   parseMetrics,
   parseRawIq,
   parseSpectrum,
@@ -49,6 +51,11 @@ export class Series {
   clear() {
     this.head = this.size = 0;
   }
+}
+
+/** The smoothed RSSI series, or the raw one in modes without an EMA. */
+export function smoothedSeries(cs: ChannelState): Series {
+  return cs.latest && cs.latest.rssiEma === null ? cs.rssi : cs.ema;
 }
 
 export interface ChannelState {
@@ -115,7 +122,7 @@ export class Store {
     this.profile = p;
     this.planKey = key;
     if (changed) {
-      const cap = HISTORY_SECONDS * 120;
+      const cap = HISTORY_SECONDS * 250; // updates/s per channel: ~200 with FFT 128 and METRICS RSSI
       this.channels = p.channels.map(() => ({
         latest: null,
         loKhz: 0,
@@ -165,6 +172,9 @@ export class Store {
       case FRAME_METRICS:
         this.onMetrics(parseMetrics(item.payload));
         break;
+      case FRAME_LEVELS:
+        this.onMetrics(parseLevels(item.payload));
+        break;
       case FRAME_SPECTRUM:
         this.onSpectrum(parseSpectrum(item.payload));
         break;
@@ -183,7 +193,8 @@ export class Store {
 
   private onMetrics(m: Metrics) {
     this.lastMetrics = m;
-    this.floorByLo.set(m.loKhz, m.floorBin);
+    if (m.floorBin === null) this.floorByLo.delete(m.loKhz);
+    else this.floorByLo.set(m.loKhz, m.floorBin);
     const t = this.now();
     const wall = performance.now();
     this.hopTimes.push({ tune: m.tuneUs, capture: m.captureUs, dsp: m.dspUs });
@@ -195,8 +206,8 @@ export class Store {
       st.loKhz = m.loKhz;
       st.updated = wall;
       st.rssi.push(t, c.rssi);
-      st.ema.push(t, c.rssiEma);
-      st.floor.push(t, c.floor);
+      if (c.rssiEma !== null) st.ema.push(t, c.rssiEma);
+      if (c.floor !== null) st.floor.push(t, c.floor);
     }
   }
 

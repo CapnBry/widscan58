@@ -26,6 +26,7 @@ typedef struct {
     uint8_t gain;
     radio_recal_t recal;
     /* Measurement */
+    uint8_t metrics_mode;    /* METRICS_FULL, _RSSI or _SNR (frames.h) */
     uint32_t rssi_hz, search_hz;
     uint8_t dc_guard;
     uint32_t spur_guard_hz;  /* +/- width masked around each known spur */

@@ -122,7 +122,8 @@ export class Zoom implements View {
       ctx.setLineDash([]);
     }
     const sig = (m.flags & CHF.SIGNAL) !== 0;
-    if (sig) {
+    // Occupancy is absent in METRICS RSSI|SNR.
+    if (sig && m.peakOffHz !== null && m.centroidOffHz !== null && m.peak !== null && m.obwLoHz !== null && m.obwHiHz !== null) {
       vline(ch.khz + m.peakOffHz / 1000, t.good);
       if (!(m.flags & CHF.NO_CENTROID)) vline(ch.khz + m.centroidOffHz / 1000, t.critical);
       // 99 % occupied band (time-averaged) as a bracket 10 dB under this hop's peak.
@@ -143,14 +144,16 @@ export class Zoom implements View {
       const k = hz / 1000;
       return `${k >= 0 ? "+" : ""}${k.toFixed(0)} kHz`;
     };
+    // Blank: not measured in this metrics mode; "—": measured, nothing there.
+    const occ = sig && !(m.flags & CHF.NO_CENTROID);
     const items: [string, string][] = [
-      ["RSSI", `${m.rssi.toFixed(1)} dBFS (EMA ${m.rssiEma.toFixed(1)})`],
-      ["SNR", `${m.snr.toFixed(1)} dB`],
-      ["floor", `${m.floor.toFixed(1)} dBFS`],
-      ["centre", sig && !(m.flags & CHF.NO_CENTROID) ? off(m.centroidOffHz) : "—"],
-      ["peak", sig ? `${m.peak.toFixed(1)} dBFS/bin` : "—"],
-      ["most occupied", sig && !(m.flags & CHF.NO_CENTROID) ? off(m.peakOffHz) : "—"],
-      ["OBW 99 %", sig && !(m.flags & CHF.NO_CENTROID) ? `${((m.obwHiHz - m.obwLoHz) / 1e6).toFixed(2)} MHz (${off(m.obwLoHz)} … ${off(m.obwHiHz)})` : "—"],
+      ["RSSI", `${m.rssi.toFixed(1)} dBFS` + (m.rssiEma === null ? "" : ` (EMA ${m.rssiEma.toFixed(1)})`)],
+      ["SNR", m.snr === null ? "" : `${m.snr.toFixed(1)} dB`],
+      ["floor", m.floor === null ? "" : `${m.floor.toFixed(1)} dBFS`],
+      ["centre", m.centroidOffHz === null ? "" : occ ? off(m.centroidOffHz) : "—"],
+      ["peak", m.peak === null ? "" : sig ? `${m.peak.toFixed(1)} dBFS/bin` : "—"],
+      ["most occupied", m.peakOffHz === null ? "" : occ ? off(m.peakOffHz) : "—"],
+      ["OBW 99 %", m.obwLoHz === null || m.obwHiHz === null ? "" : occ ? `${((m.obwHiHz - m.obwLoHz) / 1e6).toFixed(2)} MHz (${off(m.obwLoHz)} … ${off(m.obwHiHz)})` : "—"],
     ];
     this.readout.replaceChildren(
       ...items.map(([k, v]) => {

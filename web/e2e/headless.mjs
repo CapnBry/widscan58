@@ -83,6 +83,24 @@ await sleep(1500);
 s = await snap();
 check("restore + GAIN MANUAL 50", s.status?.enabled === 255 && s.status?.gain === 50, JSON.stringify(s.status));
 
+// Reduced metrics: FRAME_LEVELS; what the mode does not measure is left blank.
+for (const mode of ["SNR", "RSSI"]) {
+  await send(`METRICS ${mode}`);
+  await sleep(1500);
+  const lv = await page.evaluate(() => {
+    const st = window.widscan58.store;
+    const m = st.lastMetrics;
+    const c = m?.channels[0];
+    return { status: st.status?.metrics, mode: m?.mode, rssi: c?.rssi, snr: c?.snr, ema: c?.rssiEma, centre: c?.centroidOffHz };
+  });
+  const ok = lv.status === mode && lv.mode === mode && Number.isFinite(lv.rssi) && lv.ema === null && lv.centre === null &&
+    (mode === "SNR" ? Number.isFinite(lv.snr) : lv.snr === null);
+  check(`METRICS ${mode} -> levels frames`, ok, JSON.stringify(lv));
+  await page.screenshot({ path: path.join(out, `metrics-${mode.toLowerCase()}.png`), fullPage: true });
+}
+await send("METRICS FULL");
+await sleep(1000);
+
 // Click a channel tile and the panorama, capture raw I/Q via the button.
 const tiles = await page.$$(".tile");
 await tiles[5].click();

@@ -1,6 +1,7 @@
 // Lap-timer style RSSI history for all channels, with crosshair tooltip.
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
+import { smoothedSeries, type ChannelState } from "../model/store";
 import { axes, channelColor, drawGrid, el, prepare, theme } from "../util/canvas";
 
 export class History implements View {
@@ -64,9 +65,10 @@ export class History implements View {
     let lo = Infinity;
     let hi = -Infinity;
     const key = app.settings.historyMetric;
+    const series = (cs: ChannelState) => (key === "ema" ? smoothedSeries(cs) : cs.rssi);
     store.channels.forEach((cs, id) => {
       if (st && !(st.enabled & (1 << id))) return;
-      cs[key].forEach((t, v) => {
+      series(cs).forEach((t, v) => {
         if (now - t > span) return;
         lo = Math.min(lo, v);
         hi = Math.max(hi, v);
@@ -89,7 +91,7 @@ export class History implements View {
       ctx.beginPath();
       let pen = false;
       let lastX = -1;
-      cs[key].forEach((t, v) => {
+      series(cs).forEach((t, v) => {
         const age = now - t;
         if (age > span) return;
         const x = a.sx(-age);
@@ -132,7 +134,7 @@ export class History implements View {
       if (st && !(st.enabled & (1 << id))) return;
       let best = Infinity;
       let val = NaN;
-      cs[key].forEach((tt, v) => {
+      series(cs).forEach((tt, v) => {
         const d = Math.abs(tt - target);
         if (d < best) {
           best = d;

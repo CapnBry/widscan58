@@ -1,5 +1,6 @@
 /* GPL-3.0-or-later. */
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 #include "metrics.h"
 
@@ -46,7 +47,7 @@ float metrics_percentile_bias(unsigned segments, float q) {
     return (float)(segments / x);
 }
 
-void metrics_floor(const metrics_input_t *in, float q, uint32_t *scratch, metrics_floor_t *out) {
+uint32_t metrics_floor_raw(const metrics_input_t *in, float q, uint32_t *scratch) {
     const int centre = (int)(in->nfft / 2), pb = (int)(in->passband_hz / in->bin_hz);
     int k0 = centre - pb, k1 = centre + pb;
     if (k0 < 0) k0 = 0;
@@ -54,8 +55,11 @@ void metrics_floor(const metrics_input_t *in, float q, uint32_t *scratch, metric
     unsigned n = 0;
     for (int k = k0; k <= k1; k++)
         if (in->valid[k]) scratch[n++] = in->p[k];
-    uint32_t v = n ? select_kth(scratch, n, (unsigned)(q * (n - 1))) : 0;
-    out->floor_units = (float)v * in->floor_bias;
+    return n ? select_kth(scratch, n, (unsigned)(q * (n - 1))) : 0;
+}
+
+void metrics_floor(const metrics_input_t *in, float q, uint32_t *scratch, metrics_floor_t *out) {
+    out->floor_units = (float)metrics_floor_raw(in, q, scratch) * in->floor_bias;
     out->floor_bin = out->floor_units * in->scale;
     out->floor_bin_db = metrics_db(out->floor_bin);
 }
@@ -217,4 +221,38 @@ void metrics_channel(const metrics_input_t *in, const metrics_floor_t *fl, int32
     while (r < k1 && in->valid[r + 1] && in->p[r + 1] > edge) r++;
     out->obw_lo_off_hz = (l - centre - 0.5f) * in->bin_hz - off;
     out->obw_hi_off_hz = (r - centre + 0.5f) * in->bin_hz - off;
+}
+
+void metrics_level(const metrics_input_t *in, uint32_t floor_raw, int32_t offset_hz, metrics_level_t *out) {
+    out->flags = 0;
+    const int centre = (int)(in->nfft / 2), last = (int)in->nfft - 1;
+    /* Bins whose centre is within +/- rssi_hz of the channel, as metrics_channel. */
+    const float off = (float)offset_hz;
+    int r0 = centre + (int)ceilf((off - in->rssi_hz) / in->bin_hz);
+    int r1 = centre + (int)floorf((off + in->rssi_hz) / in->bin_hz);
+    if (r0 < 0) r0 = 0;
+    if (r1 > last) r1 = last;
+    const unsigned total = r1 >= r0 ? (unsigned)(r1 - r0 + 1) : 0;
+    uint64_t sum = 0;
+    unsigned used = 0;
+    for (int k = r0; k <= r1; k++) {
+        if (!in->valid[k]) continue;
+        sum += in->p[k];
+        used++;
+    }
+    /* Masked bins are filled with the window's mean, as metrics_channel. */
+    if (used < total) {
+        out->flags |= CHF_DC_IN_SEARCH;
+        if (used) sum = sum * total / used;
+    }
+    if ((uint32_t)abs(offset_hz) + in->rssi_hz > in->passband_hz) out->flags |= CHF_EDGE;
+    const int32_t rssi_q8 = metrics_code_q8(sum);
+    out->rssi = sum ? metrics_code_u8(rssi_q8 + in->level_q8) : 0;
+    out->snr = 0;
+    if (!floor_raw || !sum) return;
+    /* Noise in the window: the mean noise per bin times its bins (the ENBW
+     * and scale cancel in the ratio). */
+    const int32_t snr_q8 = rssi_q8 - metrics_code_q8((uint64_t)floor_raw * total) - in->floor_bias_q8;
+    out->snr = metrics_code_u8(snr_q8);
+    if (snr_q8 >= in->signal_q8) out->flags |= CHF_SIGNAL;
 }

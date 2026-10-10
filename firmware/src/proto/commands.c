@@ -48,6 +48,10 @@ static void reply_send(void) {
     reply[0] = 0;
 }
 
+static const char *metrics_mode_name(unsigned m) {
+    return m == METRICS_RSSI ? "RSSI" : m == METRICS_SNR ? "SNR" : "FULL";
+}
+
 static void send_profile(const scan_config_t *c) {
     const profile_t *p = c->profile;
     reply_add("PROFILE {\"name\":\"%s\",\"description\":\"%s\",\"target\":\"%s\","
@@ -71,13 +75,14 @@ static void send_status(void) {
     reply_add("STATUS {\"profile\":\"%s\",\"running\":%d,\"enabled\":%" PRIu32 ",\"mode\":\"%s\","
               "\"capture_samples\":%u,\"nfft\":%u,\"segments\":%u,\"rate_code\":%u,\"filter\":%d,"
               "\"conjugate\":%d,\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
-              "\"recal\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
+              "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"plan\":[",
               c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.iq_corr, c.settle_us,
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, rawiq_max(),
-              c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY", c.rssi_hz, c.search_hz, c.dc_guard,
+              c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY",
+              metrics_mode_name(c.metrics_mode), c.rssi_hz, c.search_hz, c.dc_guard,
               (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type));
     for (unsigned j = 0; j < plan.nhops; j++) {
@@ -189,7 +194,7 @@ static void handle(char *line) {
         c.capture_samples = (uint16_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
-    } else if (sscanf(line, "FFT %" SCNu32 " %c", &a, &extra) == 1 && a >= 256 && a <= PSD_MAX_FFT && !(a & (a - 1))) {
+    } else if (sscanf(line, "FFT %" SCNu32 " %c", &a, &extra) == 1 && a >= 128 && a <= PSD_MAX_FFT && !(a & (a - 1))) {
         c.nfft = (uint16_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
@@ -225,6 +230,12 @@ static void handle(char *line) {
         c.search_hz = b;
         scanner_set_config(&c);
         link_text("OK\n");
+    } else if (!strcmp(line, "METRICS FULL") || !strcmp(line, "METRICS RSSI") || !strcmp(line, "METRICS SNR")) {
+        c.metrics_mode = line[8] == 'F' ? METRICS_FULL : line[8] == 'R' ? METRICS_RSSI : METRICS_SNR;
+        scanner_set_config(&c);
+        link_text("OK\n");
+    } else if (!strcmp(line, "METRICS?")) {
+        link_printf("METRICS %s\n", metrics_mode_name(c.metrics_mode));
     } else if (sscanf(line, "AVG %" SCNu32 " %c", &a, &extra) == 1 && a >= METRICS_AVG_SHIFT_MIN &&
                a <= METRICS_AVG_SHIFT_MAX) {
         c.avg_shift = (uint8_t)a;

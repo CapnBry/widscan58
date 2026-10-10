@@ -19,7 +19,13 @@ enum {
     FRAME_TELEMETRY = 3,
     FRAME_RAWIQ = 4,
     FRAME_LOG = 5,
+    FRAME_LEVELS = 6,
 };
+
+/* What the scanner measures per channel (METRICS command). FULL sends
+ * FRAME_METRICS; RSSI and SNR send FRAME_LEVELS with only what lap timing
+ * needs: the channel power, and in SNR mode the noise floor and SNR. */
+enum { METRICS_FULL = 0, METRICS_RSSI = 1, METRICS_SNR = 2 };
 
 typedef struct __attribute__((packed)) {
     uint8_t sync0, sync1, type, version;
@@ -88,9 +94,33 @@ typedef struct __attribute__((packed)) {
     int8_t filter;           /* -1 = automatic */
 } frame_telemetry_t;
 
+/* One per hop in METRICS RSSI|SNR mode. Levels are byte codes, like the
+ * spectrum: dBFS = code / 2 - 127.5; ratios: dB = code / 2. */
+typedef struct __attribute__((packed)) {
+    uint32_t seq;
+    uint32_t t_ms;
+    uint32_t lo_khz;
+    uint32_t tune_us, capture_us, dsp_us;
+    uint16_t saturated;
+    uint8_t gain;            /* 255 = hardware AGC */
+    uint8_t hop_index, hops;
+    uint8_t mode;            /* METRICS_RSSI or METRICS_SNR */
+    uint8_t floor_bin;       /* mean noise per FFT bin, level code; 0 in RSSI mode */
+    uint8_t nch;
+} frame_levels_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t id;              /* profile channel index */
+    uint8_t flags;           /* CHF_* (metrics.h) */
+    uint8_t rssi;            /* channel power, level code */
+    uint8_t snr;             /* (S+N)/N, dB x 2; 0 in RSSI mode */
+} frame_level_t;
+
 /* web/src/proto/frames.ts and tools/widscan58cli.py hard-code these sizes. */
 _Static_assert(sizeof(frame_metrics_t) == 34, "frame_metrics_t layout");
 _Static_assert(sizeof(frame_channel_t) == 26, "frame_channel_t layout");
+_Static_assert(sizeof(frame_levels_t) == 32, "frame_levels_t layout");
+_Static_assert(sizeof(frame_level_t) == 4, "frame_level_t layout");
 _Static_assert(sizeof(frame_telemetry_t) == 62, "frame_telemetry_t layout");
 
 /* Raw snapshot, signed 8-bit I then Q: the 10-bit samples >> shift, with the

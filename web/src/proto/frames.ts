@@ -5,6 +5,13 @@ export const FRAME_SPECTRUM = 2;
 export const FRAME_TELEMETRY = 3;
 export const FRAME_RAWIQ = 4;
 export const FRAME_LOG = 5;
+export const FRAME_LEVELS = 6;
+
+// What the device measures per channel (METRICS command). FULL sends
+// FRAME_METRICS; RSSI and SNR send FRAME_LEVELS, which only has the channel
+// power, plus floor and SNR in SNR mode. Absent values parse as null.
+export type MetricsMode = "FULL" | "RSSI" | "SNR";
+const LEVELS_MODES: MetricsMode[] = ["FULL", "RSSI", "SNR"];
 
 export const CHF = {
   SIGNAL: 1,
@@ -12,24 +19,25 @@ export const CHF = {
   MASKED: 4, // DC or spur bins excluded in the search window
   EDGE: 8,
   NO_CENTROID: 16,
-  SPUR: 32,
+  SPUR: 32, // FULL: a known spur masked in the search window; RSSI/SNR: one in the RSSI window, unmasked
 } as const;
 
 export interface ChannelMetrics {
   id: number;
   flags: number;
   rssi: number; // dBFS
-  rssiEma: number;
-  floor: number; // noise in the RSSI window, dBFS
-  snr: number; // (S+N)/N dB
-  clearFloor: number | null;
-  peak: number; // per-bin dBFS, this hop
+  // null: not measured in this metrics mode.
+  rssiEma: number | null;
+  floor: number | null; // noise in the RSSI window, dBFS
+  snr: number | null; // (S+N)/N dB
+  clearFloor: number | null; // also null before the channel was ever clear
+  peak: number | null; // per-bin dBFS, this hop
   // Time-averaged occupancy, vs channel nominal: most occupied frequency,
   // power-weighted centre, and the band holding 99 % of the excess power.
-  peakOffHz: number;
-  centroidOffHz: number;
-  obwLoHz: number;
-  obwHiHz: number;
+  peakOffHz: number | null;
+  centroidOffHz: number | null;
+  obwLoHz: number | null;
+  obwHiHz: number | null;
 }
 
 export interface Metrics {
@@ -40,8 +48,9 @@ export interface Metrics {
   captureUs: number;
   dspUs: number;
   saturated: number;
-  floorBin: number; // dBFS per FFT bin
-  dc: number; // dBFS
+  mode: MetricsMode;
+  floorBin: number | null; // dBFS per FFT bin
+  dc: number | null; // dBFS
   gain: number; // 255 = hardware AGC
   hopIndex: number;
   hops: number;
@@ -101,6 +110,7 @@ export function parseMetrics(p: DataView): Metrics {
     captureUs: p.getUint32(16, true),
     dspUs: p.getUint32(20, true),
     saturated: p.getUint16(24, true),
+    mode: "FULL",
     floorBin: p.getInt16(26, true) / 100,
     dc: p.getInt16(28, true) / 100,
     gain: p.getUint8(30),
@@ -126,6 +136,54 @@ export function parseMetrics(p: DataView): Metrics {
       centroidOffHz: p.getInt32(o + 18, true),
       obwLoHz: p.getInt16(o + 22, true) * 1000,
       obwHiHz: p.getInt16(o + 24, true) * 1000,
+    });
+  }
+  return m;
+}
+
+const LEVELS_HDR = 32; // sizeof(frame_levels_t)
+const LEVEL_SIZE = 4; // sizeof(frame_level_t)
+// Level codes, as the spectrum: dBFS = code / 2 - 127.5.
+const levelDb = (code: number) => code / 2 - 127.5;
+
+export function parseLevels(p: DataView): Metrics {
+  const mode = LEVELS_MODES[p.getUint8(29)] ?? "RSSI";
+  const snrMode = mode === "SNR";
+  const m: Metrics = {
+    seq: p.getUint32(0, true),
+    tMs: p.getUint32(4, true),
+    loKhz: p.getUint32(8, true),
+    tuneUs: p.getUint32(12, true),
+    captureUs: p.getUint32(16, true),
+    dspUs: p.getUint32(20, true),
+    saturated: p.getUint16(24, true),
+    gain: p.getUint8(26),
+    hopIndex: p.getUint8(27),
+    hops: p.getUint8(28),
+    mode,
+    floorBin: snrMode ? levelDb(p.getUint8(30)) : null,
+    dc: null,
+    channels: [],
+  };
+  const nch = p.getUint8(LEVELS_HDR - 1);
+  for (let j = 0; j < nch; j++) {
+    const o = LEVELS_HDR + j * LEVEL_SIZE;
+    if (o + LEVEL_SIZE > p.byteLength) break;
+    const rssi = levelDb(p.getUint8(o + 2));
+    const snr = snrMode ? p.getUint8(o + 3) / 2 : null;
+    m.channels.push({
+      id: p.getUint8(o),
+      flags: p.getUint8(o + 1),
+      rssi,
+      rssiEma: null,
+      floor: snr === null ? null : rssi - snr,
+      snr,
+      clearFloor: null,
+      peak: null,
+      peakOffHz: null,
+      centroidOffHz: null,
+      obwLoHz: null,
+      obwHiHz: null,
     });
   }
   return m;
@@ -224,6 +282,7 @@ export interface Status {
   gain_max: number;
   rawiq_max?: number; // largest RAWIQ the link can carry in one frame
   recal: "ONCE" | "EVERY" | "CACHE";
+  metrics?: MetricsMode; // absent from firmware before METRICS existed
   rssi_hz: number;
   search_hz: number;
   dc_guard: number;

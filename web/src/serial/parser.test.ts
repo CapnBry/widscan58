@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StreamParser, crc32, encodeFrame } from "./parser";
-import { FRAME_METRICS, FRAME_SPECTRUM, parseMetrics, parseSpectrum, parseTelemetry } from "../proto/frames";
+import { FRAME_METRICS, FRAME_SPECTRUM, parseLevels, parseMetrics, parseSpectrum, parseTelemetry } from "../proto/frames";
 
 const text = (s: string) => new TextEncoder().encode(s);
 const join = (...parts: Uint8Array[]) => {
@@ -34,6 +34,27 @@ function metricsPayload(): Uint8Array {
   return new Uint8Array(dv.buffer);
 }
 
+// frame_levels_t + two frame_level_t, in SNR (2) or RSSI (1) mode.
+function levelsPayload(mode: number): DataView {
+  const H = 32;
+  const dv = new DataView(new ArrayBuffer(H + 8));
+  dv.setUint32(0, 9, true);
+  dv.setUint32(8, 5677000, true);
+  dv.setUint32(20, 1150, true);
+  dv.setUint8(26, 60);
+  dv.setUint8(28, 4);
+  dv.setUint8(29, mode);
+  dv.setUint8(30, mode === 2 ? 118 : 0); // floor/bin -68.5 dBFS
+  dv.setUint8(31, 2);
+  dv.setUint8(H, 0);
+  dv.setUint8(H + 1, 1);
+  dv.setUint8(H + 2, 183); // -36 dBFS
+  dv.setUint8(H + 3, mode === 2 ? 41 : 0); // 20.5 dB
+  dv.setUint8(H + 4, 1);
+  dv.setUint8(H + 6, 140); // -57.5 dBFS
+  return dv;
+}
+
 describe("crc32", () => {
   it("matches zlib for a known vector", () => {
     expect(crc32(text("123456789"))).toBe(0xcbf43926);
@@ -52,6 +73,17 @@ describe("StreamParser", () => {
     expect(m.floorBin).toBeCloseTo(-68.6);
     expect(m.dspUs).toBe(67602);
     expect(m.channels[0]).toMatchObject({ id: 3, flags: 1, rssi: -36, clearFloor: null, peakOffHz: -1234, centroidOffHz: 885000, obwLoHz: -4000000, obwHiHz: 4400000 });
+  });
+
+  it("parses levels frames, leaving what the mode does not measure null", () => {
+    const snr = parseLevels(levelsPayload(2));
+    expect(snr).toMatchObject({ seq: 9, loKhz: 5677000, dspUs: 1150, gain: 60, hops: 4, mode: "SNR", floorBin: -68.5, dc: null });
+    expect(snr.channels).toHaveLength(2);
+    expect(snr.channels[0]).toMatchObject({ id: 0, flags: 1, rssi: -36, snr: 20.5, floor: -56.5, rssiEma: null, peak: null, centroidOffHz: null });
+    const rssi = parseLevels(levelsPayload(1));
+    expect(rssi.mode).toBe("RSSI");
+    expect(rssi.floorBin).toBeNull();
+    expect(rssi.channels[1]).toMatchObject({ id: 1, rssi: -57.5, snr: null, floor: null });
   });
 
   it("reassembles frames split across chunks", () => {

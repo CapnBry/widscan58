@@ -39,9 +39,10 @@ static struct {
     channel_state_t ch[PROFILE_MAX_CHANNELS];
     psd_iq_t iq[PROFILE_MAX_CHANNELS]; /* per plan hop (one LO each) */
     float floor_bias;
+    int32_t floor_bias_q8;   /* the same as metrics_input_t.floor_bias_q8 */
     float centroid_ratio;
     uint32_t *scratch;
-    uint32_t seq_metrics, seq_spectrum;
+    uint32_t seq_metrics, seq_spectrum; /* seq_metrics counts FRAME_LEVELS too */
     uint8_t spec_codes[1024];
     /* Telemetry window */
     int64_t window_start;
@@ -76,6 +77,7 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->settle_us = 100;
     c->gain_mode = RADIO_GAIN_MANUAL;
     c->gain = 60;
+    c->metrics_mode = METRICS_FULL;
     c->rssi_hz = p->rssi_hz;
     c->search_hz = p->search_hz;
     c->dc_guard = 1;
@@ -127,7 +129,7 @@ static void apply_config(void) {
     /* Channel state is per plan index: a new channel list starts afresh. */
     bool channels_changed = s.cfg.nch != shared.nch || memcmp(s.cfg.ch, shared.ch, sizeof(shared.ch));
     bool measure_changed = profile_changed || channels_changed || s.cfg.nfft != shared.nfft ||
-                           s.cfg.rssi_hz != shared.rssi_hz;
+                           s.cfg.rssi_hz != shared.rssi_hz || s.cfg.metrics_mode != shared.metrics_mode;
     s.cfg = shared;
     s.plan = shared_plan;
     s.psd_error_reported = false;
@@ -144,6 +146,7 @@ static void apply_config(void) {
     unsigned segs = s.cfg.capture_samples / s.cfg.nfft;
     if (segs > s.cfg.segments) segs = s.cfg.segments;
     s.floor_bias = metrics_percentile_bias(segs ? segs : 1, FLOOR_PERCENTILE);
+    s.floor_bias_q8 = (int32_t)lrintf(20.0f * log10f(s.floor_bias) * 256.0f);
     s.centroid_ratio = powf(10.0f, s.cfg.centroid_db / 10.0f);
 }
 
@@ -211,6 +214,67 @@ static void emit_spectrum(const psd_result_t *psd, uint32_t lo_khz) {
 static scan_timing_t timing;
 void scanner_timing(scan_timing_t *t) { *t = timing; }
 
+/* After the measurements: the display spectrum and the timing breakdown. */
+static int64_t finish_hop(const psd_result_t *psd, const plan_hop_t *hop, int64_t t2, int64_t tm0, int64_t tm1) {
+    const scan_config_t *c = &s.cfg;
+    /* One spectrum per spec_every hops, rotating through the LOs: a plain
+     * hops_total % N would pick the same LO forever when N divides the plan. */
+    if (c->spec_every && s.hop % c->spec_every == s.rotations % c->spec_every) emit_spectrum(psd, hop->lo_khz);
+    int64_t t3 = esp_timer_get_time();
+    timing = (scan_timing_t){.prep_us = psd->prep_us, .fft_us = psd->fft_us, .power_us = psd->power_us,
+                             .psd_us = (uint32_t)(tm0 - t2), .metrics_us = (uint32_t)(tm1 - tm0),
+                             .spectrum_us = (uint32_t)(t3 - tm1)};
+    return t3;
+}
+
+static void hop_stats(int64_t t0, int64_t t1, int64_t t2, int64_t t3);
+
+/* METRICS RSSI|SNR: per channel only the RSSI window power, and in SNR mode
+ * the floor and SNR, as byte codes. No per-channel state. */
+static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_hop_t *hop, int64_t t0, int64_t t1,
+                      int64_t t2, int64_t tm0) {
+    const scan_config_t *c = &s.cfg;
+    const bool snr = c->metrics_mode == METRICS_SNR;
+    /* Per hop: the scale in level codes, from the cheap metrics_db. */
+    const int32_t bin_q8 = (int32_t)lrintf((2.0f * metrics_db(psd->scale) + 255.0f) * 256.0f);
+    in->level_q8 = bin_q8 - (int32_t)lrintf(2.0f * metrics_db(psd->enbw_bins) * 256.0f);
+    in->floor_bias_q8 = s.floor_bias_q8;
+    in->signal_q8 = (int32_t)lrintf(c->signal_snr_db * 512.0f);
+    const uint32_t floor_raw = snr ? metrics_floor_raw(in, FLOOR_PERCENTILE, s.scratch) : 0;
+    frame_level_t out[PLAN_MAX_PER_LO];
+    for (unsigned j = 0; j < hop->nch; j++) {
+        metrics_level_t m;
+        metrics_level(in, floor_raw, hop->offset_hz[j], &m);
+        if (psd->saturated) m.flags |= CHF_SATURATED;
+        for (unsigned k = 0; k < c->nspurs; k++) {
+            int64_t d = ((int64_t)c->spurs_khz[k] - hop->lo_khz) * 1000 - hop->offset_hz[j];
+            if (llabs(d) <= c->rssi_hz) m.flags |= CHF_SPUR;
+        }
+        out[j] = (frame_level_t){.id = hop->ch[j], .flags = m.flags, .rssi = m.rssi, .snr = m.snr};
+    }
+    int64_t tm1 = esp_timer_get_time();
+    int64_t t3 = finish_hop(psd, hop, t2, tm0, tm1);
+    unsigned gain_index;
+    radio_gain_mode_t gm = radio_get_gain(&gain_index);
+    frame_levels_t h = {
+        .seq = s.seq_metrics++,
+        .t_ms = (uint32_t)(t0 / 1000),
+        .lo_khz = hop->lo_khz,
+        .tune_us = (uint32_t)(t1 - t0),
+        .capture_us = (uint32_t)(t2 - t1),
+        .dsp_us = (uint32_t)(t3 - t2),
+        .saturated = clamp_u16(psd->saturated),
+        .gain = gm == RADIO_GAIN_HARDWARE ? 255 : (uint8_t)gain_index,
+        .hop_index = (uint8_t)s.hop,
+        .hops = s.plan.nhops,
+        .mode = c->metrics_mode,
+        .floor_bin = floor_raw ? metrics_code_u8(metrics_code_q8(floor_raw) + s.floor_bias_q8 + bin_q8) : 0,
+        .nch = hop->nch,
+    };
+    link_frame(FRAME_LEVELS, &h, sizeof(h), out, hop->nch * sizeof(frame_level_t), 0);
+    hop_stats(t0, t1, t2, t3);
+}
+
 static void do_hop(void) {
     const scan_config_t *c = &s.cfg;
     const profile_t *p = c->profile;
@@ -246,15 +310,22 @@ static void do_hop(void) {
         .avg_shift = c->avg_shift,
     };
     /* Mask the board's own spurs like the DC bins: excluded from the floor,
-     * peak and centroid; RSSI fills them with the window mean. */
+     * peak and centroid; RSSI fills them with the window mean. Not in
+     * METRICS RSSI|SNR: with coarse bins the mask can cover a fifth of a
+     * channel (R8 on the C5 at FFT 128), while the spur only adds a constant
+     * ~2 dB to the empty channel, which lap-timing thresholds absorb. */
     int half = (int)(psd.nfft / 2), guard = (int)ceilf(c->spur_guard_hz / psd.bin_hz);
-    for (unsigned j = 0; j < c->nspurs; j++) {
+    for (unsigned j = 0; j < c->nspurs && c->metrics_mode == METRICS_FULL; j++) {
         float off = ((float)c->spurs_khz[j] - (float)hop->lo_khz) * 1000.0f;
         int k = half + (int)lrintf(off / psd.bin_hz);
         for (int m = k - guard; m <= k + guard; m++)
             if (m >= 0 && m < (int)psd.nfft) psd.valid[m] = 0;
     }
     int64_t tm0 = esp_timer_get_time();
+    if (c->metrics_mode != METRICS_FULL) {
+        do_levels(&in, &psd, hop, t0, t1, t2, tm0);
+        return;
+    }
     metrics_floor_t fl;
     metrics_floor(&in, FLOOR_PERCENTILE, s.scratch, &fl);
     frame_channel_t out[PLAN_MAX_PER_LO];
@@ -288,13 +359,7 @@ static void do_hop(void) {
     }
     float dc = (psd.dc_i * psd.dc_i + psd.dc_q * psd.dc_q) / (RADIO_FULL_SCALE * RADIO_FULL_SCALE);
     int64_t tm1 = esp_timer_get_time();
-    /* One spectrum per spec_every hops, rotating through the LOs: a plain
-     * hops_total % N would pick the same LO forever when N divides the plan. */
-    if (c->spec_every && s.hop % c->spec_every == s.rotations % c->spec_every) emit_spectrum(&psd, hop->lo_khz);
-    int64_t t3 = esp_timer_get_time();
-    timing = (scan_timing_t){.prep_us = psd.prep_us, .fft_us = psd.fft_us, .power_us = psd.power_us,
-                             .psd_us = (uint32_t)(tm0 - t2), .metrics_us = (uint32_t)(tm1 - tm0),
-                             .spectrum_us = (uint32_t)(t3 - tm1)};
+    int64_t t3 = finish_hop(&psd, hop, t2, tm0, tm1);
     unsigned gain_index;
     radio_gain_mode_t gm = radio_get_gain(&gain_index);
     frame_metrics_t h = {
@@ -313,7 +378,10 @@ static void do_hop(void) {
         .nch = hop->nch,
     };
     link_frame(FRAME_METRICS, &h, sizeof(h), out, hop->nch * sizeof(frame_channel_t), 0);
+    hop_stats(t0, t1, t2, t3);
+}
 
+static void hop_stats(int64_t t0, int64_t t1, int64_t t2, int64_t t3) {
     uint32_t hop_us = (uint32_t)(t3 - t0), tune_us = (uint32_t)(t1 - t0), dsp_us = (uint32_t)(t3 - t2);
     s.w_hops++;
     s.hops_total++;

@@ -1,5 +1,6 @@
 /* Host tests for the target-independent DSP: the radix-4 FFT kernel against
- * a double-precision DFT, metrics_db, integer metrics on a synthetic PSD, and
+ * a double-precision DFT, metrics_db and metrics_code_q8, integer metrics and
+ * byte-code levels on a synthetic PSD, and
  * the LO planner.
  * pio test -e native. GPL-3.0-or-later. */
 #include <math.h>
@@ -153,6 +154,62 @@ static void test_metrics_tone(void) {
     TEST_ASSERT_FLOAT_WITHIN(1e-4f * (float)(band * 1e-9 / 1.5), (float)(band * 1e-9 / 1.5), m.rssi);
 }
 
+/* metrics_code_q8: 20 log10(v) in 1/256, integer, across the whole range. */
+static void test_metrics_code_q8(void) {
+    metrics_init();
+    double worst = 0;
+    for (double v = 1; v < 1.8e19; v *= 1.0137) {
+        uint64_t u = (uint64_t)v;
+        double err = metrics_code_q8(u) / 256.0 - 20 * log10((double)u);
+        if (fabs(err) > worst) worst = fabs(err);
+    }
+    TEST_ASSERT_TRUE(worst < 0.01); /* 0.005 dB: well inside a 0.5 dB code */
+    TEST_ASSERT_EQUAL(0, metrics_code_q8(1));
+    TEST_ASSERT_EQUAL(255, metrics_code_u8(300 * 256));
+    TEST_ASSERT_EQUAL(0, metrics_code_u8(-5 * 256));
+}
+
+/* metrics_level on the tone PSD of test_metrics_tone: the same RSSI and SNR
+ * as metrics_channel, to within rounding to a code. */
+static void test_metrics_level(void) {
+    enum { N = 1024 };
+    static uint32_t p[N], scratch[N];
+    static uint8_t valid[N];
+    metrics_init();
+    const float bin = 78125.0f;
+    for (unsigned k = 0; k < N; k++) {
+        p[k] = 1000;
+        unsigned rel = (unsigned)abs((int)k - N / 2);
+        valid[k] = rel > 1 && rel * bin <= 40e6f;
+    }
+    int kc = N / 2 + (int)lrintf((-19e6f + 2e6f) / bin);
+    p[kc] = 1000000;
+    metrics_input_t in = {.p = p, .scale = 1e-9f, .valid = valid, .nfft = N, .bin_hz = bin,
+                          .enbw_bins = 1.5f, .floor_bias = 1.3f, .passband_hz = 24000000,
+                          .rssi_hz = 5000000, .search_hz = 12000000, .signal_snr_db = 6.0f,
+                          .centroid_ratio = 4.0f};
+    in.level_q8 = (int32_t)lrintf((2 * metrics_db(in.scale / in.enbw_bins) + 255) * 256);
+    in.floor_bias_q8 = (int32_t)lrintf(20 * log10f(in.floor_bias) * 256);
+    in.signal_q8 = (int32_t)lrintf(in.signal_snr_db * 512);
+    metrics_floor_t fl;
+    metrics_floor(&in, 0.2f, scratch, &fl);
+    metrics_channel_t m;
+    metrics_level_t lv;
+    const int32_t offs[] = {-19000000, 18000000, 0}; /* the tone's channel, an empty one, one over DC */
+    for (unsigned j = 0; j < 3; j++) {
+        metrics_channel(&in, &fl, offs[j], NULL, &m);
+        metrics_level(&in, metrics_floor_raw(&in, 0.2f, scratch), offs[j], &lv);
+        TEST_ASSERT_FLOAT_WITHIN(0.51f, 2 * m.rssi_db + 255, lv.rssi);
+        TEST_ASSERT_FLOAT_WITHIN(0.51f, fmaxf(0, 2 * m.snr_db), lv.snr);
+        TEST_ASSERT_EQUAL(m.flags & CHF_SIGNAL, lv.flags & CHF_SIGNAL);
+        TEST_ASSERT_EQUAL(j == 2, !!(lv.flags & CHF_DC_IN_SEARCH));
+        metrics_level(&in, 0, offs[j], &lv); /* RSSI only */
+        TEST_ASSERT_FLOAT_WITHIN(0.51f, 2 * m.rssi_db + 255, lv.rssi);
+        TEST_ASSERT_EQUAL(0, lv.snr);
+        TEST_ASSERT_FALSE(lv.flags & CHF_SIGNAL);
+    }
+}
+
 /* FM-video-like occupancy: one tone that sits at +1.5 MHz on three hops out
  * of four and at -3.5 MHz (sync) on the fourth. The average sees both: the
  * peak at +1.5, the centre at the time-weighted mean, and the 99 % band
@@ -303,6 +360,8 @@ int main(void) {
     RUN_TEST(test_metrics_db);
     RUN_TEST(test_metrics_tone);
     RUN_TEST(test_metrics_avg);
+    RUN_TEST(test_metrics_code_q8);
+    RUN_TEST(test_metrics_level);
     RUN_TEST(test_plan_default_raceband);
     RUN_TEST(test_plan_groups);
     RUN_TEST(test_profile_equiv);

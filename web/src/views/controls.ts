@@ -98,7 +98,7 @@ export class Controls implements View {
     this.syncs.push((st) => (filter.value = String(st.filter)));
     // FFT / capture
     const fftSel = el("select") as HTMLSelectElement;
-    for (const v of [256, 512, 1024, 2048]) fftSel.append(new Option(`${v}-pt FFT`, String(v)));
+    for (const v of [128, 256, 512, 1024, 2048]) fftSel.append(new Option(`${v}-pt FFT`, String(v)));
     fftSel.onchange = () => void this.apply(`FFT ${fftSel.value}`);
     const capSel = el("select") as HTMLSelectElement;
     for (const v of [1024, 2048, 4096, 8192, 16380]) capSel.append(new Option(`${v} samples`, String(v)));
@@ -111,6 +111,11 @@ export class Controls implements View {
       capSel.value = String(st.capture_samples);
       segs.value = String(st.segments);
     });
+    // Per-channel measurements
+    this.ctl(
+      "Metrics (RSSI / SNR: only what lap timing needs, faster; the rest is left blank)",
+      this.seg([["FULL", "Full"], ["RSSI", "RSSI"], ["SNR", "SNR"]], (v) => void this.apply(`METRICS ${v}`), (st) => st.metrics ?? "FULL"),
+    );
     // Windows
     const rssi = this.num(10, 20000, 10);
     const search = this.num(10, 20000, 10);

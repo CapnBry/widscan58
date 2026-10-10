@@ -381,13 +381,15 @@ start with an ASCII letter. The parser resynchronises on the magic and CRC.
 As built, the layouts are in `firmware/src/proto/frames.h`, mirrored by
 `web/src/proto/frames.ts` and `tools/widscan58cli.py`. That header is authoritative
 over the plan table below, and it static-asserts the sizes the parsers hard-code
-(metrics header 34 bytes, channel record 26, telemetry 62). All µs timings are u32.
+(metrics header 34 bytes, channel record 26, levels header 32, level record 4,
+telemetry 62). All µs timings are u32.
 The stream makes no compatibility promise across firmware versions: change all
 three together, and old recordings stop replaying.
 
 | Frame | Contents |
 |---|---|
 | `METRICS` (per hop) | seq, t_us, LO kHz, gain idx, sat count, noise floor (cdB), hop timing (tune / capture / dsp µs), then per channel: `{id, rssi, rssi_ema, snr, clear_floor (cdB), peak_off, centroid_off (Hz/10), obw (kHz), flags}` |
+| `LEVELS` (per hop, `METRICS RSSI\|SNR`) | seq, LO kHz, hop timing, gain, sat count, mode, floor per bin (u8 level code; SNR mode only), then per channel: `{id, flags, rssi (u8 level code), snr (dB × 2; SNR mode only)}`. Level codes are the spectrum's: dBFS = code / 2 − 127.5 |
 | `SPECTRUM` / `PANO` | seq, LO kHz, start kHz, bin Hz, n, detector, u8 codes[] |
 | `TELEMETRY` (≈ 4 Hz) | rotation Hz, hop timing min/avg/max, CPU ‰, heap, TX drops, temperature, recal age per LO |
 | `EVENT` (Phase 4) | channel on/off transition plus the before/after delta vector |

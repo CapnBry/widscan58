@@ -3,7 +3,7 @@
 // GPL-3.0-or-later.
 import type { Transport } from "../serial/device";
 import { encodeFrame } from "../serial/parser";
-import { CHF, FRAME_METRICS, FRAME_RAWIQ, FRAME_SPECTRUM, FRAME_TELEMETRY } from "../proto/frames";
+import { CHF, FRAME_LEVELS, FRAME_METRICS, FRAME_RAWIQ, FRAME_SPECTRUM, FRAME_TELEMETRY, type MetricsMode } from "../proto/frames";
 import { channelMetrics, db, floorEstimate, percentileBias, planBuild, type Hop, type ProfileDef } from "./dsp";
 
 const K24 = 83.5 / 296;
@@ -47,6 +47,13 @@ function gaussRand(): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
 }
 
+interface HopChannel {
+  id: number;
+  m: ReturnType<typeof channelMetrics>;
+  ema: number;
+  clear: number | null;
+}
+
 export class MockTransport implements Transport {
   readonly name = "Simulated device";
   private onBytes: (c: Uint8Array) => void = () => {};
@@ -64,6 +71,7 @@ export class MockTransport implements Transport {
   private specSpanHz = race24.usableHz;
   private specDetector = 1;
   private ema = 0.25;
+  private metricsMode: MetricsMode = "FULL";
   private clearEma = 0.02;
   private plan: Hop[] = [];
   private hop = 0;
@@ -165,6 +173,7 @@ export class MockTransport implements Transport {
             gain_max: 82,
             rawiq_max: 16380,
             recal: "ONCE",
+            metrics: this.metricsMode,
             rssi_hz: p.rssiHz,
             search_hz: p.searchHz,
             dc_guard: 1,
@@ -225,6 +234,12 @@ export class MockTransport implements Transport {
         this.specSpanHz = num(3);
         this.specDetector = parts[4] === "MAX" ? 1 : 0;
         return ok();
+      case line === "METRICS FULL" || line === "METRICS RSSI" || line === "METRICS SNR":
+        this.metricsMode = parts[1] as MetricsMode;
+        this.state.clear();
+        return ok();
+      case line === "METRICS?":
+        return this.text(`METRICS ${this.metricsMode}\n`);
       case parts[0] === "EMA":
         this.ema = num(1) / 1000;
         this.clearEma = num(2) / 1000;
@@ -371,10 +386,24 @@ export class MockTransport implements Transport {
       return { id, m, ema: db(st.ema), clear: st.clear === null ? null : db(st.clear) };
     });
     const tune = 900 + Math.random() * 200;
+    // Same LO rotation as the firmware: one spectrum per specEvery hops.
+    if (this.specEvery && this.hop % this.specEvery === this.rotations % this.specEvery) this.spectrum(h.loKhz, psd, binHz);
+    if (this.metricsMode !== "FULL") this.emitLevels(now, h.loKhz, tune, floorBin, chans);
+    else this.emitMetrics(now, h.loKhz, tune, floorBin, chans);
+    this.hopsTotal++;
+    this.winHops++;
+    if (++this.hop >= this.plan.length) {
+      this.hop = 0;
+      this.rotations++;
+      this.winRot++;
+    }
+  }
+
+  private emitMetrics(now: number, loKhz: number, tune: number, floorBin: number, chans: HopChannel[]) {
     const buf = new DataView(new ArrayBuffer(34 + 26 * chans.length));
     buf.setUint32(0, this.seq++, true);
     buf.setUint32(4, Math.floor(now - this.start), true);
-    buf.setUint32(8, h.loKhz, true);
+    buf.setUint32(8, loKhz, true);
     buf.setUint32(12, tune, true);
     buf.setUint32(16, 160, true);
     buf.setUint32(20, 3400 + Math.random() * 300, true);
@@ -401,16 +430,35 @@ export class MockTransport implements Transport {
       buf.setInt16(o + 22, Math.round(c.m.obwLo / 1000), true);
       buf.setInt16(o + 24, Math.round(c.m.obwHi / 1000), true);
     });
-    // Same LO rotation as the firmware: one spectrum per specEvery hops.
-    if (this.specEvery && this.hop % this.specEvery === this.rotations % this.specEvery) this.spectrum(h.loKhz, psd, binHz);
     this.onBytes(encodeFrame(FRAME_METRICS, new Uint8Array(buf.buffer)));
-    this.hopsTotal++;
-    this.winHops++;
-    if (++this.hop >= this.plan.length) {
-      this.hop = 0;
-      this.rotations++;
-      this.winRot++;
-    }
+  }
+
+  // METRICS RSSI|SNR: frame_levels_t, level codes (dBFS = code / 2 - 127.5).
+  private emitLevels(now: number, loKhz: number, tune: number, floorBin: number, chans: HopChannel[]) {
+    const snr = this.metricsMode === "SNR";
+    const code = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+    const buf = new DataView(new ArrayBuffer(32 + 4 * chans.length));
+    buf.setUint32(0, this.seq++, true);
+    buf.setUint32(4, Math.floor(now - this.start), true);
+    buf.setUint32(8, loKhz, true);
+    buf.setUint32(12, tune, true);
+    buf.setUint32(16, 60, true);
+    buf.setUint32(20, 900 + Math.random() * 100, true);
+    buf.setUint16(24, 0, true);
+    buf.setUint8(26, this.gainManual ? this.gain : 255);
+    buf.setUint8(27, this.hop);
+    buf.setUint8(28, this.plan.length);
+    buf.setUint8(29, snr ? 2 : 1);
+    buf.setUint8(30, snr ? code(2 * db(floorBin) + 255) : 0);
+    buf.setUint8(31, chans.length);
+    chans.forEach((c, j) => {
+      const o = 32 + 4 * j;
+      buf.setUint8(o, c.id);
+      buf.setUint8(o + 1, snr ? c.m.flags & ~(CHF.NO_CENTROID) : c.m.flags & ~(CHF.SIGNAL | CHF.NO_CENTROID));
+      buf.setUint8(o + 2, code(2 * c.m.rssi + 255));
+      buf.setUint8(o + 3, snr ? code(2 * c.m.snr) : 0);
+    });
+    this.onBytes(encodeFrame(FRAME_LEVELS, new Uint8Array(buf.buffer)));
   }
 
   private spectrum(loKhz: number, psd: Float64Array, binHz: number) {

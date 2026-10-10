@@ -1,6 +1,7 @@
 // Per-channel tiles: enable toggle, RSSI bar, SNR, floor, centre offset, sparkline.
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
+import { smoothedSeries } from "../model/store";
 import { CHF } from "../proto/frames";
 import { channelColor, el, prepare, theme } from "../util/canvas";
 import { channelsCommand } from "../model/channelPlan";
@@ -19,12 +20,13 @@ interface Tile {
   toggle: HTMLInputElement;
 }
 
-export function badgesFor(flags: number, stale: boolean): [string, string][] {
+// masked: spurs are masked (METRICS FULL); in RSSI/SNR mode they are only flagged.
+export function badgesFor(flags: number, stale: boolean, masked = true): [string, string][] {
   const out: [string, string][] = [];
   if (stale) out.push(["stale", "warning"]);
   if (flags & CHF.SIGNAL) out.push(["signal", "good"]);
   if (flags & CHF.SATURATED) out.push(["clipping", "critical"]);
-  if (flags & CHF.SPUR) out.push(["spur masked", "serious"]);
+  if (flags & CHF.SPUR) out.push(masked ? ["spur masked", "serious"] : ["spur", "warning"]);
   if (flags & CHF.EDGE) out.push(["filter edge", "warning"]);
   return out;
 }
@@ -147,30 +149,43 @@ export class ChannelGrid implements View {
         tile.badges.replaceChildren();
         return;
       }
-      tile.big.replaceChildren(`${m.rssiEma.toFixed(1)}`, el("small", {}, " dBFS"));
+      // Without an EMA (METRICS RSSI|SNR) the raw RSSI; without a floor, the
+      // channel's lowest RSSI in view stands in for it.
+      const level = m.rssiEma ?? m.rssi;
+      const series = smoothedSeries(cs);
+      const now_s = store.now();
+      let floor = m.floor;
+      if (floor === null) {
+        let low = level;
+        series.forEach((tt, v) => {
+          if (now_s - tt <= 10 && v < low) low = v;
+        });
+        floor = low;
+      }
+      tile.big.replaceChildren(`${level.toFixed(1)}`, el("small", {}, " dBFS"));
       // Bar spans floor-10 .. floor+40 dB so empty channels sit near the left.
-      const frac = Math.max(0, Math.min(1, (m.rssiEma - (m.floor - 10)) / 50));
+      const frac = Math.max(0, Math.min(1, (level - (floor - 10)) / 50));
       const fill = tile.bar.firstElementChild as HTMLDivElement;
       fill.style.width = `${(frac * 100).toFixed(1)}%`;
       fill.style.background = channelColor(id);
       const sig = (m.flags & CHF.SIGNAL) !== 0;
+      const occ = sig && !(m.flags & CHF.NO_CENTROID);
       const rows: [string, string][] = [
-        ["SNR", `${m.snr.toFixed(1)} dB`],
-        ["floor", `${m.floor.toFixed(1)}`],
-        ["clear", m.clearFloor === null ? "—" : m.clearFloor.toFixed(1)],
-        ["centre", sig && !(m.flags & CHF.NO_CENTROID) ? `${m.centroidOffHz >= 0 ? "+" : ""}${(m.centroidOffHz / 1000).toFixed(0)} kHz` : "—"],
-        ["OBW 99 %", sig && !(m.flags & CHF.NO_CENTROID) ? `${((m.obwHiHz - m.obwLoHz) / 1e6).toFixed(2)} MHz` : "—"],
+        ["SNR", m.snr === null ? "" : `${m.snr.toFixed(1)} dB`],
+        ["floor", m.floor === null ? "" : `${m.floor.toFixed(1)}`],
+        ["clear", m.clearFloor === null ? (m.rssiEma === null ? "" : "—") : m.clearFloor.toFixed(1)],
+        ["centre", m.centroidOffHz === null ? "" : occ ? `${m.centroidOffHz >= 0 ? "+" : ""}${(m.centroidOffHz / 1000).toFixed(0)} kHz` : "—"],
+        ["OBW 99 %", m.obwLoHz === null || m.obwHiHz === null ? "" : occ ? `${((m.obwHiHz - m.obwLoHz) / 1e6).toFixed(2)} MHz` : "—"],
       ];
       tile.kv.replaceChildren(...rows.flatMap(([k, v]) => [el("span", {}, k), el("span", {}, v)]));
-      tile.badges.replaceChildren(...badgesFor(m.flags, stale).map(([txt, cls]) => el("span", { class: `badge ${cls}` }, txt)));
+      tile.badges.replaceChildren(...badgesFor(m.flags, stale, m.peak !== null).map(([txt, cls]) => el("span", { class: `badge ${cls}` }, txt)));
       // Sparkline: last 10 s of smoothed RSSI against the channel's floor.
       const s = prepare(tile.spark);
-      const now_s = store.now();
-      const lo = m.floor - 5;
-      const hi = Math.max(m.floor + 30, m.rssiEma + 3);
+      const lo = floor - 5;
+      const hi = Math.max(floor + 30, level + 3);
       s.ctx.strokeStyle = t.grid;
       s.ctx.beginPath();
-      const fy = s.h - ((m.floor - lo) / (hi - lo)) * s.h;
+      const fy = s.h - ((floor - lo) / (hi - lo)) * s.h;
       s.ctx.moveTo(0, fy);
       s.ctx.lineTo(s.w, fy);
       s.ctx.stroke();
@@ -178,7 +193,7 @@ export class ChannelGrid implements View {
       s.ctx.lineWidth = 1.5;
       s.ctx.beginPath();
       let first = true;
-      cs.ema.forEach((tt, v) => {
+      series.forEach((tt, v) => {
         if (now_s - tt > 10) return;
         const x = s.w - ((now_s - tt) / 10) * s.w;
         const y = s.h - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * s.h;

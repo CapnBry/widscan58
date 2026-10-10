@@ -98,11 +98,17 @@ ESP32-C5, all 8 channels (4 pair LOs), 4096 samples at 80 MS/s, 4 × 1024-point 
 | R4 / R2 (soft float, no FPU) | ~65 / ~67 ms | ~3.8 / ~3.7 /s |
 | S16R, `FFT 256` (4 × 256-point, 312.5 kHz bins) | ~2.1 ms (DSP 1.2) | ~122 /s |
 | S16, `FFT 256` | ~2.35 ms (DSP 1.6) | ~106 /s |
+| S16R, `FFT 128`, `CAPN 512` (4 × 128-point, 625 kHz bins), `SPEC 0` | ~1.69 ms (DSP 0.90) | ~143 /s |
+| the same, `METRICS SNR` | ~1.27 ms (tune 0.60, DSP 0.63) | ~184 /s |
+| the same, `METRICS RSSI` | ~1.21 ms (tune 0.59, DSP 0.59) | ~196 /s |
+| `METRICS RSSI`, `FFT 128`, `SEGMENTS 2`, `CAPN 256` | ~0.96 ms (DSP 0.35) | ~248 /s |
 
 The tune includes the per-LO calibration cache restore (`RECALMODE CACHE`, the
 C5 default); DSP is most of the hop (PLAN.md, Status). The DSP includes the
 digital IQ correction (`IQCORR`, on by default): ~0.17 ms per hop at 1024
-points, ~0.07 ms at 256. The R4/R2 rows predate it.
+points, ~0.07 ms at 256. The R4/R2 rows predate it. With `METRICS RSSI|SNR` the
+per-channel work drops from ~0.27–0.4 ms to ~0.035 / ~0.05 ms per hop, and the
+tune measures ~0.15 ms shorter (not yet explained; the frames are much smaller).
 
 ESP32-S3:
 
@@ -128,7 +134,8 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
-| `CAPN <samples>`, `FFT <n>` | Capture length and FFT size (S3: up to 2048; C5: up to 1024) |
+| `CAPN <samples>`, `FFT <n>` | Capture length (from 256) and FFT size (from 128; S3: up to 2048; C5: up to 1024) |
+| `METRICS FULL\|RSSI\|SNR`, `METRICS?` | Per-channel measurements. `FULL` (default): everything, `METRICS` frames. `RSSI`: only the RSSI-window power; `SNR`: that plus noise floor and SNR. Both send compact `LEVELS` frames of byte codes (integer math per channel, for lap timing); the UI leaves the rest blank. They do not mask board spurs (at `FFT 128` the mask would cover ~1.9 MHz of R8 on the C5; the unmasked spur adds ~2 dB to the empty channel) |
 | `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
 | `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as one frame. At most `rawiq_max` samples: 16380 on the S3, 9180 on the C5 (smaller link queue). The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |

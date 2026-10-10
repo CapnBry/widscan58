@@ -21,9 +21,11 @@ import serial
 
 from ttyfix import keep_vmin1
 
-FRAME_METRICS, FRAME_SPECTRUM, FRAME_TELEMETRY, FRAME_RAWIQ, FRAME_LOG = 1, 2, 3, 4, 5
+FRAME_METRICS, FRAME_SPECTRUM, FRAME_TELEMETRY, FRAME_RAWIQ, FRAME_LOG, FRAME_LEVELS = 1, 2, 3, 4, 5, 6
 METRICS_HDR = struct.Struct("<IIIIIIHhhBBBB")
 CHANNEL = struct.Struct("<BBhhhhhhiihh")
+LEVELS_HDR = struct.Struct("<IIIIIIHBBBBBB")
+LEVEL = struct.Struct("<BBBB")
 SPECTRUM_HDR = struct.Struct("<IIiIHBB")
 TELEMETRY = struct.Struct("<IIIIIIIIIIIHIIIBBBb")
 RAWIQ_HDR = struct.Struct("<IIHBB")
@@ -117,6 +119,26 @@ def parse_metrics(p):
     return m
 
 
+def parse_levels(p):
+    """FRAME_LEVELS (METRICS RSSI|SNR) in parse_metrics' shape: centi-dB, None where not measured."""
+    h = LEVELS_HDR.unpack_from(p)
+    keys = "seq t_ms lo_khz tune_us capture_us dsp_us saturated gain hop_index hops mode floor_bin nch".split()
+    m = dict(zip(keys, h))
+    snr_mode = m["mode"] == 2
+    m["floor_bin_cdb"] = (m["floor_bin"] * 50 - 12750) if snr_mode else None
+    m["dc_cdb"] = None
+    chans = []
+    for j in range(m["nch"]):
+        cid, flags, rssi, snr = LEVEL.unpack_from(p, LEVELS_HDR.size + j * LEVEL.size)
+        rssi_cdb = rssi * 50 - 12750
+        c = dict.fromkeys("ema clear peak peak_off centroid_off obw_lo_khz obw_hi_khz".split())
+        c.update(id=cid, flags=flags, rssi=rssi_cdb, snr=snr * 50 if snr_mode else None,
+                 floor=rssi_cdb - snr * 50 if snr_mode else None)
+        chans.append(c)
+    m["channels"] = chans
+    return m
+
+
 def parse_spectrum(p):
     seq, lo_khz, start_off, bin_hz, n, det, _ = SPECTRUM_HDR.unpack_from(p)
     codes = p[SPECTRUM_HDR.size : SPECTRUM_HDR.size + n]
@@ -160,8 +182,8 @@ def cmd_monitor(link, args):
     last_draw = 0
     while end is None or time.time() < end:
         for item in link.poll():
-            if item[0] == "frame" and item[1] == FRAME_METRICS:
-                m = parse_metrics(item[2])
+            if item[0] == "frame" and item[1] in (FRAME_METRICS, FRAME_LEVELS):
+                m = (parse_metrics if item[1] == FRAME_METRICS else parse_levels)(item[2])
                 for c in m["channels"]:
                     latest[c["id"]] = (m, c)
             elif item[0] == "frame" and item[1] == FRAME_TELEMETRY:
@@ -173,16 +195,20 @@ def cmd_monitor(link, args):
             lines = ["\x1b[2J\x1b[H" if not args.plain else "",
                      f"{'ch':4}{'MHz':>10}{'LO':>11}{'RSSI':>8}{'EMA':>8}{'floor':>8}{'SNR':>7}{'clear':>8}"
                      f"{'peak':>8}{'occ kHz':>9}{'cen kHz':>9}{'OBW99 kHz':>11} flags"]
+            # Blank: not measured in this metrics mode (FRAME_LEVELS).
+            def f(v, w, scale=100, prec=1):
+                return f"{v / scale:{w}.{prec}f}" if v is not None else " " * w
             for cid in sorted(latest):
                 m, c = latest[cid]
-                clear = c["clear"] / 100 if c["clear"] > -32768 else float("nan")
-                lines.append(f"{names[cid]:4}{khz[cid] / 1000:10.3f}{m['lo_khz'] / 1000:11.3f}{c['rssi'] / 100:8.1f}"
-                             f"{c['ema'] / 100:8.1f}{c['floor'] / 100:8.1f}{c['snr'] / 100:7.1f}{clear:8.1f}"
-                             f"{c['peak'] / 100:8.1f}{c['peak_off'] / 1000:9.0f}{c['centroid_off'] / 1000:9.0f}"
-                             f"{c['obw_hi_khz'] - c['obw_lo_khz']:11.0f} {flags_str(c['flags'])}")
+                clear = None if c["clear"] is None else c["clear"] if c["clear"] > -32768 else float("nan")
+                obw = None if c["obw_lo_khz"] is None else c["obw_hi_khz"] - c["obw_lo_khz"]
+                lines.append(f"{names[cid]:4}{khz[cid] / 1000:10.3f}{m['lo_khz'] / 1000:11.3f}{f(c['rssi'], 8)}"
+                             f"{f(c['ema'], 8)}{f(c['floor'], 8)}{f(c['snr'], 7)}{f(clear, 8)}"
+                             f"{f(c['peak'], 8)}{f(c['peak_off'], 9, 1000, 0)}{f(c['centroid_off'], 9, 1000, 0)}"
+                             f"{f(obw, 11, 1, 0)} {flags_str(c['flags'])}")
             if latest:
                 m = next(iter(latest.values()))[0]
-                lines.append(f"floor/bin {m['floor_bin_cdb'] / 100:.1f} dBFS  DC {m['dc_cdb'] / 100:.1f} dBFS  "
+                lines.append(f"floor/bin {f(m['floor_bin_cdb'], 0)} dBFS  DC {f(m['dc_cdb'], 0)} dBFS  "
                              f"gain {m['gain']}  sat {m['saturated']}")
             if tel:
                 lines.append(f"rot {tel['rotation_mhz'] / 1000:.1f}/s  hop avg {tel['hop_avg']} max {tel['hop_max']} us  "

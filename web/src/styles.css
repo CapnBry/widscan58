@@ -124,6 +124,22 @@ header.top .spacer { flex: 1; }
 }
 .flash-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .plan-dialog { width: min(680px, calc(100vw - 32px)); }
+/* Grid view (narrow screens): fade an edge while there is more to scroll to. */
+.plan-scroll-wrap { position: relative; }
+.plan-scroll-wrap::before, .plan-scroll-wrap::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+.plan-scroll-wrap::before { left: 0; background: linear-gradient(to right, var(--surface), transparent); }
+.plan-scroll-wrap::after { right: 0; background: linear-gradient(to left, var(--surface), transparent); }
+.plan-scroll-wrap.more-left::before, .plan-scroll-wrap.more-right::after { opacity: 1; }
 .plan-scroll { overflow-x: auto; }
 .plan-chart { border-collapse: separate; border-spacing: 3px; margin: 0 auto; }
 .plan-chart thead th { font-size: 11px; font-weight: 500; color: var(--muted); }
@@ -140,6 +156,46 @@ header.top .spacer { flex: 1; }
 .plan-chan { min-width: 54px; }
 .plan-band { min-width: 76px; background: var(--surface-2); }
 .plan-band span { white-space: nowrap; }
+/* Spectrum view (wide screens): channels on a frequency axis. */
+.spec-view { display: none; }
+@media (min-width: 760px) {
+  .plan-dialog { width: min(900px, calc(100vw - 32px)); }
+  .spec-view { display: block; }
+  .plan-grid-view { display: none; }
+}
+.spec-defs { position: absolute; width: 0; height: 0; }
+.spec { --band-w: 76px; position: relative; }
+.spec-row { display: grid; grid-template-columns: var(--band-w) 1fr; height: 46px; border-bottom: 1px solid var(--grid); }
+.spec-row .plan-band { margin: 4px 6px 4px 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; padding: 2px 4px; }
+.spec-row .plan-band span { font-size: 10px; color: var(--muted); }
+.spec-track { position: relative; }
+.spec-axis { height: 22px; border-bottom-color: var(--axis); }
+.spec-tick { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--axis); }
+.spec-tick.major { height: 8px; background: var(--muted); }
+.spec-tick span { position: absolute; bottom: 9px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--muted); }
+/* A hump button's box overlaps its neighbours: only the shape and label take clicks. */
+.spec-hump, .spec-hump:hover:not(:disabled), .spec-hump.on {
+  position: absolute; top: 0; bottom: 0; padding: 0; border: 0; border-radius: 0; background: none; pointer-events: none;
+}
+.spec-hump.on { z-index: 1; }
+.spec-hump svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.spec-hump path {
+  pointer-events: visiblePainted; cursor: pointer; fill: url(#plan-hump-off);
+  stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke;
+}
+.spec-hump:hover:not(:disabled) path { stroke: var(--ink-2); }
+.spec-hump.on path { fill: var(--accent); stroke: var(--accent); }
+.spec-hump:disabled path { opacity: 0.35; cursor: default; }
+.spec-label {
+  position: absolute; left: 50%; top: 9px; transform: translateX(-50%); z-index: 2;
+  text-align: center; line-height: 1.1; white-space: nowrap; pointer-events: auto; cursor: pointer;
+}
+.spec-label b { display: block; font-size: 12px; }
+.spec-label small { display: block; font-size: 10px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.spec-hump.on .spec-label, .spec-hump.on .spec-label small { color: #fff; }
+.spec-hump:disabled .spec-label { opacity: 0.45; cursor: default; }
+.spec-guides { position: absolute; left: var(--band-w); right: 0; top: 22px; bottom: 0; pointer-events: none; }
+.spec-guide { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--accent); opacity: 0.55; }
 .plan-buttons { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .plan-buttons .spacer { flex: 1; }
 .plan-count { color: var(--muted); }

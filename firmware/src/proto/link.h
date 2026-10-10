@@ -13,9 +13,18 @@ bool link_frame(uint8_t type, const void *a, size_t alen, const void *b, size_t 
  * rare large frames (RAWIQ) that only fit a nearly empty queue. */
 bool link_frame_wait(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, uint32_t wait_ms);
 bool link_text(const char *text);
+/* Bytes as they are (RotorHazard replies), in order with text. */
+bool link_raw(const void *data, size_t n);
+/* Frames are only queued while streaming (monitor mode); text and raw bytes
+ * always are. */
+void link_set_streaming(bool on);
+bool link_streaming(void);
+/* Drop everything queued and not yet handed to USB. */
+void link_flush(void);
 bool link_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 uint32_t link_drops(void);
 unsigned link_fill_permille(void);
 size_t link_capacity(void);
-/* Blocking line reader for the command task; returns length, or -1 overflow. */
-int link_read_line(char *line, size_t capacity);
+/* Read up to capacity bytes, waiting up to timeout_ms for the first
+ * (UINT32_MAX: forever). Returns the count. */
+int link_read(uint8_t *buf, size_t capacity, uint32_t timeout_ms);

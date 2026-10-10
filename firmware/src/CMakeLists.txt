@@ -2,9 +2,11 @@ set(sources
     "main.c"
     "proto/link.c"
     "proto/commands.c"
+    "proto/rh.c"
     "scan/profile.c"
     "scan/planner.c"
     "scan/metrics.c"
+    "scan/lap.c"
     "scan/scanner.c"
     "dsp/psd.c"
     "dsp/fft_eval.c")

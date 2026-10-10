@@ -2,6 +2,7 @@
 import { StreamParser, type StreamItem } from "./parser";
 import { FRAME_RAWIQ } from "../proto/frames";
 import { grantedUsbCdcPorts, requestUsbCdcPort } from "./webusb";
+import { RhLink } from "./rhLink";
 
 export interface Transport {
   readonly name: string;
@@ -201,6 +202,9 @@ function replyMatcher(cmd: string): (item: StreamItem) => boolean {
     "TIMING?": "TIMING ",
     "SPURS?": "SPURS ",
     "ENABLE?": "ENABLE ",
+    "PROTOCOL?": "PROTOCOL ",
+    "CONFIG?": "CONFIG ",
+    "METRICS?": "METRICS ",
     SYNC: "SYNC ",
   };
   const prefix = query[word];
@@ -210,6 +214,8 @@ function replyMatcher(cmd: string): (item: StreamItem) => boolean {
 
 export class Device {
   private parser = new StreamParser();
+  /** Set while the device speaks RotorHazard's protocol (PROTOCOL RH). */
+  rh: RhLink | null = null;
   private waiters: Waiter[] = [];
   private queue: Promise<unknown> = Promise.resolve();
   private listeners = new Set<(item: StreamItem) => void>();
@@ -225,6 +231,7 @@ export class Device {
       (chunk) => this.onBytes(chunk),
       (why) => {
         this.connected = false;
+        this.rh?.close();
         for (const w of this.waiters.splice(0)) {
           clearTimeout(w.timer);
           w.reject(new Error(why));
@@ -258,8 +265,26 @@ export class Device {
     };
   }
 
+  /** Hand the byte stream to RotorHazard transactions (after PROTOCOL RH). */
+  enterRh(): RhLink {
+    this.rh?.close();
+    this.rh = new RhLink((d) => this.transport.write(d));
+    return this.rh;
+  }
+
+  /** Back to our framed stream (after PROTOCOL MONITOR). */
+  exitRh() {
+    this.rh?.close();
+    this.rh = null;
+    this.parser = new StreamParser();
+  }
+
   private onBytes(chunk: Uint8Array) {
     for (const fn of this.rawListeners) fn(chunk);
+    if (this.rh) {
+      this.rh.push(chunk);
+      return;
+    }
     for (const item of this.parser.push(chunk)) {
       if (item.kind === "frame") this.frames[item.type] = (this.frames[item.type] ?? 0) + 1;
       const w = this.waiters.findIndex((x) => x.match(item));
@@ -282,6 +307,15 @@ export class Device {
 
   /** Send one command line; resolves with the reply item. Commands are serialised. */
   command(line: string, timeoutMs = 3000): Promise<StreamItem> {
+    if (this.rh) {
+      const rh = this.rh;
+      return rh.text(line, timeoutMs).then((reply) => {
+        const item: StreamItem = { kind: "text", line: reply };
+        for (const fn of this.listeners) fn(item);
+        if (reply.startsWith("ERR")) throw new Error(`${line}: ${reply}`);
+        return item;
+      });
+    }
     const run = async () => {
       const match = replyMatcher(line);
       const reply = new Promise<StreamItem>((resolve, reject) => {

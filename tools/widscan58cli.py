@@ -304,6 +304,13 @@ def main():
     sub.add_parser("bootloader")
     args = ap.parse_args()
     link = Link(args.port)
+    # The firmware boots silent in RotorHazard mode; our commands need monitor
+    # mode (older firmware answers ERR command, and is always in it).
+    if args.cmd != "bootloader":
+        try:
+            link.command("PROTOCOL MONITOR", timeout=1.0)
+        except TimeoutError:
+            print("no reply to PROTOCOL MONITOR", file=sys.stderr)
     {"info": cmd_info, "cmd": cmd_raw, "monitor": cmd_monitor, "rawiq": cmd_rawiq,
      "spectrum": cmd_spectrum, "bootloader": cmd_bootloader}[args.cmd](link, args)
 

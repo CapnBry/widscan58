@@ -5,6 +5,8 @@ import type { Transport } from "../serial/device";
 import { encodeFrame } from "../serial/parser";
 import { CHF, FRAME_LEVELS, FRAME_METRICS, FRAME_RAWIQ, FRAME_SPECTRUM, FRAME_TELEMETRY, type MetricsMode } from "../proto/frames";
 import { channelMetrics, db, floorEstimate, percentileBias, planBuild, type Hop, type ProfileDef } from "./dsp";
+import { LapSeat } from "./lap";
+import { RH, RH_API_MARKER, checksum } from "../proto/rh";
 
 const K24 = 83.5 / 296;
 const race24: ProfileDef = {
@@ -86,12 +88,24 @@ export class MockTransport implements Transport {
   private vtx: Vtx[] = [];
   private wifi = { centerKhz: 2437000, until: 0, next: 0 };
   private state = new Map<number, { ema: number; clear: number | null }>();
+  // Protocol, as the firmware: boots silent in RotorHazard mode.
+  private proto: "RH" | "MONITOR" = "RH";
+  private rhSeats = Array.from({ length: 8 }, (_, j) => ({
+    mhz: [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917][j],
+    mapped: false,
+    lap: new LapSeat(190, 180),
+    nextPass: 0,
+    lastMs: 0,
+  }));
+  private rhCur = 0;
+  private rhWrite: { cmd: number; need: number; got: number[] } | null = null;
+  private rhText: string | null = null;
+  private rhMetric: "RSSI" | "SNR" = "RSSI";
 
   async open(onBytes: (c: Uint8Array) => void): Promise<void> {
     this.onBytes = onBytes;
     this.reset();
     this.timer = window.setInterval(() => this.tick(), 20);
-    this.text("READY widscan58 esp32s3 (simulated)\n");
   }
 
   async close(): Promise<void> {
@@ -99,6 +113,10 @@ export class MockTransport implements Transport {
   }
 
   async write(data: Uint8Array): Promise<void> {
+    if (this.proto === "RH") {
+      for (const b of data) this.rhByte(b);
+      return;
+    }
     this.rx += new TextDecoder().decode(data);
     let nl: number;
     while ((nl = this.rx.indexOf("\n")) >= 0) {
@@ -153,15 +171,27 @@ export class MockTransport implements Transport {
             channels: this.channels.map((c, id) => ({ id, name: c.name, khz: c.khz })),
           })}\n`,
         );
-      case line === "STATUS?":
+      case line === "PROTOCOL?":
+        return this.text(`PROTOCOL ${this.proto}\n`);
+      case line === "PROTOCOL RH" || line === "PROTOCOL MONITOR":
+        this.proto = parts[1] as "RH" | "MONITOR";
+        this.rx = "";
+        return ok();
+      case line === "METRICS RSSI" || line === "METRICS SNR":
+        if (this.proto === "RH") this.rhMetric = parts[1] as "RSSI" | "SNR";
+        else this.metricsMode = parts[1] as MetricsMode;
+        this.state.clear();
+        return ok();
+      case line === "STATUS?" || line === "CONFIG?":
         return this.text(
-          `STATUS ${JSON.stringify({
+          `${parts[0].slice(0, -1)} ${JSON.stringify({
+            protocol: this.proto,
             profile: p.name,
             running: +this.running,
             enabled: this.enabled,
             mode: this.group ? "GROUP" : "SINGLE",
-            capture_samples: p.nfft * p.segments,
-            nfft: p.nfft,
+            capture_samples: this.proto === "RH" ? 512 : p.nfft * p.segments, // RotorHazard mode defaults (commands.c)
+            nfft: this.proto === "RH" ? 128 : p.nfft,
             segments: p.segments,
             rate_code: 1,
             filter: 60,
@@ -173,7 +203,7 @@ export class MockTransport implements Transport {
             gain_max: 82,
             rawiq_max: 16380,
             recal: "ONCE",
-            metrics: this.metricsMode,
+            metrics: this.proto === "RH" ? this.rhMetric : this.metricsMode,
             rssi_hz: p.rssiHz,
             search_hz: p.searchHz,
             dc_guard: 1,
@@ -234,8 +264,8 @@ export class MockTransport implements Transport {
         this.specSpanHz = num(3);
         this.specDetector = parts[4] === "MAX" ? 1 : 0;
         return ok();
-      case line === "METRICS FULL" || line === "METRICS RSSI" || line === "METRICS SNR":
-        this.metricsMode = parts[1] as MetricsMode;
+      case line === "METRICS FULL":
+        this.metricsMode = "FULL";
         this.state.clear();
         return ok();
       case line === "METRICS?":
@@ -252,12 +282,149 @@ export class MockTransport implements Transport {
         return this.text(`SPURS ${p.spursKhz.length} ${p.spursKhz.join(" ")} guard 60000\n`);
       case line === "RECAL":
         return this.text("OK RECAL\n");
-      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "WIN", "SPURS", "TUNESKIP", "AVG", "PROMISC", "REBOOT", "BOOTLOADER"].includes(parts[0]):
+      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "WIN", "SPURS", "TUNESKIP", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
+        return ok();
+      case line === "REBOOT":
+        // Like the firmware: back to defaults, silent in RotorHazard mode.
+        setTimeout(() => {
+          this.proto = "RH";
+          this.rx = "";
+          this.channels = p.channels;
+          this.enabled = (1 << this.channels.length) - 1;
+          this.metricsMode = "FULL";
+          this.reset();
+        }, 300);
         return ok();
       case parts[0] === "SYNC":
         return this.text(`SYNC ${parts[1]}\n`);
       default:
         return this.text("ERR command\n");
+    }
+  }
+
+  // ---- RotorHazard mode -------------------------------------------------------
+  // The firmware's protocol (firmware/src/proto/rh.c) on synthetic levels:
+  // each seat on a channel sees a quad pass the gate every 5-9 s.
+
+  private rhAllowed(line: string): boolean {
+    return (
+      ["PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?", "METRICS RSSI", "METRICS SNR", "METRICS?",
+        "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE"].includes(line) ||
+      ["GAIN MANUAL ", "FFT ", "CAPN ", "FILTER ", "IQCORR "].some((p) => line.startsWith(p))
+    );
+  }
+
+  private rhByte(b: number) {
+    if (this.rhText !== null) {
+      if (b === 10) {
+        const line = this.rhText.trim();
+        this.rhText = null;
+        if (line === "METRICS?") this.text(`METRICS ${this.rhMetric}\n`);
+        else if (this.rhAllowed(line)) setTimeout(() => this.command(line), 2);
+        else this.text("ERR rh_mode\n");
+      } else if (b !== 13) this.rhText += String.fromCharCode(b);
+      return;
+    }
+    if (this.rhWrite) {
+      const w = this.rhWrite;
+      w.got.push(b);
+      if (w.got.length < w.need + 1) return;
+      this.rhWrite = null;
+      if (checksum(w.got, w.need) === w.got[w.need]) this.rhWriteCmd(w.cmd, w.got);
+      return;
+    }
+    if (b >= 0x41 && b <= 0x50) {
+      this.rhText = String.fromCharCode(b);
+      return;
+    }
+    if (b <= 0x50) return this.rhRead(b);
+    const need = b === RH.WRITE_FREQUENCY || b === 0x75 ? 2 : [0x71, 0x72, 0x78, 0x79, 0x7a, 0x7e].includes(b) ? 1 : 0;
+    if (need) this.rhWrite = { cmd: b, need, got: [] };
+  }
+
+  private rhNow(): number {
+    return Math.floor(performance.now() - this.start);
+  }
+
+  private rhRead(cmd: number) {
+    const s = this.rhSeats[this.rhCur];
+    const l = s.lap;
+    const now = this.rhNow();
+    const out: number[] = [];
+    const u16 = (v: number) => out.push((v >> 8) & 0xff, v & 0xff);
+    const passStats = () => {
+      out.push(l.lap);
+      u16((now - l.passMs) & 0xffff);
+      out.push(l.valid ? l.level : 1, l.nodePeak, l.passPeak);
+      u16(l.loopUs);
+    };
+    const extremums = () => {
+      const x = l.popExtremum();
+      out.push((l.crossing ? 1 : 0) | (x?.peak ? 2 : 0), l.passNadir, l.nodeNadir);
+      if (x) {
+        out.push(x.e.level);
+        u16((now - x.e.firstMs) & 0xffff);
+        u16(x.e.durationMs);
+      } else out.push(0, 0, 0, 0, 0);
+    };
+    const text = (t: string) => {
+      for (let j = 0; j < 16; j++) out.push(j < t.length ? t.charCodeAt(j) : 0);
+    };
+    switch (cmd) {
+      case RH.READ_FREQUENCY: u16(s.mhz); break;
+      case RH.TEST_RX_REGISTER: out.push(+s.mapped); break;
+      case RH.READ_LAP_PASS_STATS: passStats(); break;
+      case RH.READ_LAP_EXTREMUMS: extremums(); break;
+      case RH.READ_REVISION_CODE: out.push(RH_API_MARKER, 36); break;
+      case RH.READ_NODE_RSSI_PEAK: out.push(l.nodePeak); break;
+      case RH.READ_NODE_RSSI_NADIR: out.push(l.nodeNadir); break;
+      case RH.READ_ENTER_AT_LEVEL: out.push(l.enterAt); break;
+      case RH.READ_EXIT_AT_LEVEL: out.push(l.exitAt); break;
+      case RH.READ_TIME_MILLIS: out.push((now >>> 24) & 0xff, (now >> 16) & 0xff, (now >> 8) & 0xff, now & 0xff); break;
+      case RH.READ_MULTINODE_COUNT: out.push(8); break;
+      case RH.READ_CURNODE_INDEX: case 0x3c: out.push(this.rhCur); break;
+      case 0x11: u16(0); break;
+      case RH.READ_FW_VERSION: text("0.1.0-sim"); break;
+      case 0x40: text("Widscan58 sim"); break;
+      default: return;
+    }
+    out.push(checksum(out));
+    setTimeout(() => this.onBytes(Uint8Array.from(out)), 1);
+  }
+
+  private rhWriteCmd(cmd: number, d: number[]) {
+    const s = this.rhSeats[this.rhCur];
+    if (cmd === RH.WRITE_CURNODE_INDEX) {
+      if (d[0] < 8) this.rhCur = d[0];
+    } else if (cmd === RH.WRITE_FREQUENCY) {
+      const mhz = (d[0] << 8) | d[1];
+      if (mhz < 100 || mhz > 9999) return;
+      const p = this.profile;
+      const khz = Math.round(p.baseKhz + (mhz * 1000 - p.equivBaseKhz) * p.scale);
+      if (mhz !== s.mhz || !s.mapped) s.lap.reset();
+      s.mhz = mhz;
+      s.mapped = khz >= p.bandLoKhz && khz <= p.bandHiKhz;
+      s.nextPass = performance.now() + 1500 + Math.random() * 4000;
+    } else if (cmd === RH.WRITE_ENTER_AT_LEVEL) s.lap.enterAt = d[0];
+    else if (cmd === RH.WRITE_EXIT_AT_LEVEL) s.lap.exitAt = d[0];
+    else if (cmd === RH.FORCE_END_CROSSING) s.lap.endCrossing();
+  }
+
+  /** Levels at ~5 ms per seat update: floor plus noise, and a pass bump. */
+  private rhTick(now: number) {
+    const tMs = this.rhNow();
+    const snr = this.rhMetric === "SNR";
+    for (const [j, s] of this.rhSeats.entries()) {
+      if (!s.mapped) continue;
+      if (now > s.nextPass + 1500) s.nextPass = now + 5000 + Math.random() * 4000 + j * 300;
+      const peakDb = 16 + (j % 4) * 4; // a little different per seat
+      for (let k = 3; k >= 0; k--) {
+        const t = now - k * 5;
+        const bump = peakDb * Math.exp(-(((t - s.nextPass) / 220) ** 2));
+        const db = bump + gaussRand() * 0.6;
+        const code = snr ? Math.max(1, 2 * db + 1) : 2 * (db - 47.5) + 255;
+        s.lap.feed(tMs - k * 5, Math.max(1, Math.min(254, Math.round(code))), 5000);
+      }
     }
   }
 
@@ -342,6 +509,7 @@ export class MockTransport implements Transport {
 
   private tick() {
     const now = performance.now();
+    if (this.proto === "RH") return this.rhTick(now);
     this.evolve(now);
     // ~5 ms per hop like the hardware: emit hops for the elapsed tick.
     const hops = this.running && this.plan.length ? 4 : 0;

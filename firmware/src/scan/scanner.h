@@ -13,6 +13,7 @@ typedef struct {
     uint32_t enabled;
     plan_mode_t mode;
     bool running;
+    bool rh;                 /* RotorHazard mode: levels feed the seats (rh.h), no frames */
     /* Acquisition */
     uint16_t capture_samples;
     uint16_t nfft;

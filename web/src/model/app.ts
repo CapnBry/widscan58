@@ -2,6 +2,7 @@
 import type { Device } from "../serial/device";
 import type { Store } from "./store";
 import { loadDeviceSettings, restoreCommands, saveDeviceSettings, type DeviceSettings } from "./channelPlan";
+import { RhModel } from "./rh";
 
 export interface View {
   el: HTMLElement;
@@ -16,6 +17,7 @@ export interface UiSettings {
   historySeconds: number;
   dbMin: number;
   dbMax: number;
+  uiMode: "monitor" | "rh"; // which protocol and page the UI asks the device for
 }
 
 export class App {
@@ -29,12 +31,16 @@ export class App {
     historySeconds: 30,
     dbMin: -100,
     dbMax: -20,
+    uiMode: "monitor",
   };
   /** Channel plan, hop mode and gain, restored on every connect. */
   deviceSettings: DeviceSettings = loadDeviceSettings();
+  /** RotorHazard mode: seats, polling and detection events. */
+  rh: RhModel;
   private listeners = new Set<() => void>();
 
   constructor(readonly store: Store) {
+    this.rh = new RhModel(store);
     try {
       const saved = localStorage.getItem("widscan58.settings");
       if (saved) Object.assign(this.settings, JSON.parse(saved));

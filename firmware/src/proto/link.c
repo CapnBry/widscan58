@@ -21,6 +21,7 @@
 #endif
 static RingbufHandle_t queue;
 static volatile uint32_t drops;
+static volatile bool streaming; /* frames allowed (link_set_streaming); off at boot */
 
 static void link_task(void *arg) {
     (void)arg;
@@ -59,6 +60,7 @@ unsigned link_fill_permille(void) {
 
 static bool frame_put(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free,
                       TickType_t wait) {
+    if (!streaming) return false; /* not a drop: nobody is listening for frames */
     size_t len = alen + blen;
     size_t total = sizeof(frame_header_t) + len + 4;
     if (len > 0xffff || (min_free && xRingbufferGetCurFreeSize(queue) < total + min_free)) {
@@ -89,13 +91,23 @@ bool link_frame_wait(uint8_t type, const void *a, size_t alen, const void *b, si
     return frame_put(type, a, alen, b, blen, 0, pdMS_TO_TICKS(wait_ms));
 }
 
-bool link_text(const char *text) {
-    size_t n = strlen(text);
-    if (xRingbufferSend(queue, text, n, pdMS_TO_TICKS(100)) != pdTRUE) {
+bool link_raw(const void *data, size_t n) {
+    if (xRingbufferSend(queue, data, n, pdMS_TO_TICKS(100)) != pdTRUE) {
         drops++;
         return false;
     }
     return true;
+}
+
+bool link_text(const char *text) { return link_raw(text, strlen(text)); }
+
+void link_set_streaming(bool on) { streaming = on; }
+bool link_streaming(void) { return streaming; }
+
+void link_flush(void) {
+    size_t size;
+    void *item;
+    while ((item = xRingbufferReceive(queue, &size, 0)) != NULL) vRingbufferReturnItem(queue, item);
 }
 
 bool link_printf(const char *fmt, ...) {
@@ -107,20 +119,6 @@ bool link_printf(const char *fmt, ...) {
     return link_text(buffer);
 }
 
-int link_read_line(char *line, size_t capacity) {
-    size_t used = 0;
-    bool overflow = false;
-    for (;;) {
-        char c;
-        if (usb_serial_jtag_read_bytes(&c, 1, portMAX_DELAY) != 1) continue;
-        if (c == '\r') continue;
-        if (c == '\n') {
-            if (overflow) return -1;
-            if (!used) continue;
-            line[used] = 0;
-            return (int)used;
-        }
-        if (used + 1 < capacity) line[used++] = c;
-        else overflow = true;
-    }
+int link_read(uint8_t *buf, size_t capacity, uint32_t timeout_ms) {
+    return usb_serial_jtag_read_bytes(buf, capacity, timeout_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms));
 }

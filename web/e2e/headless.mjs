@@ -101,6 +101,67 @@ for (const mode of ["SNR", "RSSI"]) {
 await send("METRICS FULL");
 await sleep(1000);
 
+// RotorHazard mode through the menu: the page polls the device as a
+// RotorHazard server would; the simulator flies a pass every 5-9 s per seat.
+const menuPick = async (label) => {
+  await page.click(".menu-btn");
+  const [item] = await page.$$(`xpath/.//button[contains(@class,'menu-item') and contains(., '${label}')]`);
+  await item.click();
+};
+await menuPick("RotorHazard mode");
+await sleep(sim ? 12000 : 6000);
+const rhSnap = () =>
+  page.evaluate(() => {
+    const { app } = window.widscan58;
+    const rh = app.rh;
+    return {
+      mode: app.settings.uiMode,
+      rhLink: !!app.device?.rh,
+      running: rh.running,
+      error: rh.error,
+      seatsOn: rh.seats.filter((x) => x.channel).length,
+      withLevel: rh.seats.filter((x) => x.channel && x.level !== null).length,
+      passes: rh.events.filter((e) => e.kind === "pass").length,
+      link: app.device?.rh?.stats,
+      cycleMs: Math.round(rh.cycleMs),
+      pageShown: getComputedStyle(document.querySelector("main.rh-page")).display !== "none",
+    };
+  });
+let r = await rhSnap();
+check("RotorHazard mode polls all seats", r.mode === "rh" && r.rhLink && r.running && r.pageShown && r.seatsOn === 8 && r.withLevel === 8, JSON.stringify(r));
+check("RotorHazard link without failed reads", r.link && r.link.reads > 100 && r.link.errors === 0, JSON.stringify(r.link));
+if (sim) check("RotorHazard passes detected", r.passes >= 1, `${r.passes} passes`);
+const enterInput = await page.$(".rh-seat input");
+await enterInput.click();
+await page.keyboard.down("Control");
+await page.keyboard.press("a");
+await page.keyboard.up("Control");
+await enterInput.type("201");
+await page.keyboard.press("Tab");
+await sleep(500);
+const enter0 = await page.evaluate(() => window.widscan58.app.rh.seats[0].enter);
+check("EnterAt edit reaches the seat", enter0 === 201, `seat 1 enter ${enter0}`);
+await page.evaluate(() => window.widscan58.app.rh.setThreshold(0, "enter", 190));
+await page.screenshot({ path: path.join(out, "rotorhazard.png"), fullPage: true });
+await menuPick("Monitor mode");
+await sleep(3000);
+s = await snap();
+const proto = await page.evaluate(() => window.widscan58.store.status?.protocol);
+const backOk = [
+  proto === "MONITOR" && s.channelsWithData === s.nch && !(await page.evaluate(() => !!window.widscan58.app.device?.rh)),
+  `protocol ${proto}, ${s.channelsWithData}/${s.nch} channels`,
+];
+check("back to monitor mode", backOk[0], backOk[1]);
+// A restart boots the device silent (RotorHazard mode); the page notices the
+// missing telemetry and switches it back to monitor mode.
+await page.evaluate(() => window.widscan58.app.send("REBOOT"));
+await sleep(9000);
+const after = await page.evaluate(() => {
+  const { store } = window.widscan58;
+  return { proto: store.status?.protocol, fresh: store.channels.filter((c) => performance.now() - c.updated < 1000).length };
+});
+check("monitor mode resumes after REBOOT", after.proto === "MONITOR" && after.fresh === 8, JSON.stringify(after));
+
 // Click a channel tile and the panorama, capture raw I/Q via the button.
 const tiles = await page.$$(".tile");
 await tiles[5].click();
@@ -125,11 +186,14 @@ check("no command errors", s.errors.length === 0, s.errors.join(" | "));
 check("no console errors", consoleErrors.length === 0, consoleErrors.slice(0, 5).join(" | "));
 await page.screenshot({ path: path.join(out, "2-after.png"), fullPage: true });
 // Crops of the main panels for review.
-const cards = await page.$$("section.card");
+const cards = (await page.$$("section.card")).filter(Boolean);
+for (let j = cards.length - 1; j >= 0; j--) if (!(await cards[j].isVisible())) cards.splice(j, 1);
 for (const [i, c] of cards.entries()) await c.screenshot({ path: path.join(out, `card-${i}.png`) });
 
 // Light theme pass.
-await page.click("button[title='Toggle light/dark']");
+await page.click(".menu-btn");
+await page.click(".menu-switch input");
+await page.keyboard.press("Escape");
 await sleep(800);
 await page.screenshot({ path: path.join(out, "3-light.png"), fullPage: false });
 // Phone width: no horizontal scroll.
@@ -138,7 +202,9 @@ await sleep(800);
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 check("no horizontal scroll at 390px", overflow <= 0, `overflow ${overflow}px`);
 await page.screenshot({ path: path.join(out, "4-phone.png"), fullPage: false });
-await page.click("button[title='Toggle light/dark']");
+await page.click(".menu-btn");
+await page.click(".menu-switch input");
+await page.keyboard.press("Escape");
 
 fs.writeFileSync(path.join(out, "results.json"), JSON.stringify({ url, results, final: s }, null, 1));
 await browser.close();

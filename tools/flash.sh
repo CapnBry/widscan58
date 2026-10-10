@@ -7,7 +7,8 @@
 # firmware's continuous output (~77 KiB/s). A failure after the erase step
 # leaves the board without a bootable app, and from then on the bootloader's
 # RTC watchdog (which no app ever disables) resets the chip part-way through
-# every later flash attempt. So: stop the stream first (SCAN STOP), then let
+# every later flash attempt. So: stop the stream first (PROTOCOL RH: silent
+# until polled; SCAN STOP for firmware before it), then let
 # esptool reset into download mode, and leave via a watchdog reset (an RTS
 # reset does not always exit download mode on USB Serial/JTAG).
 #
@@ -35,7 +36,7 @@ else
     python3 -c '
 import sys, time, serial
 s = serial.Serial(sys.argv[1], 115200, timeout=0.1)
-s.write(b"\nSCAN STOP\n")
+s.write(b"\nSCAN STOP\nPROTOCOL RH\n")
 time.sleep(0.3)
 s.reset_input_buffer()
 ' "$port"

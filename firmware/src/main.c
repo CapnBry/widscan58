@@ -31,14 +31,16 @@ int cmd_parse(char *cmd, char *name, int *argc, char **argv) {
     } while (0)
 
 static void boot_failed(const char *what, esp_err_t err) {
+    /* Boot is silent (commands.c), so report only once a host speaks. */
+    bool host = false;
     for (;;) {
         /* Nothing else reads the port; drain it so host writes don't stall. */
         uint8_t sink[64];
-        while (usb_serial_jtag_read_bytes(sink, sizeof(sink), 0) > 0) {
-        }
-        link_printf("ERR boot %s %s heap=%u largest=%u\n", what, esp_err_to_name(err),
-                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        while (usb_serial_jtag_read_bytes(sink, sizeof(sink), 0) > 0) host = true;
+        if (host)
+            link_printf("ERR boot %s %s heap=%u largest=%u\n", what, esp_err_to_name(err),
+                        (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -72,6 +74,5 @@ void app_main(void) {
     BOOT_CHECK(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE));
     BOOT_CHECK(radio_init());
     BOOT_CHECK(scanner_init());
-    commands_task_start();
-    link_printf("READY widscan58 %s\n", radio_caps()->target);
+    commands_task_start(); /* silent from here on until a host speaks (commands.c) */
 }

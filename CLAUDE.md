@@ -9,7 +9,9 @@ FPV channel scanner using the ESP32's built-in radio as an SDR, through the raw
 I/Q debug path found by [ESPARGOS/esp-sdr](https://github.com/ESPARGOS/esp-sdr).
 The firmware steps through up to eight FPV channels and reports RSSI, noise
 floor, SNR, peak and video-centre frequency per channel, plus a decimated
-spectrum. A Web Serial dashboard shows it all live.
+spectrum. A Web Serial dashboard shows it all live. In RotorHazard mode the
+board is a RotorHazard timer node instead: one USB port with a seat per channel
+(see "RotorHazard mode" below).
 
 Targets: the **ESP32-C5** (real 5.8 GHz) runs on a Seeed XIAO ESP32-C5 and works
 with the web UI: ~4.75 ms/hop, about 53 rotations/s over R1–R8 (PLAN.md, Status,
@@ -31,10 +33,12 @@ keep that for anything new that is copied or derived from it.
 | `tools/pages_firmware.py` | Stages the built firmware into `web/public/firmware` for the in-page flasher (used by CI). |
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
 | `tools/ttyfix.py` | Leaves a serial port at VMIN=1 after pyserial use (see the Web UI "device has been lost" note). |
+| `tools/rh_check.py` | Runs RotorHazard's own node interface code (from `ref/RotorHazard`) against the board: discovery, seats, polling, passes, comm errors. |
 | `tools/gen_twiddle.py` | Generates `firmware/src/dsp/fft_twiddle_q15.h` for the radix-4 FFT. |
 | `.github/workflows/` | Builds firmware + web UI and publishes to GitHub Pages (https://capnbry.github.io/widscan58/). Only `esp32c5` firmware is published (`FW_ENVS`). |
 | `images/` | Screenshots used by README.md. |
 | `ref/esp-sdr/` | Reference checkout of esp-sdr (not tracked here). Restore it with `git clone https://github.com/ESPARGOS/esp-sdr ref/esp-sdr`. |
+| `ref/RotorHazard/` | Reference checkout of RotorHazard for `tools/rh_check.py` (not tracked): `git clone https://github.com/RotorHazard/RotorHazard ref/RotorHazard`. Its license (MIT with no-AI-training terms) differs from ours: interoperate with it, don't copy its code. |
 | `backup/` | Full flash dump of the S3 as it arrived (esp-sdr WebSDR firmware). Local only, not tracked. |
 
 ## Firmware
@@ -64,8 +68,18 @@ tools/flash.sh` or `pio run -e esp32c5 -t upload`). Rev v1.0 silicon has a ROM b
 re-enables that clock at boot, so this only bites before our firmware is running,
 e.g. on a board flashed with something else. Recover with BOOT + RESET, then
 `RX_ENV=esp32c5 tools/flash.sh --manual`. If a boot step fails, the firmware prints
-`ERR boot <step> <error> heap=… largest=…` every second instead of
-reboot-looping.
+`ERR boot <step> <error> heap=… largest=…` every second (once a host has sent
+something) instead of reboot-looping.
+
+**The firmware boots silent, in RotorHazard mode** (`firmware/src/proto/commands.c`):
+it sends nothing until asked, as a RotorHazard server expects of a node, and
+there is no `READY` line any more. Our hosts switch with `PROTOCOL MONITOR`
+(the web UI, `widscan58cli.py` and `tools/flash.sh` do this themselves; with
+`pio device monitor` or a terminal, type it). In monitor mode a lone RotorHazard
+probe byte (0x22) after 100 ms of input silence switches back to RotorHazard
+mode, so a RotorHazard server can take over a port a monitor left streaming.
+In RotorHazard mode, input bytes `A`–`P` (unused by RotorHazard) start one of our
+command lines; only a few are allowed there (`rh_allowed`).
 
 Use the PlatformIO Core that pioarduino 55.03.312-1 expects (6.2.x). The
 platform pins ESP-IDF 5.5.5. Before changing the platform version, run
@@ -142,7 +156,35 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `IQCORR 0\|1` | Digital IQ imbalance correction before the FFT (default 1). Removes the mirror image of strong signals, e.g. R1 showing on R2 in pair mode. |
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, centre and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
-| `REBOOT` | Restart (USB stays connected; the UI re-syncs on `READY`) |
+| `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `CAPN`, `FILTER`, `IQCORR` and `MODE GROUP\|SINGLE` work; the rest answer `ERR rh_mode` |
+| `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
+
+## RotorHazard mode
+
+The board answers RotorHazard's serial node protocol (node API level 36) as one
+multi-node processor with 8 seats, like an S32_BPill board with 8 receivers.
+RotorHazard's server needs no changes: add the port to `GENERAL` →
+`SERIAL_PORTS` in its config (e.g. `"SERIAL_PORTS": ["/dev/ttyACM0"]`).
+
+- **Firmware:** `src/proto/rh.c` (protocol; written from RotorHazard's
+  server-side code, `src/interface/serial_node.py` and `RHInterface.py`) and
+  `src/scan/lap.c` (crossing detection per seat, host-tested). A seat set to an
+  unknown frequency (RotorHazard writes 1111 for "off") is left out of the scan
+  plan. The defaults in this mode: `FFT 128`, `CAPN 512`, `METRICS RSSI`, no
+  display spectrum; with R1–R6 that is ~3.5 ms between updates of a seat
+  (~285 /s).
+- **Levels** are the `METRICS` byte codes: RSSI (dBFS = code / 2 − 127.5) or SNR
+  (dB = code / 2), clamped to 1–254. `METRICS RSSI|SNR` picks one and resets the
+  seats' levels. EnterAt/ExitAt are in the same codes (defaults before the
+  server writes its own: 190 / 180, about −32.5 / −37.5 dBFS).
+- **Detection:** a median of 3 updates, a crossing from EnterAt until below
+  ExitAt, and the pass at the middle of the crossing's highest plateau. Peaks
+  and nadirs (2-code hysteresis, 8 queued each) feed the server's RSSI graph.
+  A frequency change keeps the lap count (the server counts passes by its
+  change).
+- **Check:** `tools/rh_check.py` runs RotorHazard's own interface code against
+  the board (no VTX: `--enter 164 --exit 162` makes noise crossings).
 
 ## Web UI
 
@@ -152,6 +194,17 @@ npm install
 npm run dev                         # http://localhost:5808 (Web Serial: Chrome/Edge, Firefox, Android Chrome)
 ```
 
+- **Menu** (☰, top left): Monitor mode / RotorHazard mode, and the dark-mode
+  switch. The choice is remembered and applied on every connect (`PROTOCOL?`,
+  then `PROTOCOL MONITOR|RH`; firmware without `PROTOCOL` is monitor only).
+- **RotorHazard mode page** (`web/src/model/rh.ts`, `views/rh.ts`): polls the
+  board as RotorHazard's server does (every 100 ms: per seat, select it and read
+  the pass stats and one queued peak/nadir), and shows each seat's level with
+  EnterAt/ExitAt (editable, "now" = average of the last second, kept per metric
+  in localStorage and written on connect), a level graph with passes, the
+  detection events with lap times, and the receiver settings this mode allows.
+  Seats take the channels of the shared channel plan in frequency order (Edit
+  channels). Disconnect before a RotorHazard server opens the port.
 - **Connect device**: Web Serial. Chrome, Edge, Firefox and Android Chrome all
   work, flashing included. Chrome remembers the grant, so later visits and
   board resets reconnect automatically.
@@ -160,7 +213,8 @@ npm run dev                         # http://localhost:5808 (Web Serial: Chrome/
   by CI, never committed).
 - **Simulate**, or open `http://localhost:5808/?sim`: synthetic VTXs, Wi-Fi
   bursts, board spurs and IMD3 products. The simulator only has the S3
-  (`s3-race24`) profile.
+  (`s3-race24`) profile. It boots in RotorHazard mode like the firmware, and
+  there flies a pass past every seat every 5–9 s.
 - **Bridge**: `python3 tools/serial_bridge.py`, then open
   `http://localhost:5808/?bridge=ws://127.0.0.1:5809`. This does not work from
   the HTTPS Pages site (Chrome blocks it from reaching a localhost WebSocket);
@@ -183,10 +237,14 @@ element after clicking Channels → Edit.
 ### Tests
 
 ```sh
-(cd firmware && pio test -e native)        # firmware host tests: radix-4 FFT vs a DFT, metrics
+(cd firmware && pio test -e native)        # firmware host tests: radix-4 FFT vs a DFT, metrics, lap detection
 cd web
 npm test                                   # parser/protocol unit tests
 node e2e/headless.mjs --sim                # headless Chrome vs. the simulator
 python3 ../tools/serial_bridge.py &        # then, against the real board:
 node e2e/headless.mjs                      # writes screenshots + results.json to e2e-out/
 ```
+
+The e2e run covers both modes (switching through the menu) and recovery after
+`REBOOT`. For RotorHazard compatibility, `tools/rh_check.py` (see "RotorHazard
+mode").

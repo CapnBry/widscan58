@@ -21,6 +21,7 @@ import { Telemetry, Console } from "./views/debug";
 import { Controls } from "./views/controls";
 import { RawIqView } from "./views/rawiq";
 import { FlashDialog } from "./views/flashDialog";
+import { RhEvents, RhGraph, RhSeats, RhSettings } from "./views/rh";
 
 const store = new Store();
 const app = new App(store);
@@ -29,6 +30,7 @@ const recorder = new Recorder();
 // ---- Theme ------------------------------------------------------------------
 function applyTheme(t: string) {
   document.documentElement.dataset.theme = t;
+  darkSwitch.checked = t !== "light";
   invalidateTheme();
   try {
     localStorage.setItem("widscan58.theme", t);
@@ -55,11 +57,29 @@ const simBtn = el("button", {}, "Simulate");
 const replayInput = el("input", { type: "file", accept: ".widscan58", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
 const recordBtn = el("button", { title: "Record the raw device stream to a .widscan58 file" }, "● Record");
-const themeBtn = el("button", { title: "Toggle light/dark" }, "◐");
+// Menu: the page / device protocol (monitor or RotorHazard) and the theme.
+const menuBtn = el("button", { class: "menu-btn", title: "Menu", "aria-haspopup": "true", "aria-expanded": "false" }, "☰");
+const modeItems = {
+  monitor: el("button", { class: "menu-item", role: "menuitemradio" }, "Monitor mode"),
+  rh: el("button", { class: "menu-item", role: "menuitemradio" }, "RotorHazard mode"),
+};
+const rhNote = el("div", { class: "menu-note" });
+const darkSwitch = el("input", { type: "checkbox", role: "switch" }) as HTMLInputElement;
+darkSwitch.checked = themeName !== "light";
+const menu = el(
+  "div",
+  { class: "menu", role: "menu", hidden: "" },
+  el("div", { class: "menu-label" }, "Mode"),
+  modeItems.monitor,
+  modeItems.rh,
+  rhNote,
+  el("div", { class: "menu-sep" }),
+  el("label", { class: "menu-item menu-switch" }, el("span", {}, "Dark mode"), darkSwitch),
+);
 const header = el(
   "header",
   { class: "top" },
-  el("span", { class: "brand" }, themeBtn, el("h1", {}, "Widscan58")),
+  el("span", { class: "brand" }, el("span", { class: "menu-wrap" }, menuBtn, menu), el("h1", {}, "Widscan58")),
   el("span", { class: "conn-state" }, dot, connText, fwText),
   el("span", { class: "spacer" }),
   connectBtn,
@@ -69,24 +89,119 @@ const header = el(
 const sessionRow = el("div", { class: "session-row" }, simBtn, replayBtn, replayInput, recordBtn);
 const banner = el("div", { class: "banner", style: "display:none" });
 
-const views: { view: View; minMs: number; last: number; drawn: number }[] = [];
-function addView(view: View, minMs = 0) {
-  views.push({ view, minMs, last: 0, drawn: -1 });
+type Page = "monitor" | "rh" | "both";
+const views: { view: View; page: Page; minMs: number; last: number; drawn: number }[] = [];
+function addView(page: Page, view: View, minMs = 0) {
+  views.push({ view, page, minMs, last: 0, drawn: -1 });
   return view.el;
 }
-const main = el(
+const monitorMain = el(
   "main",
   {},
-  addView(new ChannelGrid(app), 100),
-  addView(new Panorama(app), 33),
-  addView(new Zoom(app), 33),
-  addView(new History(app), 50),
-  addView(new Telemetry(app), 200),
-  addView(new Controls(app), 100),
-  addView(new RawIqView(app), 100),
-  addView(new Console(app, sessionRow), 200),
+  addView("monitor", new ChannelGrid(app), 100),
+  addView("monitor", new Panorama(app), 33),
+  addView("monitor", new Zoom(app), 33),
+  addView("monitor", new History(app), 50),
+  addView("monitor", new Telemetry(app), 200),
+  addView("monitor", new Controls(app), 100),
+  addView("monitor", new RawIqView(app), 100),
 );
-document.getElementById("app")!.append(header, banner, main);
+const rhMain = el(
+  "main",
+  { class: "rh-page" },
+  addView("rh", new RhSeats(app), 100),
+  addView("rh", new RhGraph(app), 50),
+  addView("rh", new RhEvents(app), 200),
+  addView("rh", new RhSettings(app), 300),
+);
+const sharedMain = el("main", { class: "shared" }, addView("both", new Console(app, sessionRow), 200));
+document.getElementById("app")!.append(header, banner, monitorMain, rhMain, sharedMain);
+
+// ---- Pages and device protocol ---------------------------------------------------
+// Firmware without the PROTOCOL command is always in monitor mode.
+let legacyFirmware = false;
+function showPage() {
+  const rh = app.settings.uiMode === "rh";
+  monitorMain.style.display = rh ? "none" : "";
+  rhMain.style.display = rh ? "" : "none";
+  modeItems.monitor.setAttribute("aria-checked", String(!rh));
+  modeItems.rh.setAttribute("aria-checked", String(rh));
+  const replay = app.readOnly && !!app.device;
+  modeItems.rh.disabled = legacyFirmware || replay;
+  rhNote.textContent = legacyFirmware
+    ? "This firmware has no RotorHazard mode: flash a newer one."
+    : replay
+      ? "Replays are monitor mode only."
+      : "";
+  rhNote.hidden = !rhNote.textContent;
+  for (const v of views) v.drawn = -1;
+  updateBanner();
+}
+
+/** Put a connected device in the page's protocol and start the page on it. */
+let starting: Promise<void> | null = null;
+function startMode(device: Device): Promise<void> {
+  const run = async () => {
+    let proto: string | null = null;
+    try {
+      proto = await device.text("PROTOCOL?", 1500);
+    } catch (e) {
+      store.addLog("info", `no protocol switch (${(e as Error).message}); monitor mode only`);
+    }
+    legacyFirmware = proto === null;
+    if (legacyFirmware && app.settings.uiMode === "rh") app.settings.uiMode = "monitor";
+    showPage();
+    if (app.settings.uiMode === "rh") {
+      await app.send("PROTOCOL RH");
+      device.enterRh();
+      await app.rh.start(device, app.deviceSettings.channels);
+    } else {
+      await app.rh.stop();
+      if (device.rh) {
+        await app.send("PROTOCOL MONITOR");
+        device.exitRh();
+      } else if (!legacyFirmware) await app.send("PROTOCOL MONITOR");
+      await syncDevice(device);
+    }
+    lastData = performance.now();
+  };
+  // One at a time: a mode change while a start runs waits for it.
+  const p = (starting ?? Promise.resolve()).then(run, run);
+  const tracked: Promise<void> = p
+    .catch(() => {})
+    .then(() => {
+      if (starting === tracked) starting = null;
+    });
+  starting = tracked;
+  return p;
+}
+
+function setMode(mode: "monitor" | "rh") {
+  closeMenu();
+  if (mode === app.settings.uiMode) return;
+  app.settings.uiMode = mode;
+  app.changed();
+  showPage();
+  if (app.device && !app.readOnly) void startMode(app.device);
+}
+modeItems.monitor.onclick = () => setMode("monitor");
+modeItems.rh.onclick = () => setMode("rh");
+
+function closeMenu() {
+  menu.hidden = true;
+  menuBtn.setAttribute("aria-expanded", "false");
+}
+menuBtn.onclick = (e) => {
+  e.stopPropagation();
+  menu.hidden = !menu.hidden;
+  menuBtn.setAttribute("aria-expanded", String(!menu.hidden));
+};
+menu.onclick = (e) => e.stopPropagation();
+document.addEventListener("click", closeMenu);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeMenu();
+});
+darkSwitch.onchange = () => applyTheme(darkSwitch.checked ? "dark" : "light");
 
 // ---- Connection ---------------------------------------------------------------
 function setState(state: "off" | "ok" | "sim" | "err", text: string) {
@@ -105,6 +220,11 @@ function updateBanner() {
   const parts: (Node | string)[] = [];
   const add = (strong: string, rest: string) => parts.push(el("strong", {}, strong), ` ${rest} `);
   if (app.device?.transport instanceof MockTransport) add("Simulated device.", "Signals, spurs and IMD products are synthetic.");
+  if (app.settings.uiMode === "rh" && app.device)
+    add(
+      "RotorHazard mode.",
+      "This page polls the device as a RotorHazard server would. Disconnect before a RotorHazard server opens the port.",
+    );
   if (app.readOnly) add("Replay.", "Controls are disabled.");
   if (p && p.scale !== 1)
     add(
@@ -126,6 +246,7 @@ function updateFirmwareText() {
 }
 
 async function syncDevice(device: Device) {
+  if (device.rh) return; /* RotorHazard mode: the page does its own setup */
   await app.restoreDevice(device);
   for (const cmd of ["INFO", "PROFILE?", "STATUS?", "SPURS?"]) {
     try {
@@ -141,10 +262,7 @@ async function connect(transport: Transport, readOnly = false) {
   store.info = "";
   device.onItem((item) => {
     store.ingest(item);
-    // The firmware announces READY after every boot; its settings are back
-    // to defaults, so re-read them (a software reset keeps USB connected).
-    if (item.kind === "text" && item.line.startsWith("READY") && app.device === device && !readOnly)
-      void syncDevice(device);
+    if (item.kind === "frame") lastData = performance.now();
   });
   device.onRaw((chunk) => recorder.add(chunk));
   if (transport instanceof WebSerialTransport) transport.onWarning = (msg) => store.addLog("info", `serial: ${msg}`);
@@ -168,13 +286,20 @@ async function connect(transport: Transport, readOnly = false) {
   setState(transport instanceof MockTransport ? "sim" : "ok", transport.name);
   (window as unknown as { widscan58: unknown }).widscan58 = { app, store }; // test/debug hook
   store.addLog("info", `connected via ${transport.name}`);
-  if (!readOnly) await syncDevice(device);
+  if (readOnly) {
+    legacyFirmware = false;
+    if (app.settings.uiMode === "rh") app.settings.uiMode = "monitor";
+    showPage();
+  } else await startMode(device);
   updateBanner();
 }
 
 async function disconnect() {
   userDisconnected = true;
   const d = app.device!;
+  await app.rh.stop();
+  // Leave the device silent, as a RotorHazard server expects to find it.
+  if (!d.rh && !legacyFirmware && !app.readOnly && d.connected) await d.command("PROTOCOL RH", 500).catch(() => {});
   app.device = null;
   stopRecording();
   await d.close();
@@ -208,7 +333,7 @@ const flashDialog = new FlashDialog({
       // Flash the connected board. Quiet its stream first, so the reset into
       // download mode does not race it (tools/flash.sh does the same).
       const port = t.currentPort;
-      await app.device!.command("SCAN STOP", 500).catch(() => {});
+      if (!app.device!.rh) await app.device!.command("SCAN STOP", 500).catch(() => {});
       flashing = true;
       await disconnect();
       return port;
@@ -240,7 +365,6 @@ void flashDialog.offeredVersion().then((v) => {
   updateFirmwareText();
 });
 
-themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
 
 function stopRecording() {
   if (!recorder.active) return;
@@ -288,10 +412,27 @@ else if (WebSerialTransport.supported()) {
 
 store.subscribe(() => updateBanner());
 setState("off", "Disconnected");
+showPage();
+
+// The firmware boots silent (RotorHazard mode). In monitor mode telemetry
+// arrives at 4 Hz even when scanning is stopped, so a quiet link means the
+// board restarted: switch it back.
+let lastData = performance.now();
+setInterval(() => {
+  const d = app.device;
+  if (!d || d.rh || app.readOnly || legacyFirmware || starting || flashing || app.settings.uiMode !== "monitor") return;
+  if (performance.now() - lastData > 3000) {
+    store.addLog("info", "no data for 3 s: switching the device to monitor mode again");
+    lastData = performance.now();
+    void startMode(d);
+  }
+}, 1000);
 
 // ---- Render loop: each view redraws when data changed, at its own max rate ----
 function frame(now: number) {
+  const page = app.settings.uiMode;
   for (const v of views) {
+    if (v.page !== "both" && v.page !== page) continue;
     if (v.drawn === store.version || now - v.last < v.minMs) continue;
     v.last = now;
     v.drawn = store.version;

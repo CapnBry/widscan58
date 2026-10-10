@@ -13,6 +13,7 @@
 #include "metrics.h"
 #include "psd.h"
 #include "fft_eval.h"
+#include "rh.h"
 #include "scanner.h"
 
 #define FLOOR_PERCENTILE 0.2f
@@ -251,6 +252,7 @@ static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_h
             if (llabs(d) <= c->rssi_hz) m.flags |= CHF_SPUR;
         }
         out[j] = (frame_level_t){.id = hop->ch[j], .flags = m.flags, .rssi = m.rssi, .snr = m.snr};
+        if (c->rh) rh_feed(hop->ch[j], (t1 + t2) / 2, snr ? m.snr : m.rssi);
     }
     int64_t tm1 = esp_timer_get_time();
     int64_t t3 = finish_hop(psd, hop, t2, tm0, tm1);
@@ -271,7 +273,7 @@ static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_h
         .floor_bin = floor_raw ? metrics_code_u8(metrics_code_q8(floor_raw) + s.floor_bias_q8 + bin_q8) : 0,
         .nch = hop->nch,
     };
-    link_frame(FRAME_LEVELS, &h, sizeof(h), out, hop->nch * sizeof(frame_level_t), 0);
+    if (!c->rh) link_frame(FRAME_LEVELS, &h, sizeof(h), out, hop->nch * sizeof(frame_level_t), 0);
     hop_stats(t0, t1, t2, t3);
 }
 
@@ -296,7 +298,7 @@ static void do_hop(void) {
     if (err != ESP_OK) {
         s.capture_errors++;
         /* Say so once per configuration; otherwise the scanner just goes quiet. */
-        if (!s.psd_error_reported) {
+        if (!s.psd_error_reported && link_streaming()) {
             link_printf("ERR psd %s fft %s\n", esp_err_to_name(err), psd_fft_name(psd_get_fft()));
             s.psd_error_reported = true;
         }

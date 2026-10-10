@@ -188,11 +188,21 @@ export class Console implements View {
       else if (e.key === "ArrowDown" && this.hpos < this.history.length) input.value = this.history[++this.hpos] ?? "";
     };
     const quick = el("span", { class: "tools" });
-    for (const cmd of ["INFO", "STATUS?", "TIMING?", "SPURS?", "GAIN?"]) {
-      const b = el("button", {}, cmd);
+    // RotorHazard mode allows a few of our commands only (rh_allowed in commands.c).
+    for (const [cmd, modes] of [
+      ["INFO", "monitor rh"],
+      ["STATUS?", "monitor"],
+      ["CONFIG?", "rh"],
+      ["TIMING?", "monitor"],
+      ["SPURS?", "monitor"],
+      ["METRICS?", "rh"],
+      ["GAIN?", "monitor rh"],
+    ]) {
+      const b = el("button", { "data-modes": modes }, cmd);
       b.onclick = () => void app.send(cmd);
       quick.append(b);
     }
+    this.quick = quick;
     this.el = el(
       "section",
       { class: "card span-6" },
@@ -205,8 +215,16 @@ export class Console implements View {
     );
   }
 
+  private quick: HTMLElement;
+  private quickMode = "";
+
   render() {
     const store = this.app.store;
+    const mode = this.app.settings.uiMode;
+    if (mode !== this.quickMode) {
+      this.quickMode = mode;
+      for (const b of this.quick.children) (b as HTMLElement).hidden = !(b as HTMLElement).dataset.modes!.split(" ").includes(mode);
+    }
     if (store.log.length !== this.shown || store.log.length === 500) {
       const atBottom = this.log.scrollTop + this.log.clientHeight >= this.log.scrollHeight - 4;
       this.log.replaceChildren(

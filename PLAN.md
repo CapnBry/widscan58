@@ -213,7 +213,9 @@ const char *radio_phy_version(void);
 
 esp-sdr sequence: NVS → `esp_wifi_init` → `WIFI_MODE_NULL` → start → promiscuous
 on → `radio_init()` (prepare RX). Logging is muted and debug text goes out as
-framed `LOG` messages.
+framed `LOG` messages. Since 2026-10-10 the device then waits silently in
+RotorHazard mode (no `READY` line); hosts switch it with `PROTOCOL MONITOR`
+(see "RotorHazard mode" in the Status log).
 
 ### 4.3 LO planner (profile-driven)
 
@@ -354,7 +356,9 @@ v1: event detection and per-channel deltas in the UI (from METRICS). The firmwar
 
 ### 4.9 Wire protocol (v1)
 
-Host → device: ASCII lines; each replies `OK …` or `ERR <reason>`.
+Host → device: ASCII lines; each replies `OK …` or `ERR <reason>`. This is
+monitor mode; `PROTOCOL RH|MONITOR` switches between it and RotorHazard's binary
+node protocol (`firmware/src/proto/rh.c`), which the device boots in.
 
 | Command | Purpose |
 |---|---|
@@ -636,6 +640,37 @@ Bring-up on hardware (XIAO ESP32-C5, 2026-10-08):
 - Forced every second (threshold 0): our calibration interleaved with it hung the scanner task (commands still answered) after 2.4 s in `EVERY`, and after ~20 s in a run with repeated `RECAL`. With a single LO (one channel enabled), its reference-channel tables stayed in place: DC −44 → −28 dB, RSSI sd 0.3 → 4–7 dB in `CACHE` and `ONCE`. With four LOs `CACHE` restored them on the next hop.
 - Now `radio_tune` runs under `phy_get_lock()`, and a `--wrap` of `phy_set_rx_gain_cal_dc` counts DC measurements outside `c5_recalibrate`; after one, the next tune clears the cache and recalibrates. Forced every second: no hang in 3 min (2471 `EVERY` calibrations against 120 tracker runs), single-LO RSSI sd 0.3–0.5 dB. This also refreshes the cache after a 30-unit temperature change. A tracker run during a capture can still spoil that capture (as in esp-sdr, the lock is not held across acquisition).
 - The S3 has the same tracker and no lock yet.
+
+**RotorHazard mode (2026-10-10).** The board is a RotorHazard timer node: one
+serial multi-node processor with 8 seats (node API 36), so a stock RotorHazard
+server drives it with only `SERIAL_PORTS` configured.
+- Boot is silent in RotorHazard mode; `PROTOCOL MONITOR` switches to our
+  protocol, and in monitor mode a lone 0x22 after ≥100 ms of input silence (and
+  nothing for 5 ms after it) switches back and answers it. Our command lines in
+  RotorHazard mode start with `A`–`P`, which RotorHazard does not use.
+- Seats feed `lap.c` (median of 3, EnterAt/ExitAt crossing, pass at the middle
+  of the highest plateau, peak/nadir history with 2-code hysteresis) from the
+  `METRICS RSSI|SNR` byte codes of each hop. RotorHazard-mode defaults: `FFT
+  128`, `CAPN 512`, `METRICS RSSI`, no spectrum.
+- Verified with RotorHazard's own interface code (`tools/rh_check.py`, their
+  main branch at 1e8bbb4): discovery in 2.0 s (count 8, API 36), seat
+  frequencies (1111 = off) and thresholds set and read back, 0 comm errors in
+  ~600–2000 reads, passes reach its pass callback with timestamps and peaks
+  (with thresholds just above the noise). Taking over a board left streaming in
+  monitor mode worked first time, without retries. R1–R6 (3 LOs): ~3.5 ms
+  between updates of a seat, ~285 /s.
+- The stray first-command `ERR command` seen with `widscan58cli.py` right after
+  flashing came from the tty: after re-enumeration it starts with echo on, and
+  whatever the device streamed in the instant before pyserial set raw mode was
+  echoed back into the device's command line. With the silent boot there is
+  nothing to echo (first command on a fresh tty answered normally).
+- Web UI: a menu (Monitor / RotorHazard mode, dark mode) and a RotorHazard page
+  that polls like the server (seat levels, EnterAt/ExitAt, level graph, passes
+  with lap times). Through the bridge on the C5: 8 seats polled in a ~40 ms
+  cycle, 0 failed reads in ~1000.
+- Not yet tested with a VTX flying through a gate: EnterAt/ExitAt calibration
+  for real passes, pass-time accuracy vs RotorHazard's RX5808 nodes, and RSSI vs
+  SNR as the level.
 
 **Image rejection vs IQ calibration on the C5 (2026-10-10).** esp-sdr 77ffc12 stops redoing the (transmitting) loopback IQ calibration on retune and keeps the startup IQ. Tested with an analog VTX at low power on R7 and R1, antenna on the C5, gain 66, `RECALMODE EVERY`; LO stepped so the VTX sat at ±4…±36 MHz, 8 × 9180-sample captures per point, image rejection = VTX power in ±4 MHz around its offset vs the mirrored band (floor subtracted). The VTX was only ~23–28 dB over the floor in that band, so values above ~30 dB are floor-limited.
 - Per-LO IQ (current): R7 27–34 dB, R1 24–33 dB.

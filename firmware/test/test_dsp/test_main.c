@@ -1,6 +1,6 @@
 /* Host tests for the target-independent DSP: the radix-4 FFT kernel against
  * a double-precision DFT, metrics_db and metrics_code_q8, integer metrics and
- * byte-code levels on a synthetic PSD, and
+ * byte-code levels on a synthetic PSD, gate-crossing detection, and
  * the LO planner.
  * pio test -e native. GPL-3.0-or-later. */
 #include <math.h>
@@ -11,6 +11,7 @@
 #include "fft_r4_sc16.h"
 #include "metrics.h"
 #include "../../src/scan/metrics.c"
+#include "../../src/scan/lap.c"
 #include "../../src/scan/planner.c"
 #include "../../src/scan/profile.c"
 
@@ -258,6 +259,85 @@ static void test_metrics_avg(void) {
     TEST_ASSERT_TRUE(m.flags & CHF_NO_CENTROID);
 }
 
+/* A pass at 5 ms per update: floor 160 with +/-1 noise, a ramp to a
+ * 3-update plateau at 220 and back. enter 190 / exit 180. */
+static uint32_t feed_pass(lap_seat_t *s, uint32_t t, int dropout) {
+    static const uint8_t ramp[] = {170, 180, 190, 200, 210, 220, 220, 220, 210, 200, 190, 180, 170};
+    for (int j = 0; j < 40; j++, t += 5) lap_feed(s, t, (uint8_t)(160 + (j % 3 == 0) - (j % 5 == 0)), 5000);
+    for (unsigned j = 0; j < sizeof(ramp); j++, t += 5) lap_feed(s, t, (int)j == dropout ? 150 : ramp[j], 5000);
+    for (int j = 0; j < 40; j++, t += 5) lap_feed(s, t, 160, 5000);
+    return t;
+}
+
+static void test_lap_pass(void) {
+    lap_seat_t s;
+    lap_init(&s, 190, 180);
+    feed_pass(&s, 1000, -1);
+    TEST_ASSERT_EQUAL(1, s.lap);
+    TEST_ASSERT_FALSE(s.crossing);
+    TEST_ASSERT_EQUAL(220, s.pass_peak);
+    /* Plateau updates at 1000 + 5 * (40 + 5..7): the middle one. */
+    TEST_ASSERT_EQUAL(1000 + 5 * 46, s.pass_ms);
+    TEST_ASSERT_EQUAL(220, s.node_peak);
+    TEST_ASSERT_EQUAL(160, s.node_nadir); /* the isolated 159s are filtered out */
+    TEST_ASSERT_EQUAL(160, s.pass_nadir);
+    TEST_ASSERT_EQUAL(5000, s.loop_us);
+}
+
+/* A one-update dropout mid-crossing is filtered out: still one pass. So is
+ * a one-update spike above enter_at: no pass. */
+static void test_lap_filter(void) {
+    lap_seat_t s;
+    lap_init(&s, 190, 180);
+    feed_pass(&s, 0, 4); /* 210 -> 150 */
+    TEST_ASSERT_EQUAL(1, s.lap);
+    TEST_ASSERT_EQUAL(220, s.pass_peak);
+    lap_init(&s, 190, 180);
+    for (uint32_t t = 0; t < 200; t += 5) lap_feed(&s, t, t == 100 ? 230 : 160, 5000);
+    TEST_ASSERT_EQUAL(0, s.lap);
+    TEST_ASSERT_FALSE(s.crossing);
+    TEST_ASSERT_EQUAL(160, s.node_peak);
+}
+
+/* Peaks and nadirs: +/-1 noise makes none (hysteresis); the pass makes one
+ * peak at 220 lasting the plateau. The history starts rising, so the floor
+ * before it is no nadir; the floor after it is still open. */
+static void test_lap_history(void) {
+    lap_seat_t s;
+    lap_init(&s, 190, 180);
+    feed_pass(&s, 1000, -1);
+    bool peak;
+    lap_extremum_t e;
+    TEST_ASSERT_TRUE(lap_pop_extremum(&s, &peak, &e));
+    TEST_ASSERT_TRUE(peak);
+    TEST_ASSERT_EQUAL(220, e.level);
+    TEST_ASSERT_EQUAL(1000 + 5 * 45, e.first_ms);
+    TEST_ASSERT_EQUAL(10, e.duration_ms);
+    TEST_ASSERT_FALSE(lap_pop_extremum(&s, &peak, &e));
+    /* A long noisy stretch overflows nothing and stays bounded. */
+    for (uint32_t t = 2000; t < 60000; t += 5) lap_feed(&s, t, (uint8_t)(160 + (t / 5) % 7), 5000);
+    TEST_ASSERT_TRUE(s.peaks.n <= LAP_HISTORY && s.nadirs.n <= LAP_HISTORY);
+}
+
+/* A frequency change keeps the lap count and thresholds; forcing the end of
+ * a crossing records its pass. */
+static void test_lap_reset_and_force(void) {
+    lap_seat_t s;
+    lap_init(&s, 190, 180);
+    feed_pass(&s, 0, -1);
+    lap_reset(&s);
+    TEST_ASSERT_EQUAL(1, s.lap);
+    TEST_ASSERT_EQUAL(190, s.enter_at);
+    TEST_ASSERT_EQUAL(0, s.node_peak);
+    TEST_ASSERT_FALSE(s.valid);
+    for (uint32_t t = 0; t < 100; t += 5) lap_feed(&s, t, 200, 5000);
+    TEST_ASSERT_TRUE(s.crossing);
+    lap_end_crossing(&s);
+    TEST_ASSERT_FALSE(s.crossing);
+    TEST_ASSERT_EQUAL(2, s.lap);
+    TEST_ASSERT_EQUAL(200, s.pass_peak);
+}
+
 /* Channel list from 5.8 GHz MHz values, as the CHANNELS command builds it. */
 static unsigned chans(const profile_t *p, const uint32_t *mhz, unsigned n, profile_channel_t *ch) {
     for (unsigned j = 0; j < n; j++) {
@@ -362,6 +442,10 @@ int main(void) {
     RUN_TEST(test_metrics_avg);
     RUN_TEST(test_metrics_code_q8);
     RUN_TEST(test_metrics_level);
+    RUN_TEST(test_lap_pass);
+    RUN_TEST(test_lap_filter);
+    RUN_TEST(test_lap_history);
+    RUN_TEST(test_lap_reset_and_force);
     RUN_TEST(test_plan_default_raceband);
     RUN_TEST(test_plan_groups);
     RUN_TEST(test_profile_equiv);

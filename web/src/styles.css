@@ -84,6 +84,63 @@ header.top {
   z-index: 5;
 }
 header.top .brand { display: inline-flex; align-items: center; gap: 8px; }
+/* Menu: page / device protocol and theme */
+.menu-wrap { position: relative; display: inline-flex; }
+.menu-btn { font-size: 15px; line-height: 1; padding: 5px 9px; }
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  min-width: 220px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.menu[hidden] { display: none; }
+.menu-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 8px 2px; }
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ink);
+  font: inherit;
+}
+.menu-item:hover:not(:disabled) { background: var(--surface-2); }
+.menu-item:disabled { color: var(--muted); cursor: default; }
+.menu-item[role="menuitemradio"]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--muted); flex: none; }
+.menu-item[aria-checked="true"]::before { background: var(--accent); border-color: var(--accent); }
+.menu-note { font-size: 11px; color: var(--muted); padding: 0 8px 4px 24px; }
+.menu-note[hidden] { display: none; }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.menu-switch { justify-content: space-between; }
+.menu-switch input {
+  appearance: none;
+  width: 30px;
+  height: 17px;
+  border-radius: 9px;
+  background: var(--axis);
+  position: relative;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+  flex: none;
+}
+.menu-switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: left 0.12s; }
+.menu-switch input:checked { background: var(--accent); }
+.menu-switch input:checked::after { left: 15px; }
 header.top h1 { font-size: 15px; margin: 0 8px 0 0; letter-spacing: 0.02em; }
 header.top .spacer { flex: 1; }
 .conn-state { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
@@ -297,6 +354,24 @@ main {
 .badge.warning::before { background: var(--warning); }
 .badge.serious::before { background: var(--serious); }
 .badge.critical::before { background: var(--critical); }
+
+/* RotorHazard page */
+main.shared { padding-top: 0; }
+.tile.crossing { outline: 2px solid var(--good); outline-offset: 1px; }
+.rh-bar { position: relative; overflow: visible; height: 8px; }
+.rh-bar .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; }
+.rh-bar .mark.enter { background: var(--good); }
+.rh-bar .mark.exit { background: var(--warning); }
+.rh-th { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 11px; }
+.rh-th label { color: var(--muted); width: 34px; }
+.rh-th input { padding: 2px 4px; }
+.rh-th button { padding: 2px 6px; font-size: 11px; }
+.rh-events { height: 260px; overflow: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
+.rh-event { display: grid; grid-template-columns: 96px 76px 1fr; gap: 6px; padding: 3px 2px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.rh-event span { overflow: hidden; text-overflow: ellipsis; }
+.rh-event .key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.rh-event.enter, .rh-event.exit { color: var(--muted); }
+.rh-event.pass span:last-child { color: var(--ink); }
 
 /* Charts */
 .chart { position: relative; width: 100%; }

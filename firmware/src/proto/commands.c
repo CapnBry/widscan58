@@ -1,4 +1,12 @@
-/* ASCII command interpreter. See PLAN.md section 4.9. GPL-3.0-or-later. */
+/* Host protocols: our ASCII commands (monitor mode) and RotorHazard's node
+ * protocol (rh.c). See PLAN.md section 4.9. GPL-3.0-or-later.
+ *
+ * The device boots silent, in RotorHazard mode: it sends nothing until
+ * asked, which is what a RotorHazard server expects of a node. Our hosts
+ * switch with PROTOCOL MONITOR (allowed in RotorHazard mode, see
+ * rh_allowed). In monitor mode a lone RotorHazard probe byte after an idle
+ * line switches back, so a server can take over a port a monitor left
+ * streaming. */
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -6,6 +14,7 @@
 #include <string.h>
 #include "esp_app_desc.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,6 +25,7 @@
 #include "radio.h"
 #include "scanner.h"
 #include "psd.h"
+#include "rh.h"
 
 /* Multi-part replies are assembled here and queued as one item: the scanner
  * task queues frames concurrently, and a frame landing between the pieces of
@@ -67,18 +77,65 @@ static void send_profile(const scan_config_t *c) {
     reply_send();
 }
 
-static void send_status(void) {
+typedef enum { PROTO_RH, PROTO_MONITOR } proto_t;
+static proto_t proto = PROTO_RH;
+/* Scan configuration of the protocol not in use, restored on a switch. */
+static scan_config_t other_cfg;
+
+/* RotorHazard mode defaults: per-channel levels only, small FFT, no spectrum. */
+static void rh_defaults(scan_config_t *c) {
+    c->rh = true;
+    c->metrics_mode = METRICS_RSSI;
+    c->nfft = 128;
+    c->capture_samples = 512;
+    c->segments = 4;
+    c->spec_every = 0;
+    c->mode = PLAN_GROUP;
+    rh_apply_plan(c);
+}
+
+static void set_proto(proto_t p) {
+    if (p == proto) return;
+    scan_config_t cur, next = other_cfg;
+    scanner_get_config(&cur);
+    other_cfg = cur;
+    if (p == PROTO_RH) {
+        rh_apply_plan(&next); /* the seats may have changed meanwhile */
+        link_set_streaming(false);
+        link_flush();
+    }
+    scanner_set_config(&next);
+    if (p == PROTO_MONITOR) link_set_streaming(true);
+    proto = p;
+}
+
+/* Our commands in RotorHazard mode: switching, identity and the settings
+ * that shape the seat levels. All start with 'A'..'P', bytes RotorHazard
+ * does not use, so the command task can tell them from its commands. */
+static bool rh_allowed(const char *line) {
+    static const char *const exact[] = {"PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?",
+                                        "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
+                                        "FILTER AUTO", "MODE GROUP", "MODE SINGLE"};
+    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "CAPN ", "FILTER ", "IQCORR "};
+    for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
+        if (!strcmp(line, exact[j])) return true;
+    for (unsigned j = 0; j < sizeof(prefix) / sizeof(prefix[0]); j++)
+        if (!strncmp(line, prefix[j], strlen(prefix[j]))) return true;
+    return false;
+}
+
+static void send_status(const char *keyword) {
     scan_config_t c;
     plan_t plan;
     scanner_get_config(&c);
     scanner_get_plan(&plan);
-    reply_add("STATUS {\"profile\":\"%s\",\"running\":%d,\"enabled\":%" PRIu32 ",\"mode\":\"%s\","
+    reply_add("%s {\"protocol\":\"%s\",\"profile\":\"%s\",\"running\":%d,\"enabled\":%" PRIu32 ",\"mode\":\"%s\","
               "\"capture_samples\":%u,\"nfft\":%u,\"segments\":%u,\"rate_code\":%u,\"filter\":%d,"
               "\"conjugate\":%d,\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"plan\":[",
-              c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
+              keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.iq_corr, c.settle_us,
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, rawiq_max(),
               c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY",
@@ -129,6 +186,10 @@ static bool parse_channels(char *args, const profile_t *p, scan_config_t *c) {
 }
 
 static void handle(char *line) {
+    if (proto == PROTO_RH && !rh_allowed(line)) {
+        link_text("ERR rh_mode\n");
+        return;
+    }
     scan_config_t c;
     scanner_get_config(&c);
     char arg[32], arg2[32];
@@ -153,8 +214,13 @@ static void handle(char *line) {
         if (!parse_channels(line + 9, c.profile, &c)) { link_text("ERR channels\n"); return; }
         scanner_set_config(&c);
         link_text("OK\n");
-    } else if (!strcmp(line, "STATUS?")) {
-        send_status();
+    } else if (!strcmp(line, "STATUS?") || !strcmp(line, "CONFIG?")) {
+        send_status(line[0] == 'S' ? "STATUS" : "CONFIG");
+    } else if (!strcmp(line, "PROTOCOL?")) {
+        link_printf("PROTOCOL %s\n", proto == PROTO_RH ? "RH" : "MONITOR");
+    } else if (!strcmp(line, "PROTOCOL RH") || !strcmp(line, "PROTOCOL MONITOR")) {
+        set_proto(line[9] == 'R' ? PROTO_RH : PROTO_MONITOR);
+        link_text("OK\n");
     } else if (!strcmp(line, "ENABLE?")) {
         link_printf("ENABLE %" PRIu32 "\n", c.enabled);
     } else if (sscanf(line, "ENABLE %31s %c", arg, &extra) == 1 && parse_u32(arg, &a)) {
@@ -231,7 +297,9 @@ static void handle(char *line) {
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (!strcmp(line, "METRICS FULL") || !strcmp(line, "METRICS RSSI") || !strcmp(line, "METRICS SNR")) {
-        c.metrics_mode = line[8] == 'F' ? METRICS_FULL : line[8] == 'R' ? METRICS_RSSI : METRICS_SNR;
+        uint8_t m = line[8] == 'F' ? METRICS_FULL : line[8] == 'R' ? METRICS_RSSI : METRICS_SNR;
+        if (proto == PROTO_RH && m != c.metrics_mode) rh_reset_levels(); /* RSSI and SNR codes don't compare */
+        c.metrics_mode = m;
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (!strcmp(line, "METRICS?")) {
@@ -327,16 +395,87 @@ static void handle(char *line) {
     }
 }
 
+/* Line assembly for our commands. */
+static char line[128];
+static size_t used;
+static bool overflow;
+static void line_byte(uint8_t b) {
+    if (b == '\r') return;
+    if (b == '\n') {
+        if (overflow) link_text("ERR command_length\n");
+        else if (used) {
+            line[used] = 0;
+            handle(line);
+        }
+        used = 0;
+        overflow = false;
+        return;
+    }
+    if (used + 1 < sizeof(line)) line[used++] = (char)b;
+    else overflow = true;
+}
+
+#define PROBE_IDLE_US 100000 /* RotorHazard waits 2 s and flushes before its probe */
+#define PROBE_QUIET_MS 5     /* and then waits for the reply */
+#define TEXT_TIMEOUT_US 200000
+
 static void commands_task(void *arg) {
     (void)arg;
-    char line[128];
+    uint8_t buf[64];
+    int64_t last_rx = 0, text_start = 0;
+    bool probe = false; /* monitor mode: a lone RotorHazard probe, waiting to see nothing follows */
+    bool text = false;  /* RotorHazard mode: one of our command lines in progress */
     for (;;) {
-        int n = link_read_line(line, sizeof(line));
-        if (n < 0) link_text("ERR command_length\n");
-        else handle(line);
+        int n = link_read(buf, sizeof(buf), probe ? PROBE_QUIET_MS : 20);
+        int64_t now = esp_timer_get_time();
+        if (n <= 0) {
+            if (probe) {
+                probe = false;
+                set_proto(PROTO_RH);
+                rh_rx(RH_REVISION_CODE, now);
+            }
+            rh_poll(now);
+            if (text && now - text_start > TEXT_TIMEOUT_US) {
+                text = false;
+                used = 0;
+                overflow = false;
+            }
+            continue;
+        }
+        for (int i = 0; i < n; i++) {
+            uint8_t b = buf[i];
+            if (proto == PROTO_MONITOR) {
+                if (probe) { /* more followed: it was just a byte of a line */
+                    probe = false;
+                    line_byte(RH_REVISION_CODE);
+                }
+                if (n == 1 && b == RH_REVISION_CODE && !used && now - last_rx >= PROBE_IDLE_US) probe = true;
+                else line_byte(b);
+            } else if (text || (rh_idle() && b >= 'A' && b <= 'P')) {
+                if (!text) {
+                    text = true;
+                    text_start = now;
+                    used = 0;
+                    overflow = false;
+                }
+                if (b == '\n') text = false;
+                line_byte(b); /* may switch to monitor mode */
+            } else {
+                rh_rx(b, now);
+            }
+            last_rx = now;
+        }
     }
 }
 
 void commands_task_start(void) {
+    /* Boot in RotorHazard mode; monitor mode starts from the defaults. */
+    rh_init();
+    scan_config_t c;
+    scanner_get_config(&c);
+    other_cfg = c;
+    rh_defaults(&c);
+    scanner_set_config(&c);
+    link_set_streaming(false);
     xTaskCreatePinnedToCore(commands_task, "cmd", 6144, NULL, 6, NULL, portNUM_PROCESSORS - 1);
 }

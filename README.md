@@ -42,6 +42,12 @@ second.*
   don't need a toolchain.
 - **Simulator:** press *Simulate* to try the whole UI without any hardware.
 - **Record and replay** a session to a file.
+- **RotorHazard timer node:** switch the page (☰ menu) to RotorHazard mode and
+  the board becomes an 8-seat receiver for [RotorHazard](https://github.com/RotorHazard/RotorHazard)
+  lap timing, on one USB port. The page shows each seat's level, lets you set
+  the EnterAt/ExitAt thresholds and lists detected passes; then connect the
+  board to your RotorHazard server instead (add its port to `SERIAL_PORTS` in
+  the server's config).
 - **Deep diagnostics** for the curious: hop timing, raw I/Q snapshots with a
   constellation view, scanner settings and a command console.
 

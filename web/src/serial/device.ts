@@ -32,6 +32,7 @@ export class WebSerialTransport implements Transport {
   readonly name = viaWebUsb() ? "WebUSB serial" : "Web Serial";
   private port: Port | null = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  private readDone: Promise<void> = Promise.resolve();
   private closing = false;
 
   /** port: a previously granted port (navigator.serial.getPorts()); otherwise
@@ -57,7 +58,7 @@ export class WebSerialTransport implements Transport {
     // USB Serial/JTAG ignores the baud rate; a large buffer absorbs bursts.
     await this.port.open({ baudRate: 115200, bufferSize: 1 << 20 });
     this.closing = false;
-    void this.readLoop(onBytes, onClose);
+    this.readDone = this.readLoop(onBytes, onClose);
   }
 
   /** Non-fatal line conditions: Web Serial errors the current readable stream,
@@ -121,6 +122,9 @@ export class WebSerialTransport implements Transport {
     } catch {
       /* already closed */
     }
+    // port.close() rejects while the read loop still holds the reader lock,
+    // which would leave the port open (and the flasher unable to open it).
+    await this.readDone;
     try {
       await this.port?.close();
     } catch {

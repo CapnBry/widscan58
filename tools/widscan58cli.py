@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Host client for esp-rx5808 firmware (protocol v1, see firmware/src/proto/frames.h).
+"""Host client for Widscan58 firmware (protocol v1, see firmware/src/proto/frames.h).
 
 GPL-3.0-or-later.
 
-  rx5808cli.py info                     INFO / PROFILE? / STATUS?
-  rx5808cli.py cmd "GAIN MANUAL 50"     send raw command lines, print replies
-  rx5808cli.py monitor [-s SECONDS]     live per-channel table + telemetry
-  rx5808cli.py rawiq LO_KHZ N [-r RATE] [-o file.npy] [--plot]
-  rx5808cli.py spectrum [-s SECONDS] [--plot out.png]   stitched max-hold of SPECTRUM frames
-  rx5808cli.py bootloader               reboot into ROM download mode
+  widscan58cli.py info                     INFO / PROFILE? / STATUS?
+  widscan58cli.py cmd "GAIN MANUAL 50"     send raw command lines, print replies
+  widscan58cli.py monitor [-s SECONDS]     live per-channel table + telemetry
+  widscan58cli.py rawiq LO_KHZ N [-r RATE] [-o file.npy] [--plot]
+  widscan58cli.py spectrum [-s SECONDS] [--plot out.png]   stitched max-hold of SPECTRUM frames
+  widscan58cli.py bootloader               reboot into ROM download mode
 """
 import argparse
 import json

@@ -88,7 +88,7 @@ typedef struct __attribute__((packed)) {
     int8_t filter;           /* -1 = automatic */
 } frame_telemetry_t;
 
-/* web/src/proto/frames.ts and tools/rx5808cli.py hard-code these sizes. */
+/* web/src/proto/frames.ts and tools/widscan58cli.py hard-code these sizes. */
 _Static_assert(sizeof(frame_metrics_t) == 34, "frame_metrics_t layout");
 _Static_assert(sizeof(frame_channel_t) == 26, "frame_channel_t layout");
 _Static_assert(sizeof(frame_telemetry_t) == 62, "frame_telemetry_t layout");

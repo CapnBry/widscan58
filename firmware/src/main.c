@@ -1,4 +1,4 @@
-/* esp-rx5808: ESP32 FPV channel scanner using the esp-sdr raw I/Q path.
+/* Widscan58: ESP32 FPV channel scanner using the esp-sdr raw I/Q path.
  * GPL-3.0-or-later. Boot sequence follows esp-sdr's receivers. */
 #include "driver/usb_serial_jtag.h"
 #include "esp_event.h"
@@ -73,5 +73,5 @@ void app_main(void) {
     BOOT_CHECK(radio_init());
     BOOT_CHECK(scanner_init());
     commands_task_start();
-    link_printf("READY RX5808 %s\n", radio_caps()->target);
+    link_printf("READY widscan58 %s\n", radio_caps()->target);
 }

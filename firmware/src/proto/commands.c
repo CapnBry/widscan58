@@ -112,7 +112,7 @@ static void handle(char *line) {
     if (!strcmp(line, "INFO")) {
         /* fw_ver is PROJECT_VER (git describe, see firmware/CMakeLists.txt); the
          * web UI compares it with the build it offers to flash. */
-        link_printf("INFO RX5808 %s %d %s %s\n", radio_caps()->target, PROTO_VERSION,
+        link_printf("INFO widscan58 %s %d %s %s\n", radio_caps()->target, PROTO_VERSION,
                     esp_app_get_description()->version, radio_phy_version());
     } else if (!strcmp(line, "PROFILE?")) {
         send_profile(&c);

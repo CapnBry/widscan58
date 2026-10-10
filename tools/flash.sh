@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Flash the esp-rx5808 firmware reliably over the S3's USB Serial/JTAG
+# Flash the Widscan58 firmware reliably over the S3's USB Serial/JTAG
 # (RX_ENV=esp32c5 for the C5; the S3 notes below are untested on it).
 # GPL-3.0-or-later.
 #

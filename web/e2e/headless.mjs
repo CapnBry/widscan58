@@ -36,7 +36,7 @@ await sleep(5000);
 
 const snap = () =>
   page.evaluate(() => {
-    const { app, store } = window.rx5808 ?? {};
+    const { app, store } = window.widscan58 ?? {};
     if (!store) return null;
     const dev = app.device;
     return {
@@ -67,7 +67,7 @@ check("no CRC errors", (s?.stats?.crcErrors ?? 1) === 0, JSON.stringify(s?.stats
 await page.screenshot({ path: path.join(out, "1-overview.png"), fullPage: true });
 
 // Interactions through the UI's own command path.
-const send = (cmd) => page.evaluate((c) => window.rx5808.app.send(c).then(() => window.rx5808.app.refreshStatus()), cmd);
+const send = (cmd) => page.evaluate((c) => window.widscan58.app.send(c).then(() => window.widscan58.app.refreshStatus()), cmd);
 await send("ENABLE 15");
 await sleep(1500);
 s = await snap();
@@ -86,7 +86,7 @@ check("restore + GAIN MANUAL 50", s.status?.enabled === 255 && s.status?.gain ==
 // Click a channel tile and the panorama, capture raw I/Q via the button.
 const tiles = await page.$$(".tile");
 await tiles[5].click();
-const selected = await page.evaluate(() => window.rx5808.app.settings.selected);
+const selected = await page.evaluate(() => window.widscan58.app.settings.selected);
 check("tile click selects channel", selected === 5, `selected ${selected}`);
 // The 5.8 GHz axis renames a scaled profile's channels to Raceband.
 const labels = () =>
@@ -113,7 +113,7 @@ await sleep(2500);
 s = await snap();
 check("raw I/Q capture", !!s.rawiq, JSON.stringify(s.rawiq));
 const sizes = await page.evaluate(() => {
-  const max = window.rx5808.store.status?.rawiq_max;
+  const max = window.widscan58.store.status?.rawiq_max;
   const card = [...document.querySelectorAll("section")].find((e) => e.querySelector("h2")?.textContent.startsWith("Raw I/Q"));
   const opts = [...(card?.querySelectorAll("select option") ?? [])];
   return { max, n: opts.length, bad: opts.filter((o) => o.disabled !== Number(o.value) > (max ?? Infinity)).map((o) => o.value) };

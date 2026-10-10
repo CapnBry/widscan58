@@ -16,5 +16,5 @@ web/dist/
 web/e2e-out/
 web/public/firmware/
 
-*.rx5808
+*.widscan58
 __pycache__/

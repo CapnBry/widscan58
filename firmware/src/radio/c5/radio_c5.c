@@ -21,7 +21,7 @@
 /* The dump engine writes 0x40830000, but the SRAM ownership bit hands the modem
  * the whole 128 KiB bank. Keep it out of the heap; sram_guard.ld keeps it out
  * of static sections. */
-SOC_RESERVE_MEMORY_REGION(0x40820000, 0x40840000, rx5808_rf_dump);
+SOC_RESERVE_MEMORY_REGION(0x40820000, 0x40840000, widscan58_rf_dump);
 #define IQ_BUFFER ((uint32_t *)0x40830000)
 #define IQ_WORDS 16380u
 #define IQ_GUARD_WORDS 4u /* overrun sentinels after the last sample; ends at the bank end */

@@ -1,4 +1,4 @@
-// esp-rx5808 web UI entry point. GPL-3.0-or-later.
+// Widscan58 web UI entry point. GPL-3.0-or-later.
 import "./styles.css";
 import { App, type View } from "./model/app";
 import { Store } from "./model/store";
@@ -31,7 +31,7 @@ function applyTheme(t: string) {
   document.documentElement.dataset.theme = t;
   invalidateTheme();
   try {
-    localStorage.setItem("rx5808.theme", t);
+    localStorage.setItem("widscan58.theme", t);
   } catch {
     /* storage unavailable */
   }
@@ -39,7 +39,7 @@ function applyTheme(t: string) {
 }
 let themeName = "dark";
 try {
-  themeName = localStorage.getItem("rx5808.theme") ?? "dark";
+  themeName = localStorage.getItem("widscan58.theme") ?? "dark";
 } catch {
   /* storage unavailable */
 }
@@ -52,14 +52,14 @@ const fwText = el("span", { class: "fw" }); // firmware version, and whether thi
 const connectBtn = el("button", { class: "primary" }, "Connect"); // becomes Disconnect while connected
 const flashBtn = el("button", { title: "Install the scanner firmware on a board" }, "Flash device");
 const simBtn = el("button", {}, "Simulate");
-const replayInput = el("input", { type: "file", accept: ".rx5808", style: "display:none" }) as HTMLInputElement;
+const replayInput = el("input", { type: "file", accept: ".widscan58", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
-const recordBtn = el("button", { title: "Record the raw device stream to a .rx5808 file" }, "● Record");
+const recordBtn = el("button", { title: "Record the raw device stream to a .widscan58 file" }, "● Record");
 const themeBtn = el("button", { title: "Toggle light/dark" }, "◐");
 const header = el(
   "header",
   { class: "top" },
-  el("span", { class: "brand" }, themeBtn, el("h1", {}, "RX5808 Scanner")),
+  el("span", { class: "brand" }, themeBtn, el("h1", {}, "Widscan58")),
   el("span", { class: "conn-state" }, dot, connText, fwText),
   el("span", { class: "spacer" }),
   connectBtn,
@@ -117,7 +117,7 @@ function updateBanner() {
   updateFirmwareText();
 }
 
-// INFO is "RX5808 <target> <proto_ver> <fw_ver> <phy_ver>".
+// INFO is "widscan58 <target> <proto_ver> <fw_ver> <phy_ver>".
 let offeredFw: string | null = null;
 function updateFirmwareText() {
   const fw = app.device?.transport instanceof WebSerialTransport ? store.info.split(" ")[3] : undefined;
@@ -165,7 +165,7 @@ async function connect(transport: Transport, readOnly = false) {
   app.device = device;
   app.readOnly = readOnly;
   setState(transport instanceof MockTransport ? "sim" : "ok", transport.name);
-  (window as unknown as { rx5808: unknown }).rx5808 = { app, store }; // test/debug hook
+  (window as unknown as { widscan58: unknown }).widscan58 = { app, store }; // test/debug hook
   store.addLog("info", `connected via ${transport.name}`);
   if (!readOnly) await syncDevice(device);
   updateBanner();
@@ -244,7 +244,7 @@ themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === "
 function stopRecording() {
   if (!recorder.active) return;
   const blob = recorder.end();
-  const a = el("a", { href: URL.createObjectURL(blob), download: `session-${new Date().toISOString().replace(/[:.]/g, "-")}.rx5808` });
+  const a = el("a", { href: URL.createObjectURL(blob), download: `session-${new Date().toISOString().replace(/[:.]/g, "-")}.widscan58` });
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   recordBtn.textContent = "● Record";

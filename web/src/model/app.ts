@@ -40,7 +40,7 @@ export class App {
 
   constructor(readonly store: Store) {
     try {
-      const saved = localStorage.getItem("rx5808.settings");
+      const saved = localStorage.getItem("widscan58.settings");
       if (saved) Object.assign(this.settings, JSON.parse(saved));
     } catch {
       /* storage unavailable */
@@ -49,7 +49,7 @@ export class App {
 
   changed() {
     try {
-      localStorage.setItem("rx5808.settings", JSON.stringify(this.settings));
+      localStorage.setItem("widscan58.settings", JSON.stringify(this.settings));
     } catch {
       /* storage unavailable */
     }

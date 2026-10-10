@@ -20,7 +20,7 @@ await page.goto(`${base}?sim`, { waitUntil: "networkidle0" });
 await sleep(3000);
 // Freeze live metrics so each state below is rendered exactly as set.
 await page.evaluate(() => {
-  window.rx5808.store.onMetrics = () => {};
+  window.widscan58.store.onMetrics = () => {};
 });
 
 // Worst cases per state: every channel quiet, or every channel showing a
@@ -32,7 +32,7 @@ const states = {
 };
 const measure = (state) =>
   page.evaluate(async (st) => {
-    const { app, store } = window.rx5808;
+    const { app, store } = window.widscan58;
     for (const cs of store.channels) {
       if (!cs?.latest) continue;
       Object.assign(cs.latest, st, { rssiEma: -45.6, rssi: -45.6, snr: 34.5, floor: -98.7, clearFloor: -99.1 });

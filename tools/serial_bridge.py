@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serial <-> WebSocket bridge for the esp-rx5808 web UI. GPL-3.0-or-later.
+"""Serial <-> WebSocket bridge for the Widscan58 web UI. GPL-3.0-or-later.
 
 Relays the device byte stream unchanged in both directions, so the web UI
 (open it with ?bridge=ws://HOST:PORT) runs against real hardware without Web

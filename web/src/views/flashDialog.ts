@@ -26,7 +26,7 @@ export class FlashDialog {
       "dialog",
       { class: "flash-dialog" },
       el("h2", {}, "Flash firmware"),
-      el("p", {}, "Installs esp-rx5808 ", this.versionText, " on an ESP32-C5 board."),
+      el("p", {}, "Installs Widscan58 ", this.versionText, " on an ESP32-C5 board."),
       el(
         "ol",
         {},

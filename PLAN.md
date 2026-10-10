@@ -1,4 +1,4 @@
-# esp-rx5808 — ESP32 FPV Spectrum / RSSI Scanner (C5 @ 5.8 GHz, S3 @ 2.4 GHz)
+# Widscan58 — ESP32 FPV Spectrum / RSSI Scanner (C5 @ 5.8 GHz, S3 @ 2.4 GHz)
 
 **License:** GPL-3.0-or-later. The project builds on code from
 [ESPARGOS/esp-sdr](https://github.com/ESPARGOS/esp-sdr) (GPL-3.0-or-later). Every
@@ -143,7 +143,7 @@ share of the band, in channels, as on the C5:
 ## 3. Repository layout
 
 ```
-esp-rx5808/
+widscan58/
 ├── PLAN.md
 ├── LICENSE                      # GPL-3.0 text
 ├── README.md
@@ -170,7 +170,7 @@ esp-rx5808/
 ├── web/                         # Vite + TypeScript, static build
 │   └── src/{serial,proto,model,views,mock}/
 └── tools/
-    ├── rx5808cli.py             # pyserial client: dump frames, record, benchmarks
+    ├── widscan58cli.py          # pyserial client: dump frames, record, benchmarks
     └── analyze_capture.py       # offline PSD / filter / alias / hop-time analysis
 ```
 
@@ -334,7 +334,7 @@ Host → device: ASCII lines; each replies `OK …` or `ERR <reason>`.
 
 | Command | Purpose |
 |---|---|
-| `INFO` | `RX5808 <target> <proto_ver> <fw_ver> <phy_ver>` |
+| `INFO` | `widscan58 <target> <proto_ver> <fw_ver> <phy_ver>` |
 | `PROFILE?` / `PROFILE <name>` | Dump the active band profile as JSON (channels, windows, LOs, rate, filter, span), or switch profile (e.g. `s3-race24`, `s3-race24-alias`, `c5-race`) |
 | `CHANNELS?` / `CHANNELS <id:kHz>,…` | Read or override the channel table |
 | `ENABLE <mask>` / `ENABLE?` | Enabled-channel bitmask |
@@ -355,7 +355,7 @@ Device → host: binary frames
 start with an ASCII letter. The parser resynchronises on the magic and CRC.
 
 As built, the layouts are in `firmware/src/proto/frames.h`, mirrored by
-`web/src/proto/frames.ts` and `tools/rx5808cli.py`. That header is authoritative
+`web/src/proto/frames.ts` and `tools/widscan58cli.py`. That header is authoritative
 over the plan table below, and it static-asserts the sizes the parsers hard-code
 (metrics header 34 bytes, channel record 26, telemetry 62). All µs timings are u32.
 The stream makes no compatibility promise across firmware versions: change all
@@ -426,7 +426,7 @@ sessions replay through the same parser.
 1. PlatformIO `esp32s3` env builds against the pinned IDF. `INFO` reports the PHY
    version.
 2. Port the S3 snapshot capture, recal, kHz tuning, filter and gain from esp-sdr
-   into `radio/s3/`, behind `radio.h`. Add `RAWIQ`. `tools/rx5808cli.py` plots
+   into `radio/s3/`, behind `radio.h`. Add `RAWIQ`. `tools/widscan58cli.py` plots
    captures. **Done when:** a known 2.4 GHz source (e.g. Wi-Fi channel 6 at
    2437 MHz, or a `testgen` tone) appears at the right frequency, including at
    kHz-offset LOs.

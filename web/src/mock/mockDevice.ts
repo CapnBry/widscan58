@@ -1,4 +1,4 @@
-// Simulated esp-rx5808 device: speaks the real protocol from a synthetic RF
+// Simulated Widscan58 device: speaks the real protocol from a synthetic RF
 // environment so the UI can be developed and demoed without hardware.
 // GPL-3.0-or-later.
 import type { Transport } from "../serial/device";
@@ -105,7 +105,7 @@ export class MockTransport implements Transport {
     this.onBytes = onBytes;
     this.reset();
     this.timer = window.setInterval(() => this.tick(), 20);
-    this.text("READY RX5808 esp32s3 (simulated)\n");
+    this.text("READY widscan58 esp32s3 (simulated)\n");
   }
 
   async close(): Promise<void> {
@@ -148,7 +148,7 @@ export class MockTransport implements Transport {
     const num = (i: number) => Number(parts[i]);
     switch (true) {
       case line === "INFO":
-        return this.text(`INFO RX5808 ${p.target} 1 0.1.0-sim SIMULATED\n`);
+        return this.text(`INFO widscan58 ${p.target} 1 0.1.0-sim SIMULATED\n`);
       case line === "PROFILE?":
         return this.text(
           `PROFILE ${JSON.stringify({

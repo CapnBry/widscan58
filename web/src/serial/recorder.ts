@@ -1,5 +1,5 @@
 // Session recording and replay of the raw device byte stream. GPL-3.0-or-later.
-// File format ".rx5808": repeated records of u32 ms | u32 length | bytes (LE).
+// File format ".widscan58": repeated records of u32 ms | u32 length | bytes (LE).
 import type { Transport } from "./device";
 
 export class Recorder {

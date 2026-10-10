@@ -16,7 +16,7 @@
 /* The vendor raw dump writes the 64 KiB aperture at 0x3fcd0000
  * (MAC_DUMP_USAGE=4). Keep it out of the heap; sram_guard.ld keeps it out of
  * static sections. */
-SOC_RESERVE_MEMORY_REGION(0x3fcd0000, 0x3fce0000, rx5808_rf_dump);
+SOC_RESERVE_MEMORY_REGION(0x3fcd0000, 0x3fce0000, widscan58_rf_dump);
 #define IQ_BUFFER ((uint32_t *)0x3fcd0000)
 #define IQ_WORDS 16380u
 #define SRAM_OWNER_REG 0x600c101cu

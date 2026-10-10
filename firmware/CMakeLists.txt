@@ -9,4 +9,4 @@ execute_process(COMMAND git describe --tags --always --dirty
 if(NOT PROJECT_VER)
     set(PROJECT_VER "unknown")
 endif()
-project(esp_rx5808)
+project(widscan58)

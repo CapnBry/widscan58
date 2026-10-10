@@ -21,7 +21,7 @@ elseif(IDF_TARGET STREQUAL "esp32c5")
     # Parts of channel setup a receiver does not need (radio_c5.c, radio_tune).
     set(wrapped_extra "-Wl,--wrap=ets_delay_us" "-Wl,--wrap=phy_wifi_set_tx_gain_new")
 else()
-    message(FATAL_ERROR "esp-rx5808: no radio backend for ${IDF_TARGET} yet")
+    message(FATAL_ERROR "Widscan58: no radio backend for ${IDF_TARGET} yet")
 endif()
 
 idf_component_register(SRCS ${sources}

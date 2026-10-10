@@ -1,4 +1,4 @@
-# esp-rx5808
+# Widscan58
 
 FPV channel scanner using the ESP32's built-in radio as an SDR, through the raw
 I/Q debug path found by [ESPARGOS/esp-sdr](https://github.com/ESPARGOS/esp-sdr).
@@ -20,7 +20,7 @@ say so in their headers.
 |---|---|
 | `firmware/` | PlatformIO + ESP-IDF 5.5.5 (pioarduino). `src/radio/` is the only target-specific code. |
 | `web/` | Vite + TypeScript dashboard (Web Serial, simulator, replay). |
-| `tools/rx5808cli.py` | Python client: `info`, `monitor`, `rawiq`, `spectrum`, `cmd`, `bootloader`. |
+| `tools/widscan58cli.py` | Python client: `info`, `monitor`, `rawiq`, `spectrum`, `cmd`, `bootloader`. |
 | `tools/serial_bridge.py` | Serial ↔ WebSocket bridge (headless tests, remote viewing). |
 | `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN; `RX_ENV=esp32c5` for the C5). Experimental, see the flashing notes. |
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
@@ -70,7 +70,7 @@ they must stay identical. Both targets pass against IDF 5.5.5.
 stays plugged in): an earlier pyserial user of the port, such as esptool,
 `pio device monitor` or a script, left the tty at VMIN=0. Chrome (up to at least
 153) reads that as a lost device. Fix: `stty -F /dev/ttyACM0 min 1`, or press
-RESET. `tools/flash.sh`, `rx5808cli.py` and `serial_bridge.py` leave the port in
+RESET. `tools/flash.sh`, `widscan58cli.py` and `serial_bridge.py` leave the port in
 the right state (`tools/ttyfix.py`); `pio run -t upload` does not.
 
 Ways back into the bootloader: esptool's `usb-reset` (automatic on upload), or
@@ -109,7 +109,7 @@ ESP32-S3:
 
 ## Useful commands
 
-Send these with `tools/rx5808cli.py cmd …` or the UI's Protocol console.
+Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 
 | Command | Purpose |
 |---|---|
@@ -140,12 +140,12 @@ npm run dev                         # http://localhost:5808 (Chrome/Edge for Web
   bursts, board spurs and IMD3 products.
 - **Bridge**: `python3 tools/serial_bridge.py`, then open
   `http://localhost:5808/?bridge=ws://127.0.0.1:5809`.
-- **Record / Replay**: saves the raw stream to a `.rx5808` file and plays it back.
+- **Record / Replay**: saves the raw stream to a `.widscan58` file and plays it back.
   The frame layout is not kept compatible across firmware versions, so
   recordings only replay with a UI built from the same version.
 
 Only one program can hold `/dev/ttyACM0` at a time: browser tab, bridge,
-`rx5808cli.py` or esptool. A connected UI tab reconnects by itself when the
+`widscan58cli.py` or esptool. A connected UI tab reconnects by itself when the
 board comes back (after a flash or reset), so click Disconnect before using
 other tools.
 

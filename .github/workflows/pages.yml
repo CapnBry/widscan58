@@ -40,13 +40,6 @@ jobs:
         with:
           python-version: "3.13"
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.platformio
-            ~/.cache/pip
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini', 'firmware/dependencies.lock.*') }}
-
       - name: Build firmware
         run: |
           pip install platformio

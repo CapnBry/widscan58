@@ -253,8 +253,10 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   (`web/src/serial/flasher.ts`; binaries come from `web/public/firmware`, staged
   by CI, never committed).
 - **Simulate**, or open `http://localhost:5173/?sim`: synthetic VTXs, Wi-Fi
-  bursts, board spurs and IMD3 products. The simulator only has the S3
-  (`s3-race24`) profile. It boots in RotorHazard mode like the firmware, and
+  bursts, board spurs and IMD3 products. It simulates the C5 (`c5-race`:
+  80 MS/s, whole-MHz LOs, the C5's measured spurs); `?sim=s3` simulates the
+  S3's scaled 2.4 GHz band (`s3-race24`) instead, for the Simulate button
+  too. It boots in RotorHazard mode like the firmware, and
   there flies a pass past every seat every 5–9 s.
 - **Bridge**: `python3 tools/serial_bridge.py`, then open
   `http://localhost:5173/?bridge=ws://127.0.0.1:5809`. This does not work from

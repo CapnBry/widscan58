@@ -8,8 +8,16 @@ import { channelMetrics, db, floorEstimate, percentileBias, planBuild, type Hop,
 import { LapSeat } from "./lap";
 import { RH, RH_API_MARKER, checksum } from "../proto/rh";
 
+// The firmware's band profiles (firmware/src/scan/profile.c), plus what only
+// the simulator needs.
+interface SimProfile extends ProfileDef {
+  rateCode: number;
+  filterCode: number;
+  wifiKhz: number[]; // 20 MHz Wi-Fi channel centers that burst in the band
+}
+
 const K24 = 83.5 / 296;
-const race24: ProfileDef = {
+const race24: SimProfile = {
   name: "s3-race24",
   description: "Raceband scaled to 2.4 GHz (k=0.2821), ESP32-S3 mock-up [SIMULATED]",
   target: "esp32s3",
@@ -19,6 +27,8 @@ const race24: ProfileDef = {
   equivBaseKhz: 5639500,
   scale: K24,
   rateHz: 40e6,
+  rateCode: 1,
+  filterCode: 60,
   nfft: 1024,
   segments: 4,
   usableHz: 11.3e6,
@@ -33,7 +43,40 @@ const race24: ProfileDef = {
     khz,
   })),
   spursKhz: [2400000, 2440000, 2448000, 2480000],
+  wifiKhz: [2412000, 2437000, 2462000],
 };
+
+// The real band (ESP32-C5). Spurs: the LO sweep in PLAN.md, "Board spurs on the C5".
+const c5race: SimProfile = {
+  name: "c5-race",
+  description: "Raceband R1-R8, ESP32-C5 [SIMULATED]",
+  target: "esp32c5",
+  bandLoKhz: 5645000,
+  bandHiKhz: 5945000,
+  baseKhz: 5639500,
+  equivBaseKhz: 5639500,
+  scale: 1,
+  rateHz: 80e6,
+  rateCode: 0,
+  filterCode: 0,
+  nfft: 1024,
+  segments: 4,
+  usableHz: 40e6,
+  passbandHz: 24e6,
+  rssiHz: 5e6,
+  searchHz: 12e6,
+  hopMaxSpanKhz: 40000,
+  singleLoOffsetKhz: -8000,
+  loStepKhz: 1000,
+  channels: [5658000, 5695000, 5732000, 5769000, 5806000, 5843000, 5880000, 5917000].map((khz, i) => ({
+    name: `R${i + 1}`,
+    khz,
+  })),
+  spursKhz: [5600000, 5680000, 5712000, 5760000, 5920000],
+  wifiKhz: [5745000, 5765000, 5785000, 5805000, 5825000],
+};
+
+export type SimTarget = "c5" | "s3";
 
 interface Vtx {
   ch: number;
@@ -61,8 +104,8 @@ export class MockTransport implements Transport {
   private onBytes: (c: Uint8Array) => void = () => {};
   private timer = 0;
   private rx = "";
-  private profile = race24;
-  private channels = race24.channels;
+  private readonly profile: SimProfile;
+  private channels: { name: string; khz: number }[];
   private enabled = 0xff;
   private group = true;
   private running = true;
@@ -70,7 +113,7 @@ export class MockTransport implements Transport {
   private gain = 50;
   private specEvery = 4;
   private specBins = 256;
-  private specSpanHz = race24.usableHz;
+  private specSpanHz = 0;
   private specDetector = 1;
   private ema = 0.25;
   private metricsMode: MetricsMode = "FULL";
@@ -86,7 +129,7 @@ export class MockTransport implements Transport {
   private winHops = 0;
   private winRot = 0;
   private vtx: Vtx[] = [];
-  private wifi = { centerKhz: 2437000, until: 0, next: 0 };
+  private wifi = { centerKhz: 0, until: 0, next: 0 };
   private state = new Map<number, { ema: number; clear: number | null }>();
   // Protocol, as the firmware: boots silent in RotorHazard mode.
   private proto: "RH" | "MONITOR" = "RH";
@@ -105,6 +148,11 @@ export class MockTransport implements Transport {
   private rhCapn = 512;
   // CONFIG SAVE: applied on every PROTOCOL RH, as the firmware (not kept across page loads).
   private rhSaved = { gainManual: true, gain: 50, group: true, metric: "RSSI" as "RSSI" | "SNR", nfft: 128, capn: 512 };
+
+  constructor(target: SimTarget = "c5") {
+    this.profile = target === "s3" ? race24 : c5race;
+    this.channels = this.profile.channels;
+  }
 
   async open(onBytes: (c: Uint8Array) => void): Promise<void> {
     this.onBytes = onBytes;
@@ -208,8 +256,8 @@ export class MockTransport implements Transport {
             capture_samples: this.proto === "RH" ? this.rhCapn : p.nfft * p.segments,
             nfft: this.proto === "RH" ? this.rhNfft : p.nfft,
             segments: p.segments,
-            rate_code: 1,
-            filter: 60,
+            rate_code: p.rateCode,
+            filter: p.filterCode,
             conjugate: 1,
             iq_corr: 1,
             settle_us: 100,
@@ -290,6 +338,7 @@ export class MockTransport implements Transport {
         this.clearEma = num(2) / 1000;
         return ok();
       case parts[0] === "RAWIQ":
+        if (num(1) % p.loStepKhz) return this.text("ERR rawiq_args\n");
         return this.rawiq(num(1), num(2));
       case line === "TIMING?":
         return this.text("TIMING psd 2650 (prep 600 fft 1650 power 260) metrics 470 spectrum 520\n");
@@ -487,7 +536,7 @@ export class MockTransport implements Transport {
     const noise = 10 ** (-68 / 10) * gain;
     const adc = 10 ** (-80 / 10);
     const em = this.emitters(now);
-    const wifiOn = p.name === "s3-race24" && now < this.wifi.until;
+    const wifiOn = now < this.wifi.until;
     for (let k = 0; k < n; k++) {
       const off = (k - n / 2) * binHz;
       const abs = loKhz * 1000 + off;
@@ -526,7 +575,8 @@ export class MockTransport implements Transport {
     if (now > this.wifi.next) {
       this.wifi.until = now + 3 + Math.random() * 25;
       this.wifi.next = now + 30 + Math.random() * 400;
-      this.wifi.centerKhz = [2412000, 2437000, 2462000][Math.floor(Math.random() * 3)];
+      const w = this.profile.wifiKhz;
+      this.wifi.centerKhz = w[Math.floor(Math.random() * w.length)];
     }
   }
 

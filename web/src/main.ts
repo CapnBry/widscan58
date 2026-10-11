@@ -11,7 +11,7 @@ import {
   type Transport,
 } from "./serial/device";
 import { Recorder, ReplayTransport } from "./serial/recorder";
-import { MockTransport } from "./mock/mockDevice";
+import { MockTransport, type SimTarget } from "./mock/mockDevice";
 import { el, invalidateTheme } from "./util/canvas";
 import { ChannelGrid } from "./views/channelGrid";
 import { Panorama } from "./views/panorama";
@@ -329,7 +329,9 @@ connectBtn.onclick = async () => {
   userDisconnected = false;
   void connect(new WebSerialTransport());
 };
-simBtn.onclick = () => void connect(new MockTransport());
+// ?sim=s3 simulates the ESP32-S3's scaled 2.4 GHz band instead of the C5's.
+const simTarget = (): SimTarget => (new URLSearchParams(location.search).get("sim") === "s3" ? "s3" : "c5");
+simBtn.onclick = () => void connect(new MockTransport(simTarget()));
 replayBtn.onclick = () => replayInput.click();
 replayInput.onchange = async () => {
   const f = replayInput.files?.[0];
@@ -413,11 +415,12 @@ async function autoConnect() {
   }
 }
 // ?bridge=ws://host:port connects through tools/serial_bridge.py instead of
-// Web Serial (headless tests, remote viewing); ?sim starts the simulator.
+// Web Serial (headless tests, remote viewing); ?sim starts the simulator
+// (?sim=s3 for the S3 band).
 const params = new URLSearchParams(location.search);
 const bridge = params.get("bridge");
 if (bridge) void connect(new WebSocketTransport(bridge));
-else if (params.has("sim")) void connect(new MockTransport());
+else if (params.has("sim")) void connect(new MockTransport(simTarget()));
 else if (WebSerialTransport.supported()) {
   WebSerialTransport.onConnectEvent(() => setTimeout(() => void autoConnect(), 500));
   void autoConnect();

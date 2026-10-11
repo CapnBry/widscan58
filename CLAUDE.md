@@ -191,13 +191,30 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   (dB = code / 2), clamped to 1–254. `METRICS RSSI|SNR` picks one and resets the
   seats' levels. EnterAt/ExitAt are in the same codes (defaults before the
   server writes its own: 190 / 180, about −32.5 / −37.5 dBFS).
-- **Detection:** a median of 3 updates, a crossing from EnterAt until below
-  ExitAt, and the pass at the middle of the crossing's highest plateau. Peaks
+- **Detection:** a running median over the last 255 ms (at most 255 updates,
+  so shorter above 1000 updates/s), as RotorHazard's own nodes use (255
+  samples at ~1 kHz); nothing is reported for the first 255 ms after a reset.
+  It comes from a histogram of the level codes, with a timestamp every 8th
+  update; the seats are on the heap (~7.6 KB for 8), since the C5's static RAM
+  below the RF dump bank had only ~5 KB left. Then a crossing from EnterAt
+  until below ExitAt, and the pass at the middle of the crossing's highest
+  plateau. Peaks
   and nadirs (2-code hysteresis, 8 queued each) feed the server's RSSI graph.
   A frequency change keeps the lap count (the server counts passes by its
   change).
 - **Check:** `tools/rh_check.py` runs RotorHazard's own interface code against
-  the board (no VTX: `--enter 164 --exit 162` makes noise crossings).
+  the board (no VTX: thresholds a code or two above the noise make noise
+  crossings, e.g. `--enter 164 --exit 162` at gain 60, `--enter 140 --exit
+  139` at manual gain 40).
+- **Testing in RotorHazard mode:** `PROTOCOL RH` applies the user's saved
+  defaults, so after switching, *set* `MODE`, `CAPN`, `FFT`, `GAIN` and
+  `METRICS` to what the test needs, but never `CONFIG SAVE` them. Leave them
+  as the test set them afterwards; there is no need to restore anything.
+  RotorHazard's port open (DTR and RTS cleared, as `rh_check.py` does through
+  its code) resets the C5, which boots with the saved defaults: settings
+  sent before `rh_check.py` connects are lost. Give them to it instead:
+  `--cmd "METRICS RSSI" --cmd "GAIN MANUAL 60"` (sent after discovery, on its
+  own port; it stops on an `ERR` reply and refuses `CONFIG SAVE`).
 
 ## Web UI
 

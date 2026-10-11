@@ -13,7 +13,14 @@ copy of it:
   /tmp/rhvenv/bin/python tools/rh_check.py [-p /dev/ttyACM0] [-s 8] [--enter 200 --exit 190]
 
 Without a VTX, --enter / --exit just above the noise (e.g. 164 / 162 in
-RSSI codes) make noise crossings, which exercises the pass path.
+RSSI codes at gain 60) make noise crossings, which exercises the pass path.
+
+Opening the port as RotorHazard does resets the board into its saved
+defaults, so receiver settings for the test go in with --cmd, sent once
+discovery is done (before the seats are set up), e.g.
+  --cmd "METRICS RSSI" --cmd "GAIN MANUAL 60"
+Only commands RotorHazard mode allows work (see CLAUDE.md); CONFIG SAVE is
+refused here, so a test never changes the saved defaults.
 """
 import argparse
 import logging
@@ -34,7 +41,11 @@ ap.add_argument("--rh", default=os.path.join(here, "..", "ref", "RotorHazard"), 
 ap.add_argument("--enter", type=int, default=200, help="EnterAt for every seat (level code)")
 ap.add_argument("--exit", type=int, default=190, help="ExitAt for every seat (level code)")
 ap.add_argument("--seats", type=int, default=6, help="seats given R1.. (the rest off, as RotorHazard does)")
+ap.add_argument("--cmd", action="append", default=[], metavar="LINE",
+                help="device command to send after discovery, e.g. 'METRICS RSSI' (repeatable; not saved)")
 args = ap.parse_args()
+if any(c.strip().upper().startswith("CONFIG SAVE") for c in args.cmd):
+    ap.error("--cmd CONFIG SAVE would change the saved RotorHazard defaults")
 sys.path.insert(0, os.path.join(args.rh, "src", "interface"))
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 
@@ -53,6 +64,21 @@ print(f"discovered {len(nodes)} nodes in {time.monotonic() - t0:.1f} s")
 for n in nodes:
     print(f"  node {n.index + 1}: api {n.api_level} fw {n.firmware_version_str!r} freq {n.frequency} "
           f"enter {n.enter_at_level} exit {n.exit_at_level} slot {n.multi_node_slot_index}")
+# Our command lines, on RotorHazard's own port before its polling starts.
+ser = nodes[0].serial if nodes else None
+for c in args.cmd:
+    ser.reset_input_buffer()
+    ser.write(c.encode() + b"\n")
+    reply, deadline = "", time.monotonic() + 2
+    while time.monotonic() < deadline:
+        line = ser.readline().decode(errors="replace").strip()
+        # Commands answer OK/ERR; queries (CONFIG?, METRICS?) one line of their own.
+        if line.startswith(("OK", "ERR")) or (c.strip().endswith("?") and line):
+            reply = line
+            break
+    print(f"  cmd {c!r}: {reply[:120] or 'no reply'}")
+    if not reply.startswith("OK") and not c.strip().endswith("?"):
+        sys.exit(f"command failed: {c!r}")
 passes, crossings = [], []
 intf.pass_record_callback = lambda node, ts, src, peak=None: passes.append((node.index + 1, round(ts, 3), peak))
 intf.node_crossing_callback = lambda node: crossings.append((node.index + 1, node.crossing_flag))

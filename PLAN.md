@@ -653,7 +653,7 @@ server drives it with only `SERIAL_PORTS` configured.
   protocol, and in monitor mode a lone 0x22 after ≥100 ms of input silence (and
   nothing for 5 ms after it) switches back and answers it. Our command lines in
   RotorHazard mode start with `A`–`P`, which RotorHazard does not use.
-- Seats feed `lap.c` (median of 3, EnterAt/ExitAt crossing, pass at the middle
+- Seats feed `lap.c` (255 ms running median, EnterAt/ExitAt crossing, pass at the middle
   of the highest plateau, peak/nadir history with 2-code hysteresis) from the
   `METRICS RSSI|SNR` byte codes of each hop. RotorHazard-mode defaults: `FFT
   128`, `CAPN 512`, `METRICS RSSI`, no spectrum.
@@ -664,6 +664,22 @@ server drives it with only `SERIAL_PORTS` configured.
   (with thresholds just above the noise). Taking over a board left streaming in
   monitor mode worked first time, without retries. R1–R6 (3 LOs): ~3.5 ms
   between updates of a seat, ~285 /s.
+- **Level filter, 2026-10-11:** our levels jumped around more than a
+  RotorHazard node's. Their node firmware (Arduino and S32_BPill alike,
+  `RssiNode.h` `FILTER_MEDIAN`) takes a running median of 255 single ADC
+  reads at ~1 kHz per node, so ~255 ms, reported with the middle sample's
+  time; their server does no filtering. Our median of 3 covered ~10 ms.
+  `lap.c` now keeps a running median over 255 ms (at most 255 updates):
+  a ring of level codes, a 256-bin histogram (one byte per bin), and one
+  timestamp per 8 updates, interpolated; ~950 B per seat. It reports
+  nothing until the window first spans 255 ms or holds 255 updates.
+  The 8 seats did not fit in the C5's static RAM below the RF dump bank
+  (~5.1 KB left), so `rh_init` allocates them from the heap (`BOOT_CHECK`, before
+  `scanner_init`): free heap while scanning 39.3 → 34.1 KB. On the C5 at
+  manual gain 40 (RSSI, no VTX), each seat's node peak and nadir over 8 s
+  stayed within 2–6 codes (1–3 dB). With `--enter 140 --exit 139`,
+  `rh_check.py` saw 15 passes and 35 crossing changes in 30 s, with 0 comm
+  errors.
 - The stray first-command `ERR command` seen with `widscan58cli.py` right after
   flashing came from the tty: after re-enumeration it starts with echo on, and
   whatever the device streamed in the instant before pyserial set raw mode was

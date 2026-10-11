@@ -544,8 +544,7 @@ static void commands_task(void *arg) {
 }
 
 void commands_task_start(void) {
-    /* Boot in RotorHazard mode; monitor mode starts from the defaults. */
-    rh_init();
+    /* Boot in RotorHazard mode (rh_init has run); monitor mode starts from the defaults. */
     scan_config_t c;
     scanner_get_config(&c);
     other_cfg = c;

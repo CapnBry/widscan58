@@ -259,13 +259,26 @@ static void test_metrics_avg(void) {
     TEST_ASSERT_TRUE(m.flags & CHF_NO_CENTROID);
 }
 
-/* A pass at 5 ms per update: floor 160 with +/-1 noise, a ramp to a
- * 3-update plateau at 220 and back. enter 190 / exit 180. */
+/* A pass at 5 ms per update (200/s, ~51 updates per median window): floor
+ * 160 with +/-1 noise for 400 ms, steps up 170..210 (50 ms each), 150 ms at
+ * 220, steps back down, 400 ms of floor. enter 190 / exit 180. The plateau
+ * is updates 130..159 from t; dropout: updates [d, d + 10) read 150. */
+#define PASS_PLATEAU_MID(t) ((t) + 5 * 130 + 5 * 29 / 2)
 static uint32_t feed_pass(lap_seat_t *s, uint32_t t, int dropout) {
-    static const uint8_t ramp[] = {170, 180, 190, 200, 210, 220, 220, 220, 210, 200, 190, 180, 170};
-    for (int j = 0; j < 40; j++, t += 5) lap_feed(s, t, (uint8_t)(160 + (j % 3 == 0) - (j % 5 == 0)), 5000);
-    for (unsigned j = 0; j < sizeof(ramp); j++, t += 5) lap_feed(s, t, (int)j == dropout ? 150 : ramp[j], 5000);
-    for (int j = 0; j < 40; j++, t += 5) lap_feed(s, t, 160, 5000);
+    int j = 0;
+    for (int k = 0; k < 80; k++, j++, t += 5)
+        lap_feed(s, t, (uint8_t)(160 + (k % 3 == 0) - (k % 5 == 0)), 5000);
+    static const uint8_t up[] = {170, 180, 190, 200, 210};
+    uint8_t shape[130];
+    unsigned n = 0;
+    for (unsigned a = 0; a < 5; a++)
+        for (int k = 0; k < 10; k++) shape[n++] = up[a];
+    for (int k = 0; k < 30; k++) shape[n++] = 220;
+    for (int a = 4; a >= 0; a--)
+        for (int k = 0; k < 10; k++) shape[n++] = up[a];
+    for (unsigned k = 0; k < n; k++, j++, t += 5)
+        lap_feed(s, t, dropout >= 0 && j >= dropout && j < dropout + 10 ? 150 : shape[k], 5000);
+    for (int k = 0; k < 80; k++, t += 5) lap_feed(s, t, 160, 5000);
     return t;
 }
 
@@ -276,32 +289,64 @@ static void test_lap_pass(void) {
     TEST_ASSERT_EQUAL(1, s.lap);
     TEST_ASSERT_FALSE(s.crossing);
     TEST_ASSERT_EQUAL(220, s.pass_peak);
-    /* Plateau updates at 1000 + 5 * (40 + 5..7): the middle one. */
-    TEST_ASSERT_EQUAL(1000 + 5 * 46, s.pass_ms);
+    /* The median trims the plateau symmetrically: the pass stays at its middle. */
+    TEST_ASSERT_INT_WITHIN(5, PASS_PLATEAU_MID(1000), s.pass_ms);
     TEST_ASSERT_EQUAL(220, s.node_peak);
     TEST_ASSERT_EQUAL(160, s.node_nadir); /* the isolated 159s are filtered out */
     TEST_ASSERT_EQUAL(160, s.pass_nadir);
     TEST_ASSERT_EQUAL(5000, s.loop_us);
 }
 
-/* A one-update dropout mid-crossing is filtered out: still one pass. So is
- * a one-update spike above enter_at: no pass. */
+/* A 50 ms dropout below exit_at mid-crossing (on the way up, at 200) is
+ * filtered out: one pass, not two, peak 220. So is a 100 ms spike above
+ * enter_at (under half the window): no pass. */
 static void test_lap_filter(void) {
     lap_seat_t s;
     lap_init(&s, 190, 180);
-    feed_pass(&s, 0, 4); /* 210 -> 150 */
+    feed_pass(&s, 0, 110);
     TEST_ASSERT_EQUAL(1, s.lap);
     TEST_ASSERT_EQUAL(220, s.pass_peak);
     lap_init(&s, 190, 180);
-    for (uint32_t t = 0; t < 200; t += 5) lap_feed(&s, t, t == 100 ? 230 : 160, 5000);
+    for (uint32_t t = 0; t < 1000; t += 5) lap_feed(&s, t, t >= 500 && t < 600 ? 230 : 160, 5000);
     TEST_ASSERT_EQUAL(0, s.lap);
     TEST_ASSERT_FALSE(s.crossing);
     TEST_ASSERT_EQUAL(160, s.node_peak);
 }
 
+/* The window: 255 ms whatever the rate, up to 255 updates; nothing is
+ * reported until it first spans 255 ms or holds 255 updates; the histogram
+ * matches the window. */
+static void test_lap_window(void) {
+    static const uint32_t step_us[] = {20000, 3500, 1000, 400};
+    for (unsigned a = 0; a < 4; a++) {
+        lap_seat_t s;
+        lap_init(&s, 190, 180);
+        uint32_t t_us = 1000000, fill_us = LAP_WINDOW_MS * 1000u;
+        if (fill_us > LAP_MAX_SAMPLES * step_us[a]) fill_us = LAP_MAX_SAMPLES * step_us[a];
+        for (int k = 0; k < 3000; k++, t_us += step_us[a]) {
+            lap_feed(&s, t_us / 1000, (uint8_t)(100 + k % 50), step_us[a]);
+            if (t_us - 1000000 + 1000 < fill_us - 2 * step_us[a]) TEST_ASSERT_FALSE(s.valid);
+        }
+        TEST_ASSERT_TRUE(s.valid);
+        uint32_t n = s.seq - s.first, expect = LAP_WINDOW_MS * 1000u / step_us[a];
+        if (expect > LAP_MAX_SAMPLES) expect = LAP_MAX_SAMPLES;
+        TEST_ASSERT_UINT32_WITHIN(1 + expect / 50, expect, n);
+        unsigned sum = 0, below = 0;
+        for (unsigned v = 0; v < 256; v++) {
+            sum += s.bins[v];
+            if (v < s.med) below += s.bins[v];
+        }
+        TEST_ASSERT_EQUAL(n, sum);
+        TEST_ASSERT_EQUAL(below, s.below);
+        TEST_ASSERT_TRUE(below <= (n - 1) / 2 && below + s.bins[s.med] > (n - 1) / 2);
+        /* The output carries the middle update's time, ~half a window back. */
+        TEST_ASSERT_INT_WITHIN(2 + step_us[a] / 1000, (t_us - step_us[a]) / 1000 - (n - 1) / 2 * step_us[a] / 1000, s.level_ms);
+    }
+}
+
 /* Peaks and nadirs: +/-1 noise makes none (hysteresis); the pass makes one
- * peak at 220 lasting the plateau. The history starts rising, so the floor
- * before it is no nadir; the floor after it is still open. */
+ * peak at 220 around the plateau's middle. The history starts rising, so
+ * the floor before it is no nadir; the floor after it is still open. */
 static void test_lap_history(void) {
     lap_seat_t s;
     lap_init(&s, 190, 180);
@@ -311,16 +356,15 @@ static void test_lap_history(void) {
     TEST_ASSERT_TRUE(lap_pop_extremum(&s, &peak, &e));
     TEST_ASSERT_TRUE(peak);
     TEST_ASSERT_EQUAL(220, e.level);
-    TEST_ASSERT_EQUAL(1000 + 5 * 45, e.first_ms);
-    TEST_ASSERT_EQUAL(10, e.duration_ms);
+    TEST_ASSERT_INT_WITHIN(5, PASS_PLATEAU_MID(1000), e.first_ms + e.duration_ms / 2);
     TEST_ASSERT_FALSE(lap_pop_extremum(&s, &peak, &e));
     /* A long noisy stretch overflows nothing and stays bounded. */
-    for (uint32_t t = 2000; t < 60000; t += 5) lap_feed(&s, t, (uint8_t)(160 + (t / 5) % 7), 5000);
+    for (uint32_t t = 3000; t < 60000; t += 5) lap_feed(&s, t, (uint8_t)(160 + (t / 5) % 7), 5000);
     TEST_ASSERT_TRUE(s.peaks.n <= LAP_HISTORY && s.nadirs.n <= LAP_HISTORY);
 }
 
-/* A frequency change keeps the lap count and thresholds; forcing the end of
- * a crossing records its pass. */
+/* A frequency change keeps the lap count and thresholds and refills the
+ * window; forcing the end of a crossing records its pass. */
 static void test_lap_reset_and_force(void) {
     lap_seat_t s;
     lap_init(&s, 190, 180);
@@ -330,7 +374,9 @@ static void test_lap_reset_and_force(void) {
     TEST_ASSERT_EQUAL(190, s.enter_at);
     TEST_ASSERT_EQUAL(0, s.node_peak);
     TEST_ASSERT_FALSE(s.valid);
-    for (uint32_t t = 0; t < 100; t += 5) lap_feed(&s, t, 200, 5000);
+    for (uint32_t t = 0; t < 200; t += 5) lap_feed(&s, t, 200, 5000);
+    TEST_ASSERT_FALSE(s.valid); /* window not yet 255 ms */
+    for (uint32_t t = 200; t < 400; t += 5) lap_feed(&s, t, 200, 5000);
     TEST_ASSERT_TRUE(s.crossing);
     lap_end_crossing(&s);
     TEST_ASSERT_FALSE(s.crossing);
@@ -444,6 +490,7 @@ int main(void) {
     RUN_TEST(test_metrics_level);
     RUN_TEST(test_lap_pass);
     RUN_TEST(test_lap_filter);
+    RUN_TEST(test_lap_window);
     RUN_TEST(test_lap_history);
     RUN_TEST(test_lap_reset_and_force);
     RUN_TEST(test_plan_default_raceband);

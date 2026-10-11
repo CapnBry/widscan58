@@ -10,15 +10,25 @@
  * protocol, not from its code): a crossing starts when the filtered level
  * reaches enter_at and ends when it drops below exit_at; the pass time is
  * the middle of the crossing's highest plateau (first to last update at
- * the peak level). The filter is a median of three updates (~15 ms at
- * 200 updates/s), which removes single-hop dropouts and spikes; its output
- * carries the middle update's time. */
+ * the peak level). The filter is a running median over the last
+ * LAP_WINDOW_MS (at most LAP_MAX_SAMPLES updates, so above 1000 updates/s
+ * the window is shorter), as RotorHazard's nodes use: it removes dropouts
+ * and spikes shorter than about half the window, and its output carries the
+ * time of the window's middle update. Nothing is reported until the window
+ * first spans LAP_WINDOW_MS. The median comes from a histogram of the level
+ * codes; update times are kept for every LAP_TS_EVERY-th update and
+ * interpolated in between. */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 
 #define LAP_HISTORY 8      /* queued peaks and nadirs each, oldest dropped when full */
 #define LAP_HYSTERESIS 2   /* level codes a reversal must exceed to end a peak or nadir */
+#define LAP_WINDOW_MS 255  /* median window */
+#define LAP_MAX_SAMPLES 255 /* window cap: one byte per histogram bin */
+#define LAP_TS_EVERY 8     /* updates per stored timestamp */
+/* Enough timestamps for the oldest update's preceding one to survive. */
+#define LAP_TS_SLOTS ((LAP_MAX_SAMPLES + 1) / LAP_TS_EVERY + 2)
 
 typedef struct {
     uint8_t level;
@@ -34,10 +44,16 @@ typedef struct {
 typedef struct {
     /* Settings */
     uint8_t enter_at, exit_at;
-    /* Median-of-3 input */
-    uint8_t in[3];
-    uint32_t in_ms[3];
-    uint8_t nin;
+    /* Median window: updates first .. seq - 1 (update k is ring[k & 255]),
+     * a histogram of their levels, and the median: the lower middle level,
+     * with `below` updates under it. */
+    uint8_t ring[256];
+    uint8_t bins[256];
+    uint32_t ts[LAP_TS_SLOTS]; /* time of update k, for k % LAP_TS_EVERY == 0 */
+    uint32_t seq, first;
+    uint32_t last_ms;      /* time of update seq - 1 */
+    uint8_t med, below;
+    bool filled;           /* the window has spanned LAP_WINDOW_MS */
     /* State */
     bool valid;            /* at least one filtered level since the reset */
     uint8_t level;         /* latest filtered level */

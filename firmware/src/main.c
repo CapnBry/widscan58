@@ -14,6 +14,7 @@
 #include "commands.h"
 #include "link.h"
 #include "radio.h"
+#include "rh.h"
 #include "scanner.h"
 
 /* Required by the stock RF test archive; no shell is exposed. */
@@ -73,6 +74,7 @@ void app_main(void) {
     BOOT_CHECK(esp_wifi_set_promiscuous(true));
     BOOT_CHECK(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE));
     BOOT_CHECK(radio_init());
+    BOOT_CHECK(rh_init()); /* before the scanner can feed seats */
     BOOT_CHECK(scanner_init());
     commands_task_start(); /* silent from here on until a host speaks (commands.c) */
 }

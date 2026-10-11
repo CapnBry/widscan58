@@ -8,6 +8,7 @@
  * WRITE_CURNODE_INDEX selects the seat the other commands address.
  * Levels are lap.h's: the seat's RSSI or SNR level code, 1..254. */
 #pragma once
+#include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include "scanner.h"
@@ -15,7 +16,7 @@
 #define RH_SEATS PROFILE_MAX_CHANNELS
 #define RH_REVISION_CODE 0x22 /* the server's first command */
 
-void rh_init(void);
+esp_err_t rh_init(void);
 /* The RotorHazard scan setup: channels and enabled seats from the seat
  * frequencies, scanning only once the server has set one. */
 void rh_apply_plan(scan_config_t *c);

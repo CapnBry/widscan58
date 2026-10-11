@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "lap.h"
@@ -50,13 +51,15 @@ enum {
 #define DEFAULT_EXIT 180
 
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED; /* seats: scanner vs command task */
+/* On the heap: the median windows (~5 KB) don't fit in the C5's static RAM
+ * below the RF dump bank. */
 static struct {
     uint16_t freq_mhz;
     bool set;          /* the server has set the frequency */
     bool mapped;       /* and the profile can tune it */
     int64_t last_us;
     lap_seat_t lap;
-} seat[RH_SEATS];
+} *seat;
 static unsigned cur;
 /* Write in progress. */
 static uint8_t wcmd, wbuf[4], wneed, wgot;
@@ -64,7 +67,9 @@ static int64_t wstart;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-void rh_init(void) {
+esp_err_t rh_init(void) {
+    seat = heap_caps_calloc(RH_SEATS, sizeof(*seat), MALLOC_CAP_INTERNAL);
+    if (!seat) return ESP_ERR_NO_MEM;
     const profile_t *p = profile_default(radio_caps()->target);
     for (unsigned j = 0; j < RH_SEATS; j++) {
         /* The server reads the frequency first and rejects 0: report the
@@ -72,6 +77,7 @@ void rh_init(void) {
         seat[j].freq_mhz = (uint16_t)(profile_equiv_khz(p, p->ch[j < p->nch ? j : 0].khz) / 1000 + 0.5);
         lap_init(&seat[j].lap, DEFAULT_ENTER, DEFAULT_EXIT);
     }
+    return ESP_OK;
 }
 
 void rh_apply_plan(scan_config_t *c) {

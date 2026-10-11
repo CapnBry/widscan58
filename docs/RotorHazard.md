@@ -80,10 +80,38 @@ time is the board's `loop_time` for the seat, the interval between updates:
 - **SINGLE mode** (LO per channel) gives every seat its own LO, so it runs at
   roughly half the GROUP rate for the same seats.
 
+## Smoothing
+
+Each seat's level goes through a running median over the last 255 ms before
+pass detection sees it. This copies what RotorHazard's own nodes do, so
+levels hold about as still as an RX5808 node's.
+
+**RotorHazard nodes** (Arduino and S32_BPill firmware alike) read each RX5808's
+RSSI pin with one ADC read about every millisecond, about 1000 reads per
+second per receiver. They take a running median of the last 255 reads, which
+covers about 255 ms. Each filtered value is reported with the time of the
+window's middle read, about 128 ms back.
+
+**Widscan58** does the same with its own updates:
+
+- The median covers the updates from the last 255 ms, up to 255 of them.
+- Each filtered level carries the time of the window's middle update, so
+  pass times are not shifted by the filter.
+- Nothing is reported for the first 255 ms after power-up or a frequency
+  change, while the window fills. A RotorHazard node also waits for a full
+  window.
+
+| | RotorHazard node | Widscan58 |
+|---|---|---|
+| Updates per seat | ~1000 /s | 210–1750 /s (see Performance) |
+| One update | one ADC read of the RX5808 RSSI voltage | the power in the channel's ±5 MHz window, from four averaged FFTs of one capture |
+| Median window | 255 reads, ~255 ms | 255 ms, at most 255 updates |
+| Filter delay | ~128 ms, reported with the middle read's time | the same |
+
 ## Notes
 
-- **Pass detection runs on the board** at the full update rate: a median of 3
-  updates, a crossing from EnterAt until the level drops below ExitAt, and the
+- **Pass detection runs on the board** at the full update rate: the 255 ms
+  median (see Smoothing), a crossing from EnterAt until the level drops below ExitAt, and the
   pass at the middle of the crossing's highest plateau. RotorHazard polls the
   board about every 100 ms, but the pass time comes from the board's own update
   rate, not from that poll.

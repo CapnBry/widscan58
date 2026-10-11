@@ -71,7 +71,7 @@ export class RawIqView implements View {
     );
   }
 
-  /* The C5's smaller link queue caps RAWIQ below the capture buffer size. */
+  /* Sizes above the device's capture buffer (rawiq_max) are disabled. */
   private limitSamples() {
     const max = this.app.store.status?.rawiq_max ?? Infinity;
     let best = "";

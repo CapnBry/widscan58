@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StreamParser, crc32, encodeFrame } from "./parser";
-import { FRAME_METRICS, FRAME_SPECTRUM, parseLevels, parseMetrics, parseSpectrum, parseTelemetry } from "../proto/frames";
+import { FRAME_METRICS, FRAME_SPECTRUM, RawIqAssembler, parseLevels, parseMetrics, parseSpectrum, parseTelemetry, rawIqChunkIsLast } from "../proto/frames";
 
 const text = (s: string) => new TextEncoder().encode(s);
 const join = (...parts: Uint8Array[]) => {
@@ -137,5 +137,39 @@ describe("telemetry", () => {
     dv.setInt8(61, -1);
     const t = parseTelemetry(dv);
     expect([t.hopUsAvg, t.dspUsMax, t.linkFill, t.heapFree, t.filter]).toEqual([69382, 66713, 0.25, 29872, -1]);
+  });
+});
+
+describe("raw I/Q chunks", () => {
+  const chunk = (n: number, offset: number, count: number) => {
+    const dv = new DataView(new ArrayBuffer(14 + 2 * count));
+    dv.setUint32(0, 5677000, true);
+    dv.setUint32(4, 80000000, true);
+    dv.setUint16(8, n, true);
+    dv.setUint16(10, offset, true);
+    dv.setUint8(12, 1);
+    dv.setUint8(13, 2);
+    for (let j = 0; j < count; j++) {
+      dv.setInt8(14 + 2 * j, (offset + j) % 100);
+      dv.setInt8(15 + 2 * j, -((offset + j) % 100));
+    }
+    return dv;
+  };
+
+  it("assembles a snapshot from consecutive chunks", () => {
+    const a = new RawIqAssembler();
+    expect(a.add(chunk(2500, 0, 1024))).toBeNull();
+    expect(rawIqChunkIsLast(chunk(2500, 1024, 1024))).toBe(false);
+    expect(a.add(chunk(2500, 1024, 1024))).toBeNull();
+    expect(rawIqChunkIsLast(chunk(2500, 2048, 452))).toBe(true);
+    const r = a.add(chunk(2500, 2048, 452));
+    expect(r && [r.n, r.loKhz, r.shift, r.conjugated, r.i[2499], r.q[1501]]).toEqual([2500, 5677000, 2, true, 99, -1]);
+  });
+
+  it("drops a snapshot with a missing chunk and starts over at offset 0", () => {
+    const a = new RawIqAssembler();
+    a.add(chunk(3000, 0, 1024));
+    expect(a.add(chunk(3000, 2048, 952))).toBeNull();
+    expect(a.add(chunk(100, 0, 100))?.n).toBe(100);
   });
 });

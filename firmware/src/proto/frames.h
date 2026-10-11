@@ -124,11 +124,16 @@ _Static_assert(sizeof(frame_level_t) == 4, "frame_level_t layout");
 _Static_assert(sizeof(frame_telemetry_t) == 62, "frame_telemetry_t layout");
 
 /* Raw snapshot, signed 8-bit I then Q: the 10-bit samples >> shift, with the
- * smallest shift (0..2) that fits the capture's peak. */
+ * smallest shift (0..2) that fits the capture's peak. Sent as consecutive
+ * chunks (RAWIQ_CHUNK samples, the last one shorter): each frame carries
+ * samples offset .. offset + (payload - header) / 2 of n. */
 typedef struct __attribute__((packed)) {
     uint32_t lo_khz;
     uint32_t rate_hz;
-    uint16_t n;
+    uint16_t n;              /* whole snapshot */
+    uint16_t offset;         /* first sample in this frame */
     uint8_t conjugated;
     uint8_t shift;
 } frame_rawiq_t;
+#define RAWIQ_CHUNK 1024
+_Static_assert(sizeof(frame_rawiq_t) == 14, "frame_rawiq_t layout");

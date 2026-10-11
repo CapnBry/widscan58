@@ -161,7 +161,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `CAPN <samples>`, `FFT <n>` | Capture length (from 256) and FFT size (from 128; S3: up to 2048; C5: up to 1024) |
 | `METRICS FULL\|RSSI\|SNR`, `METRICS?` | Per-channel measurements. `FULL` (default): everything, `METRICS` frames. `RSSI`: only the RSSI-window power; `SNR`: that plus noise floor and SNR. Both send compact `LEVELS` frames of byte codes (integer math per channel, for lap timing); the UI leaves the rest blank. They do not mask board spurs (at `FFT 128` the mask would cover ~1.9 MHz of R8 on the C5; the unmasked spur adds ~2 dB to the empty channel) |
 | `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
-| `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as one frame. At most `rawiq_max` samples: 16380 on the S3, 9180 on the C5 (smaller link queue). The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
+| `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as consecutive 1024-sample `RAWIQ` frames (header: total `n` and this chunk's `offset`). At most `rawiq_max` samples, the capture buffer: 16380 on both targets. The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `IQCORR 0\|1` | Digital IQ imbalance correction before the FFT (default 1). Removes the mirror image of strong signals, e.g. R1 showing on R2 in pair mode. |
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. |
@@ -204,7 +204,7 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
 ```sh
 cd web
 npm install
-npm run dev                         # http://localhost:5808 (Web Serial: Chrome/Edge, Firefox, Android Chrome)
+npm run dev                         # http://localhost:5173 (Web Serial: Chrome/Edge, Firefox, Android Chrome)
 ```
 
 - **Menu** (☰, top left): Monitor mode / RotorHazard mode, and the dark-mode
@@ -227,12 +227,12 @@ npm run dev                         # http://localhost:5808 (Web Serial: Chrome/
 - **Flash device**: flashes the firmware the page was deployed with
   (`web/src/serial/flasher.ts`; binaries come from `web/public/firmware`, staged
   by CI, never committed).
-- **Simulate**, or open `http://localhost:5808/?sim`: synthetic VTXs, Wi-Fi
+- **Simulate**, or open `http://localhost:5173/?sim`: synthetic VTXs, Wi-Fi
   bursts, board spurs and IMD3 products. The simulator only has the S3
   (`s3-race24`) profile. It boots in RotorHazard mode like the firmware, and
   there flies a pass past every seat every 5–9 s.
 - **Bridge**: `python3 tools/serial_bridge.py`, then open
-  `http://localhost:5808/?bridge=ws://127.0.0.1:5809`. This does not work from
+  `http://localhost:5173/?bridge=ws://127.0.0.1:5809`. This does not work from
   the HTTPS Pages site (Chrome blocks it from reaching a localhost WebSocket);
   use the local dev server.
 - **Record / Replay**: saves the raw stream to a `.widscan58` file and plays it back.

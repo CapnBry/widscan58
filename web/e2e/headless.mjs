@@ -1,7 +1,7 @@
 // Headless end-to-end check of the web UI against the simulator or real
 // hardware through tools/serial_bridge.py. GPL-3.0-or-later.
 //
-//   node e2e/headless.mjs [--url http://localhost:5808/] [--bridge ws://127.0.0.1:5809 | --sim] [--out dir]
+//   node e2e/headless.mjs [--url http://localhost:5173/] [--bridge ws://127.0.0.1:5809 | --sim] [--out dir]
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 import path from "node:path";
@@ -10,7 +10,7 @@ const arg = (name, def) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : def;
 };
-const base = arg("--url", "http://localhost:5808/");
+const base = arg("--url", "http://localhost:5173/");
 const sim = process.argv.includes("--sim");
 const bridge = arg("--bridge", "ws://127.0.0.1:5809");
 const out = arg("--out", "e2e-out");

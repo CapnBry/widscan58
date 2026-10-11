@@ -227,15 +227,64 @@ export function parseTelemetry(p: DataView): Telemetry {
   };
 }
 
-export function parseRawIq(p: DataView): RawIq {
-  const n = p.getUint16(8, true);
-  const i = new Int8Array(n);
-  const q = new Int8Array(n);
-  for (let j = 0; j < n; j++) {
-    i[j] = p.getInt8(12 + 2 * j);
-    q[j] = p.getInt8(13 + 2 * j);
+// RAWIQ arrives in consecutive chunks: the header (n = whole snapshot, offset
+// = first sample in this frame), then 8-bit I/Q pairs.
+const RAWIQ_HDR = 14;
+export interface RawIqChunk {
+  loKhz: number;
+  rateHz: number;
+  n: number;
+  offset: number;
+  count: number;
+  conjugated: boolean;
+  shift: number;
+  p: DataView;
+}
+
+export function parseRawIqChunk(p: DataView): RawIqChunk {
+  return {
+    loKhz: p.getUint32(0, true),
+    rateHz: p.getUint32(4, true),
+    n: p.getUint16(8, true),
+    offset: p.getUint16(10, true),
+    count: (p.byteLength - RAWIQ_HDR) >> 1,
+    conjugated: p.getUint8(12) !== 0,
+    shift: p.getUint8(13),
+    p,
+  };
+}
+
+/** Whether this chunk ends its snapshot. */
+export function rawIqChunkIsLast(p: DataView): boolean {
+  const c = parseRawIqChunk(p);
+  return c.offset + c.count >= c.n;
+}
+
+/** Collects chunks into a snapshot; add() returns it once the last one is in. */
+export class RawIqAssembler {
+  private cur: RawIq | null = null;
+  private next = 0;
+
+  add(p: DataView): RawIq | null {
+    const c = parseRawIqChunk(p);
+    if (c.offset === 0) {
+      this.cur = { loKhz: c.loKhz, rateHz: c.rateHz, n: c.n, conjugated: c.conjugated, shift: c.shift, i: new Int8Array(c.n), q: new Int8Array(c.n) };
+      this.next = 0;
+    }
+    const r = this.cur;
+    if (!r || c.offset !== this.next || c.n !== r.n || c.offset + c.count > r.n) {
+      this.cur = null; // a chunk went missing: drop the snapshot
+      return null;
+    }
+    for (let j = 0; j < c.count; j++) {
+      r.i[c.offset + j] = p.getInt8(RAWIQ_HDR + 2 * j);
+      r.q[c.offset + j] = p.getInt8(RAWIQ_HDR + 1 + 2 * j);
+    }
+    this.next = c.offset + c.count;
+    if (this.next < r.n) return null;
+    this.cur = null;
+    return r;
   }
-  return { loKhz: p.getUint32(0, true), rateHz: p.getUint32(4, true), n, conjugated: p.getUint8(10) !== 0, shift: p.getUint8(11), i, q };
 }
 
 // Profile / status JSON (text replies).
@@ -280,7 +329,7 @@ export interface Status {
   gain_mode: "MANUAL" | "HARDWARE";
   gain: number;
   gain_max: number;
-  rawiq_max?: number; // largest RAWIQ the link can carry in one frame
+  rawiq_max?: number; // largest RAWIQ snapshot (the capture buffer)
   recal: "ONCE" | "EVERY" | "CACHE";
   metrics?: MetricsMode; // absent from firmware before METRICS existed
   rssi_hz: number;

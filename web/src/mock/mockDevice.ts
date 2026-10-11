@@ -716,13 +716,7 @@ export class MockTransport implements Transport {
     const p = this.profile;
     const now = performance.now();
     const rate = p.rateHz;
-    const out = new Uint8Array(12 + 2 * n);
-    const dv = new DataView(out.buffer);
-    dv.setUint32(0, loKhz, true);
-    dv.setUint32(4, rate, true);
-    dv.setUint16(8, n, true);
-    dv.setUint8(10, 1);
-    dv.setUint8(11, 2);
+    const iq = new Int8Array(2 * n);
     const em = this.emitters(now).filter((e) => Math.abs(e.hz - loKhz * 1000) < p.passbandHz);
     const phases = em.map(() => Math.random() * 2 * Math.PI);
     for (let j = 0; j < n; j++) {
@@ -738,9 +732,22 @@ export class MockTransport implements Transport {
         i += a * Math.cos(ph);
         q += a * Math.sin(ph);
       });
-      dv.setInt8(12 + 2 * j, Math.max(-128, Math.min(127, Math.round(i))));
-      dv.setInt8(13 + 2 * j, Math.max(-128, Math.min(127, Math.round(q))));
+      iq[2 * j] = Math.max(-128, Math.min(127, Math.round(i)));
+      iq[2 * j + 1] = Math.max(-128, Math.min(127, Math.round(q)));
     }
-    this.onBytes(encodeFrame(FRAME_RAWIQ, out));
+    // In chunks of 1024 samples, as the firmware sends them.
+    for (let off = 0; off < n; off += 1024) {
+      const len = Math.min(1024, n - off);
+      const out = new Uint8Array(14 + 2 * len);
+      const dv = new DataView(out.buffer);
+      dv.setUint32(0, loKhz, true);
+      dv.setUint32(4, rate, true);
+      dv.setUint16(8, n, true);
+      dv.setUint16(10, off, true);
+      dv.setUint8(12, 1);
+      dv.setUint8(13, 2);
+      out.set(new Uint8Array(iq.buffer, 2 * off, 2 * len), 14);
+      this.onBytes(encodeFrame(FRAME_RAWIQ, out));
+    }
   }
 }

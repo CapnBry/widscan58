@@ -455,9 +455,18 @@ static void do_rawiq(const scan_request_t *r) {
         iq[2 * j] = (int8_t)(i > 127 ? 127 : i < -128 ? -128 : i);
         iq[2 * j + 1] = (int8_t)(q > 127 ? 127 : q < -128 ? -128 : q);
     }
+    /* In chunks, so the link queue needn't hold a whole snapshot: the samples
+     * stay put in the capture aperture while each chunk waits for room. */
     frame_rawiq_t h = {.lo_khz = r->lo_khz, .rate_hz = radio_caps()->rates_hz[r->rate_code],
                        .n = r->n, .conjugated = c->conjugate, .shift = (uint8_t)shift};
-    if (!link_frame_wait(FRAME_RAWIQ, &h, sizeof(h), iq, 2u * r->n, 500)) link_text("ERR link_full\n");
+    for (unsigned off = 0; off < r->n; off += RAWIQ_CHUNK) {
+        unsigned len = r->n - off < RAWIQ_CHUNK ? r->n - off : RAWIQ_CHUNK;
+        h.offset = (uint16_t)off;
+        if (!link_frame_wait(FRAME_RAWIQ, &h, sizeof(h), iq + 2 * off, 2u * len, 500)) {
+            link_text("ERR link_full\n");
+            return;
+        }
+    }
 }
 
 /* FFT A/B evaluation: every FFT path on identical samples, averaged over reps.

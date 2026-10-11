@@ -1,6 +1,6 @@
 // Transports (Web Serial, mock, replay) and the command/reply client. GPL-3.0-or-later.
 import { StreamParser, type StreamItem } from "./parser";
-import { FRAME_RAWIQ } from "../proto/frames";
+import { FRAME_RAWIQ, rawIqChunkIsLast } from "../proto/frames";
 import { grantedUsbCdcPorts, requestUsbCdcPort } from "./webusb";
 import { RhLink } from "./rhLink";
 
@@ -189,11 +189,11 @@ export interface DeviceStats {
 }
 
 // Which reply ends a command. Most commands answer OK/ERR; queries answer with
-// their own keyword; RAWIQ answers with a frame.
+// their own keyword; RAWIQ answers with frames, done at the last chunk.
 function replyMatcher(cmd: string): (item: StreamItem) => boolean {
   const word = cmd.split(" ")[0];
   const isErr = (i: StreamItem) => i.kind === "text" && i.line.startsWith("ERR");
-  if (word === "RAWIQ") return (i) => (i.kind === "frame" && i.type === FRAME_RAWIQ) || isErr(i);
+  if (word === "RAWIQ") return (i) => (i.kind === "frame" && i.type === FRAME_RAWIQ && rawIqChunkIsLast(i.payload)) || isErr(i);
   const query: Record<string, string> = {
     INFO: "INFO ",
     "PROFILE?": "PROFILE ",

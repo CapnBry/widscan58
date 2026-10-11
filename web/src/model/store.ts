@@ -9,7 +9,7 @@ import {
   FRAME_TELEMETRY,
   parseLevels,
   parseMetrics,
-  parseRawIq,
+  RawIqAssembler,
   parseSpectrum,
   parseTelemetry,
   type ChannelMetrics,
@@ -90,6 +90,7 @@ export class Store {
   channels: ChannelState[] = [];
   segments = new Map<number, Segment>();
   rawiq: RawIq | null = null;
+  private rawiqChunks = new RawIqAssembler();
   spursKhz: number[] = [];
   floorByLo = new Map<number, number>(); // per-bin noise floor (dBFS) per LO
   log: LogLine[] = [];
@@ -181,9 +182,11 @@ export class Store {
       case FRAME_TELEMETRY:
         this.telemetry = parseTelemetry(item.payload);
         break;
-      case FRAME_RAWIQ:
-        this.rawiq = parseRawIq(item.payload);
+      case FRAME_RAWIQ: {
+        const r = this.rawiqChunks.add(item.payload);
+        if (r) this.rawiq = r;
         break;
+      }
       case FRAME_LOG:
         this.addLog("info", new TextDecoder().decode(new Uint8Array(item.payload.buffer)));
         break;

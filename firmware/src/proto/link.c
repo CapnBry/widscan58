@@ -12,11 +12,12 @@
 
 #if RX_TARGET_C5
 /* The C5 heap is ~125 KB once the 128 KiB capture bank is reserved, and Wi-Fi
- * needs most of what's left: max item ~18 KB, a ~9000-sample RAWIQ. */
-#define LINK_QUEUE_BYTES (36 * 1024)
+ * needs much of what's left. RAWIQ goes out in chunks, so the queue only has
+ * to hold a reply (3 KB) and ride out short host stalls. */
+#define LINK_QUEUE_BYTES (16 * 1024)
 #define LINK_USB_TX_BYTES 4096
 #else
-#define LINK_QUEUE_BYTES (72 * 1024) /* NOSPLIT: max item ~half, fits a 16380-sample RAWIQ */
+#define LINK_QUEUE_BYTES (72 * 1024)
 #define LINK_USB_TX_BYTES 16384
 #endif
 static RingbufHandle_t queue;

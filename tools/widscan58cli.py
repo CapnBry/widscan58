@@ -28,7 +28,7 @@ LEVELS_HDR = struct.Struct("<IIIIIIHBBBBBB")
 LEVEL = struct.Struct("<BBBB")
 SPECTRUM_HDR = struct.Struct("<IIiIHBB")
 TELEMETRY = struct.Struct("<IIIIIIIIIIIHIIIBBBb")
-RAWIQ_HDR = struct.Struct("<IIHBB")
+RAWIQ_HDR = struct.Struct("<IIHHBB")  # lo, rate, n, offset, conj, shift; then a chunk of I/Q
 CHF = {1: "SIG", 2: "SAT", 4: "DC", 8: "EDGE", 16: "NOC", 32: "SPUR"}
 
 
@@ -44,6 +44,7 @@ class Link:
         keep_vmin1(self.ser)
         self.buf = bytearray()
         self.crc_errors = 0
+        self.pending = []  # items wait_frame has read but not consumed yet
 
     def send(self, line):
         self.ser.write(line.encode() + b"\n")
@@ -98,7 +99,10 @@ class Link:
     def wait_frame(self, ftype, timeout=3.0):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            for item in self.poll():
+            if not self.pending:
+                self.pending = self.poll()
+            while self.pending:
+                item = self.pending.pop(0)
                 if item[0] == "frame" and item[1] == ftype:
                     return item[2]
                 if item[0] == "text" and item[1].startswith("ERR"):
@@ -222,10 +226,18 @@ def cmd_rawiq(link, args):
     import numpy as np
     cmd = f"RAWIQ {args.lo_khz} {args.n}" + (f" {args.rate}" if args.rate is not None else "")
     link.send(cmd)
-    p = link.wait_frame(FRAME_RAWIQ, timeout=5)
-    lo, rate, n, conj, shift = RAWIQ_HDR.unpack_from(p)
+    # The snapshot arrives as consecutive chunks.
+    buf = bytearray()
+    while True:
+        p = link.wait_frame(FRAME_RAWIQ, timeout=5)
+        lo, rate, n, off, conj, shift = RAWIQ_HDR.unpack_from(p)
+        if 2 * off != len(buf):
+            raise RuntimeError(f"RAWIQ chunk at {off}, expected {len(buf) // 2}")
+        buf += p[RAWIQ_HDR.size:]
+        if len(buf) >= 2 * n:
+            break
     # Back to 10-bit ADC counts.
-    iq = np.frombuffer(p[RAWIQ_HDR.size : RAWIQ_HDR.size + 2 * n], dtype=np.int8).astype(np.float32) * (1 << shift)
+    iq = np.frombuffer(bytes(buf[: 2 * n]), dtype=np.int8).astype(np.float32) * (1 << shift)
     x = iq[0::2] + 1j * iq[1::2]
     print(f"lo {lo} kHz rate {rate} n {n} conj {conj} shift {shift} (10-bit counts) mean {x.mean():.2f} rms {np.sqrt(np.mean(abs(x) ** 2)):.2f} "
           f"max |I|,|Q| {abs(iq[0::2]).max():.0f},{abs(iq[1::2]).max():.0f}")

@@ -1,14 +1,14 @@
 // Layout stability: channel tiles and the zoom card must keep their height
 // whether or not channels show a signal. GPL-3.0-or-later.
 //
-//   node e2e/layout-stability.mjs [--url http://localhost:5808/] [--widths 1113,1300,1500]
+//   node e2e/layout-stability.mjs [--url http://localhost:5173/] [--widths 1113,1300,1500]
 import puppeteer from "puppeteer-core";
 
 const arg = (name, def) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : def;
 };
-const base = arg("--url", "http://localhost:5808/");
+const base = arg("--url", "http://localhost:5173/");
 const widths = arg("--widths", "700,1000,1113,1200,1300,1400,1500,1800").split(",").map(Number);
 const chrome = arg("--chrome", "/usr/bin/google-chrome-stable");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

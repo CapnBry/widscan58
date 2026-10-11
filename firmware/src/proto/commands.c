@@ -38,11 +38,6 @@
  * a line cuts it in two on the host. Only the command task uses it. */
 static char reply[3072];
 
-/* Largest RAWIQ that fits one link frame (8-bit I/Q plus header and CRC). */
-static unsigned rawiq_max(void) {
-    unsigned n = (unsigned)((link_capacity() - 64) / 2);
-    return n < radio_caps()->max_samples ? n : radio_caps()->max_samples;
-}
 static size_t reply_len;
 static bool reply_overflow;
 
@@ -208,7 +203,7 @@ static void send_status(const char *keyword) {
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"plan\":[",
               keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.iq_corr, c.settle_us,
-              c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, rawiq_max(),
+              c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, (unsigned)radio_caps()->max_samples,
               c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY",
               metrics_mode_name(c.metrics_mode), c.rssi_hz, c.search_hz, c.dc_guard,
               (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
@@ -407,7 +402,7 @@ static void handle(char *line) {
         /* RAWIQ <lo_khz> <samples> [rate_code] */
         int fields = sscanf(line, "RAWIQ %" SCNu32 " %" SCNu32 " %" SCNu32, &a, &b, &d);
         if (fields < 3) d = c.rate_code;
-        if (b < 16 || b > radio_caps()->max_samples || b > rawiq_max() || d >= RADIO_MAX_RATES ||
+        if (b < 16 || b > radio_caps()->max_samples || d >= RADIO_MAX_RATES ||
             !radio_caps()->rates_hz[d] || a % radio_caps()->lo_step_khz) {
             link_text("ERR rawiq_args\n");
             return;

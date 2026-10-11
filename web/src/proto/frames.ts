@@ -33,7 +33,7 @@ export interface ChannelMetrics {
   clearFloor: number | null; // also null before the channel was ever clear
   peak: number | null; // per-bin dBFS, this hop
   // Time-averaged occupancy, vs channel nominal: most occupied frequency,
-  // power-weighted centre, and the band holding 99 % of the excess power.
+  // power-weighted center, and the band holding 99 % of the excess power.
   peakOffHz: number | null;
   centroidOffHz: number | null;
   obwLoHz: number | null;

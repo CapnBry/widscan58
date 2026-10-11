@@ -357,6 +357,10 @@ export class RhSettings implements View {
     ctl("RX gain (PHY table index)", this.gain, this.gainVal);
     ctl("FFT and capture (FFTs averaged = samples / FFT size, at most 4)", this.fft, this.capn);
     ctl("LO plan", this.mode.el);
+    // RotorHazard's UI can't change these: the device applies its saved ones on every switch to this mode.
+    const save = el("button", { title: "Save these settings as default" }, "Save");
+    save.onclick = () => void rh.saveDefaults();
+    ctl("Save these settings as default", save);
     this.el = el("section", { class: "card span-12" }, el("h2", {}, "Receiver"), this.body, this.stats);
   }
 

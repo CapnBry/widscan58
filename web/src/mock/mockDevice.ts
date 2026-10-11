@@ -101,6 +101,10 @@ export class MockTransport implements Transport {
   private rhWrite: { cmd: number; need: number; got: number[] } | null = null;
   private rhText: string | null = null;
   private rhMetric: "RSSI" | "SNR" = "RSSI";
+  private rhNfft = 128;
+  private rhCapn = 512;
+  // CONFIG SAVE: applied on every PROTOCOL RH, as the firmware (not kept across page loads).
+  private rhSaved = { gainManual: true, gain: 60, group: true, metric: "RSSI" as "RSSI" | "SNR", nfft: 128, capn: 512 };
 
   async open(onBytes: (c: Uint8Array) => void): Promise<void> {
     this.onBytes = onBytes;
@@ -176,6 +180,17 @@ export class MockTransport implements Transport {
       case line === "PROTOCOL RH" || line === "PROTOCOL MONITOR":
         this.proto = parts[1] as "RH" | "MONITOR";
         this.rx = "";
+        if (this.proto === "RH") this.applyRhSaved();
+        else this.metricsMode = "FULL";
+        this.state.clear();
+        return ok();
+      case line === "CONFIG SAVE":
+        if (this.proto !== "RH") return this.text("ERR rh_only\n");
+        this.rhSaved = { gainManual: this.gainManual, gain: this.gain, group: this.group, metric: this.rhMetric, nfft: this.rhNfft, capn: this.rhCapn };
+        return ok();
+      case this.proto === "RH" && (parts[0] === "FFT" || parts[0] === "CAPN"):
+        if (parts[0] === "FFT") this.rhNfft = num(1);
+        else this.rhCapn = num(1);
         return ok();
       case line === "METRICS RSSI" || line === "METRICS SNR":
         if (this.proto === "RH") this.rhMetric = parts[1] as "RSSI" | "SNR";
@@ -190,8 +205,8 @@ export class MockTransport implements Transport {
             running: +this.running,
             enabled: this.enabled,
             mode: this.group ? "GROUP" : "SINGLE",
-            capture_samples: this.proto === "RH" ? 512 : p.nfft * p.segments, // RotorHazard mode defaults (commands.c)
-            nfft: this.proto === "RH" ? 128 : p.nfft,
+            capture_samples: this.proto === "RH" ? this.rhCapn : p.nfft * p.segments,
+            nfft: this.proto === "RH" ? this.rhNfft : p.nfft,
             segments: p.segments,
             rate_code: 1,
             filter: 60,
@@ -293,6 +308,7 @@ export class MockTransport implements Transport {
           this.enabled = (1 << this.channels.length) - 1;
           this.metricsMode = "FULL";
           this.reset();
+          this.applyRhSaved();
         }, 300);
         return ok();
       case parts[0] === "SYNC":
@@ -306,10 +322,17 @@ export class MockTransport implements Transport {
   // The firmware's protocol (firmware/src/proto/rh.c) on synthetic levels:
   // each seat on a channel sees a quad pass the gate every 5-9 s.
 
+  private applyRhSaved() {
+    ({ gainManual: this.gainManual, gain: this.gain, group: this.group, metric: this.rhMetric, nfft: this.rhNfft, capn: this.rhCapn } =
+      this.rhSaved);
+    this.plan = planBuild(this.profile, this.channels, this.enabled, this.group);
+    this.hop = 0;
+  }
+
   private rhAllowed(line: string): boolean {
     return (
       ["PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?", "METRICS RSSI", "METRICS SNR", "METRICS?",
-        "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE"].includes(line) ||
+        "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE"].includes(line) ||
       ["GAIN MANUAL ", "FFT ", "CAPN ", "FILTER ", "IQCORR "].some((p) => line.startsWith(p))
     );
   }

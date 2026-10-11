@@ -81,7 +81,7 @@ static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
 static unsigned gain_code = 60;
 static int filter_code = -1;
 static radio_recal_t recal_mode = RADIO_RECAL_ONCE;
-static uint32_t recal_centre_khz = 5787000;
+static uint32_t recal_center_khz = 5787000;
 static unsigned calibrated_mhz;
 
 static unsigned gain_max(void) {
@@ -102,9 +102,9 @@ const radio_caps_t *radio_caps(void) {
 
 const char *radio_phy_version(void) { return get_phy_version_str(); }
 
-void radio_set_recal(radio_recal_t mode, uint32_t centre_khz) {
+void radio_set_recal(radio_recal_t mode, uint32_t center_khz) {
     recal_mode = mode;
-    recal_centre_khz = centre_khz;
+    recal_center_khz = center_khz;
     calibrated_mhz = 0;
 }
 
@@ -160,7 +160,7 @@ static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us) {
         c5_cal_clear();
     }
     unsigned mhz = lo_khz / 1000u;
-    unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_centre_khz / 1000u : mhz;
+    unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_center_khz / 1000u : mhz;
     bool recalibrated = calibrated_mhz != cal_mhz;
     if (recalibrated) {
         if (recal_mode != RADIO_RECAL_CACHE || !c5_cal_restore(cal_mhz)) {
@@ -276,8 +276,8 @@ esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, 
 }
 
 esp_err_t radio_init(void) {
-    radio_set_recal(RADIO_RECAL_ONCE, recal_centre_khz);
-    return radio_tune(recal_centre_khz, 3000);
+    radio_set_recal(RADIO_RECAL_ONCE, recal_center_khz);
+    return radio_tune(recal_center_khz, 3000);
 }
 
 /* The dump only writes the upper half of the bank. The lower half is reserved

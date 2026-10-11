@@ -35,7 +35,7 @@ function roundStep(khz: number, step: number): number {
   return step <= 1 ? Math.trunc(khz) : Math.floor((khz + step / 2) / step) * step;
 }
 
-/** firmware place_lo(): the LO farthest from every channel's centre, keeping
+/** firmware place_lo(): the LO farthest from every channel's center, keeping
  *  all of them within max(span limit / 2, single offset) of it. */
 function placeLo(p: ProfileDef, khz: number[]): number {
   const d = Math.abs(p.singleLoOffsetKhz);

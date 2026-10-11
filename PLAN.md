@@ -9,7 +9,7 @@ The project has two parts:
 1. **Firmware** (PlatformIO + ESP-IDF). It reads raw I/Q samples through the ADC/DAC
    debug bypass that esp-sdr found, steps through a set of FPV channels one after
    another (round robin), and reports per channel: RSSI, noise floor, SNR, and the
-   estimated centre of the video signal. It also streams a reduced spectrum for
+   estimated center of the video signal. It also streams a reduced spectrum for
    display. Two targets share one codebase:
    - **ESP32-C5:** the real target. Raceband R1–R8 at 5.8 GHz.
    - **ESP32-S3:** a **scaled mock-up** of the C5 system in the 2.4 GHz ISM band.
@@ -19,7 +19,7 @@ The project has two parts:
    and debug/spectrum views (band panorama, waterfall, per-channel zoom, timing and
    health telemetry, and later intermodulation (IMD) statistics).
 
-**Main design rule:** everything band-specific (channel centres, window widths,
+**Main design rule:** everything band-specific (channel centers, window widths,
 LO plan, filter, sample rate, display span) lives in a **band profile** that the
 device sends to the UI. Firmware DSP and the web UI work only in Hz from that
 profile. The S3 and C5 then run the *same* scanner, metrics, protocol and UI code;
@@ -68,7 +68,7 @@ of the carrier.
 | Analog filter | mode 1, code 0 (≈ 48 MHz full width) |
 | Usable span per capture | ±24 MHz (filter) inside ±40 MHz Nyquist |
 | RSSI integration window | ±5 MHz |
-| Centre search window | ±12 MHz |
+| Center search window | ±12 MHz |
 | Pair-mode LOs | 5677 / 5751 / 5825 / 5899 MHz (the planner rounds the half-MHz midpoints up; channels at −19 / +18 MHz) |
 | FFT | 1024 points → 78.1 kHz bins; Welch 4 × 1024 from a 4096-sample snapshot |
 
@@ -83,7 +83,7 @@ scaled linearly onto 2400.0–2483.5 MHz (83.5 MHz):
 
 - Scale factor **k = 83.5 / 296 = 0.28209**
 - Spacing 37 × k = **10.4375 MHz**
-- Centre of channel *i* (*i* = 0…7) = 2400 + 5.21875 × (2*i* + 1) MHz
+- Center of channel *i* (*i* = 0…7) = 2400 + 5.21875 × (2*i* + 1) MHz
 
 | Ch | 5.8 GHz | 2.4 GHz mock (MHz) |
 |---|---|---|
@@ -132,7 +132,7 @@ share of the band, in channels, as on the C5:
 - **Test signals.** Real 2.4 GHz analog VTXs are about 18 MHz wide, i.e. not
   scaled. Test sources, best first:
   1. A spare ESP32 running a `testgen` env that transmits a CW tone, or slow-swept
-     tones, at the scaled channel centres (esp-sdr's PHY cert-test TX path; exact
+     tones, at the scaled channel centers (esp-sdr's PHY cert-test TX path; exact
      API to verify).
   2. A signal generator or HackRF, if available.
   3. Ambient Wi-Fi/BLE.
@@ -228,14 +228,14 @@ within 8 MHz). Three channels evenly over 40 MHz leave no gap within reach,
 so the LO sits 1 MHz off the middle channel; the outer channels sit 20 MHz
 out, so their ±5 MHz RSSI windows reach 25 MHz, past the ±24 MHz passband
 (and into the skirt measured above LO 5831 MHz, Status below).
-**Single mode:** LO = channel centre + profile `single_lo_offset_khz`.
+**Single mode:** LO = channel center + profile `single_lo_offset_khz`.
 
 The planner sorts the enabled channels by frequency and groups them greedily
 from the lowest (minimum hop count for fixed-width windows). For each group it
 tries an LO in the middle of every gap, at the single-mode offset outside
 either end, and at both ends of the allowed range; keeps those with every
 channel within max(span/2, single offset) of the LO; and picks the one
-farthest from the nearest channel centre, counting at most the single offset
+farthest from the nearest channel center, counting at most the single offset
 (ties: the smallest farthest offset). It outputs LOs with `(channel_id, offset_hz)`
 lists. The channel plan itself is the profile's default (R1–R8) or a
 `CHANNELS` list from the host. A panorama mode sweeps the whole profile band in
@@ -288,7 +288,7 @@ Target: ≤ 2.5 ms per hop, so ≥ 100 Hz per channel with all 8 enabled.
    - **RSSI**: integrated power over ±rssi_window, in dBFS, plus approximate dBm
      via the gain table and a user offset.
    - **Peak level**: highest bin in ±search_window, this hop.
-   - **Most occupied frequency, centre, occupied BW**: time-averaged (`metrics_avg_t`), because one 51 µs snapshot is shorter than a video line and catches the FM carrier at the picture level or the sync tip. Each SIGNAL hop's power more than 6 dB above the floor is normalised and binned into 64 bins across the search window, then averaged with weight 2^-shift (`AVG <shift>`, 4–8; default 7, ~2.3 s at 56 hops/s). Most occupied = the largest averaged bin (interpolated); centre = the same average of each hop's exact power-weighted centroid; occupied BW = the band holding 99 % of the averaged excess (low and high edges are reported). Without SIGNAL hops the average decays, and below 1/8 of its full level (after ~2.1 × 2^shift hops, ~4.8 s at the default) the channel reports no centre.
+   - **Most occupied frequency, center, occupied BW**: time-averaged (`metrics_avg_t`), because one 51 µs snapshot is shorter than a video line and catches the FM carrier at the picture level or the sync tip. Each SIGNAL hop's power more than 6 dB above the floor is normalised and binned into 64 bins across the search window, then averaged with weight 2^-shift (`AVG <shift>`, 4–8; default 7, ~2.3 s at 56 hops/s). Most occupied = the largest averaged bin (interpolated); center = the same average of each hop's exact power-weighted centroid; occupied BW = the band holding 99 % of the averaged excess (low and high edges are reported). Without SIGNAL hops the average decays, and below 1/8 of its full level (after ~2.1 × 2^shift hops, ~4.8 s at the default) the channel reports no center.
    - **Noise floor**: 20th percentile of the valid bins in the capture.
    - **Clear-channel floor**: EMA of RSSI, updated only while the channel is empty.
    - **SNR**.
@@ -429,13 +429,13 @@ sessions replay through the same parser.
 
 **Views:**
 1. **Connection bar:** versions, target, profile, link statistics, start/stop.
-2. **Channel grid:** per-channel enable toggle, RSSI bar, SNR, noise floor, centre
+2. **Channel grid:** per-channel enable toggle, RSSI bar, SNR, noise floor, center
    offset, OBW, flags, 10 s sparkline, update rate (Hz). Also shows the current LO
    plan.
 3. **Band panorama:** stitched spectrum with channel overlays, live trace,
    max-hold, average, persistence, and segment-age shading.
 4. **Waterfall.**
-5. **Channel zoom:** markers for nominal centre, peak, centroid, OBW edges, noise
+5. **Channel zoom:** markers for nominal center, peak, centroid, OBW edges, noise
    floor, DC and alias shading.
 6. **RSSI history:** lap-timer style, with threshold enter/exit detection.
 7. **IMD / step-on view:**
@@ -468,7 +468,7 @@ sessions replay through the same parser.
      practice;
    - gain index → dB;
    - leakage from a strong neighbour tone at ±15.7 MHz.
-4. `testgen` env: tone transmitter at the S-channel centres (verify the cert-test
+4. `testgen` env: tone transmitter at the S-channel centers (verify the cert-test
    TX API and its frequency granularity).
 
 ### Phase 1 — Scanner MVP (S3)
@@ -668,6 +668,15 @@ server drives it with only `SERIAL_PORTS` configured.
   that polls like the server (seat levels, EnterAt/ExitAt, level graph, passes
   with lap times). Through the bridge on the C5: 8 seats polled in a ~40 ms
   cycle, 0 failed reads in ~1000.
+- Saved defaults (2026-10-11): `CONFIG SAVE` (RotorHazard mode only; it starts
+  with `C` because `S` is a RotorHazard write command) keeps gain, FFT size,
+  capture length, metric and LO plan in NVS (namespace `widscan58`, blob `rh`,
+  versioned and range-checked on load). Boot and every `PROTOCOL RH` (or probe
+  takeover) apply them; a metric change resets the seats' levels. Every
+  `PROTOCOL MONITOR` applies `METRICS FULL`. The web UI no longer sends
+  `METRICS` on entering RotorHazard mode; it reads the metric from `CONFIG?`.
+  Checked on the C5: save, monitor round trip and reboot all bring back the
+  saved values; an unsaved change is dropped on the next `PROTOCOL RH`.
 - Not yet tested with a VTX flying through a gate: EnterAt/ExitAt calibration
   for real passes, pass-time accuracy vs RotorHazard's RX5808 nodes, and RSSI vs
   SNR as the level.
@@ -678,11 +687,11 @@ server drives it with only `SERIAL_PORTS` configured.
 - IQ zeroed: about as good as per-LO at R7 (not tried at R1).
 - IQ measured once at 5795 MHz, then DC-only per LO: R7 28–35 dB, R1 25–31 dB, the same as per-LO within the measurement. The −20 MHz point at R7 (22 dB in every mode) has the 5920 MHz board spur in its mirror band.
 - Pair-mode ghost (VTX close on R1, gain 50, R1 at about −8 dBFS): in GROUP R2 read ~20 dB below R1 (SNR 14, SIG 99 %); in SINGLE R2 was at the floor. It is R1's image (−19 → +19 MHz, inside R2's ±5 MHz window). Image rejection vs offset at fresh LOs was 40–50 dB, but 20.7 dB at the cached LO 5677. In 4 of 8 reboots the first calibration of 5677 had ~20 dB; `RECAL` gave 30–32 dB in every case (10 fresh calibrations at 5677: 37–40 dB by the raw-capture measure). Even then R2 stays ~13 dB over its floor with a VTX this strong. A moment-based digital IQ correction (E[I²], E[Q²], E[IQ] per capture) applied offline gave 55–58 dB at the same captures, the bad-calibration one included.
-- Now in the DSP (`IQCORR`, default on; `psd_iq_t`): pass 1 also sums I², Q², I·Q per segment; the centred moments are averaged per plan hop (weight 1/16 per segment, reset on config change and `RECAL`), and pass 2 rebuilds Q as c1·Q + c2·I (Q14; 1, 0 is bit-exact with it off). Estimates beyond a 0.7–1.4 gain ratio or |ρ| > 0.3 are ignored. A Python model of the integer path on the bad-calibration captures: 20.7 → 49–55 dB from the first capture (that calibration's error was mostly gain, Q ≈ 1.2 × I). Cost on the C5: DSP 3.72 → 3.90 ms per hop, hop 4.54 → 4.71 ms. No signal: floors, RSSI and its sd unchanged on all channels.
+- Now in the DSP (`IQCORR`, default on; `psd_iq_t`): pass 1 also sums I², Q², I·Q per segment; the centered moments are averaged per plan hop (weight 1/16 per segment, reset on config change and `RECAL`), and pass 2 rebuilds Q as c1·Q + c2·I (Q14; 1, 0 is bit-exact with it off). Estimates beyond a 0.7–1.4 gain ratio or |ρ| > 0.3 are ignored. A Python model of the integer path on the bad-calibration captures: 20.7 → 49–55 dB from the first capture (that calibration's error was mostly gain, Q ≈ 1.2 × I). Cost on the C5: DSP 3.72 → 3.90 ms per hop, hop 4.54 → 4.71 ms. No signal: floors, RSSI and its sd unchanged on all channels.
 - With the VTX on R1 (SNR 35–40 dB), GROUP, a bad first calibration after boot: R2 SNR 15.5–18.5 dB, SIG 100 % with it off; −0.7 dB, SIG 0 % with it on (toggled twice). With a good calibration: 0.5–2.2 dB off, −0.6 dB on. SINGLE (R2 on its own LO): −0.2 dB either way. `RAWIQ` stays uncorrected. Why the first calibration after boot is bad about half the time is still open.
 
 **Analog filter and R8 on the C5 (2026-10-08).**
-- The noise floor (dummy load) is flat to ±37 MHz at LOs up to 5830 MHz, but from 5831 MHz up it follows the filter skirt: −2.5 dB at ±22–28 MHz and −9.5 dB at ±34–40 MHz relative to the centre, with the centre level unchanged. The switch sits exactly between LO 5830 and 5831 MHz and is repeatable; recalibrating (`RECALMODE EVERY`) does not change it, and `FILTER 60` moves the skirt inward. So it is a PHY setting that changes with frequency (most likely inside `phy_set_chanfreq`; 5830 MHz is Wi-Fi channel 166, near the top of UNII-3), not RF roll-off. In Raceband it only affects the R7/R8 LO.
+- The noise floor (dummy load) is flat to ±37 MHz at LOs up to 5830 MHz, but from 5831 MHz up it follows the filter skirt: −2.5 dB at ±22–28 MHz and −9.5 dB at ±34–40 MHz relative to the center, with the center level unchanged. The switch sits exactly between LO 5830 and 5831 MHz and is repeatable; recalibrating (`RECALMODE EVERY`) does not change it, and `FILTER 60` moves the skirt inward. So it is a PHY setting that changes with frequency (most likely inside `phy_set_chanfreq`; 5830 MHz is Wi-Fi channel 166, near the top of UNII-3), not RF roll-off. In Raceband it only affects the R7/R8 LO.
 - Filter response, measured with board spurs as test tones (the LO stepped in 2 MHz steps so a spur crosses the baseband; spur peak level in 9.8 kHz bins, 3 captures per point; the 0 MHz point is lost to DC removal):
   - Above 5831 MHz (5920 MHz spur, clean): code 0 is −3 dB at ±23 MHz, −6 dB at ±26, −10 dB at ±29.5, −20 dB at ±34; code 20 is −3 dB at ±17.5, −6 dB at ±19.5.
   - Below 5831 MHz (5760 MHz spur; the spur level scatters ±3 dB from LO to LO, so only coarse edges): −6 dB below the passband plateau at about ±32 MHz for code 0, ±20 for code 20, ±14 for code 40 and ±12 for code 63. Code 0 looks somewhat wider here than above 5831, consistent with the flat floor.
@@ -696,9 +705,9 @@ server drives it with only `SERIAL_PORTS` configured.
 - Now skipped while `radio_tune` runs channel setup (`--wrap` of `ets_delay_us` and `phy_wifi_set_tx_gain_new`, gated by a flag): the 300 µs wait and the TX gain table. `c5_cal_restore` no longer rebuilds the gain table itself, since channel setup does (that was a duplicate ~160 µs per hop in `CACHE` mode). Full-spectrum comparison against the stock sequence at five LOs: floor within 0.07 dB, no new lines, same DC.
 - What remains in channel setup (~560 µs) is mostly the gain-table rebuild (~170 µs) and I2C register traffic. Further cuts would mean a PLL-only retune like the S3's (`phy_set_rf_freq_offset`), which skips the per-frequency settings that channel setup applies (band, pbus memory, RX compensation, the 5831 MHz filter change), so it needs care.
 
-**Peak, centre and occupied BW are time-averaged (2026-10-08).**
+**Peak, center and occupied BW are time-averaged (2026-10-08).**
 - With a VTX on R1 (SNR ~42 dB), the per-snapshot values scattered: peak sd 1.3 MHz, centroid sd 0.84 MHz, −10 dB width mostly 0.2–1.1 MHz. Recomputing them in Python from raw captures gave the same numbers, so the arithmetic was right; the definitions were the problem. A capture is 51 µs, less than one 64 µs line, and the carrier sat at about +1.5 MHz (picture level) with ~5 µs dips to −3.5 MHz (sync) every line, so each snapshot saw one or two of those.
-- Now (see §4.5): most occupied frequency +1.42 MHz (sd 0.02), centre −0.05 MHz (sd 0.07), 99 % band −4.26 … +4.73 MHz (8.98 MHz, sd 0.09). Channels without a signal report no centre. Cost ~70 µs per hop (metrics 0.33 → 0.40 ms, independent of the weight) and ~4 KB static RAM. Those numbers are at weight 1/32; the default is now 1/128 (`AVG 7`).
+- Now (see §4.5): most occupied frequency +1.42 MHz (sd 0.02), center −0.05 MHz (sd 0.07), 99 % band −4.26 … +4.73 MHz (8.98 MHz, sd 0.09). Channels without a signal report no center. Cost ~70 µs per hop (metrics 0.33 → 0.40 ms, independent of the weight) and ~4 KB static RAM. Those numbers are at weight 1/32; the default is now 1/128 (`AVG 7`).
 - The frame's `obw_hz` (u32) is now `obw_lo_khz`/`obw_hi_khz` (two int16, vs channel nominal); the UI shows "OBW 99 %" and draws the band in the zoom view.
 
 **Board spurs on the C5 (LO sweep, 2026-10-08).**
@@ -722,7 +731,7 @@ Next steps, in order:
    - **Test whether `RECALMODE CACHE` would help the S3.** On the S3, `CACHE` currently behaves like `EVERY` (no cache; its calibration snapshot layout is uninvestigated, §4.4). First repeat the C5 comparison of `ONCE` vs `EVERY` there: DC offset per LO across the band, and bursts of raised floor (dummy load, single mode, several `RECAL`s). If `EVERY` is clearly better, find what the S3 calibration writes (diff its `phy_param` areas as on the C5) and port the cache; if not, keep `ONCE`.
 8. **Bad first calibration after boot on the C5.** In 4 of 8 reboots the first calibration of LO 5677 left ~20 dB image rejection (mostly an I/Q gain error, Q ≈ 1.2 × I); `RECAL` always fixed it (37–40 dB). `CACHE` keeps a bad entry until `RECAL` or a tracking recalibration. `IQCORR` hides it from the scanner, but `RAWIQ` still shows it, and it may be related to the bursts of raised floor seen in the first ~20 calibrations of a session under `ONCE` ("Calibration on the C5"). Find out whether it is the first calibration after boot or the first per LO (log the IQ words at +222 per calibration), then fix it (e.g. a throw-away calibration in `radio_init`, or recalibrate when the IQ words are implausible).
 9. **IQ correction cost.** `IQCORR` adds ~0.17 ms per hop at 1024 points (3 multiplies per sample for the moments in pass 1, 2 in pass 2). Once a hop's estimate has settled, the moments could be updated on every Nth capture only, leaving just the pass-2 multiplies.
-10. **Revisit the IQ part of the PHY calibration.** With `IQCORR`, per-LO IQ calibration (a transmitted loopback tone each time) matters less. Options measured with the VTX: IQ once at the band centre then DC-only per LO matched per-LO IQ; startup IQ only (esp-sdr's policy) gave ~20 dB, which `IQCORR` should now fix up as well (untested). Either would also shrink cache entries to the DC tables.
+10. **Revisit the IQ part of the PHY calibration.** With `IQCORR`, per-LO IQ calibration (a transmitted loopback tone each time) matters less. Options measured with the VTX: IQ once at the band center then DC-only per LO matched per-LO IQ; startup IQ only (esp-sdr's policy) gave ~20 dB, which `IQCORR` should now fix up as well (untested). Either would also shrink cache entries to the DC tables.
 
 ## 7. Risks and open questions
 

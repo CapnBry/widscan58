@@ -91,9 +91,9 @@ for (const mode of ["SNR", "RSSI"]) {
     const st = window.widscan58.store;
     const m = st.lastMetrics;
     const c = m?.channels[0];
-    return { status: st.status?.metrics, mode: m?.mode, rssi: c?.rssi, snr: c?.snr, ema: c?.rssiEma, centre: c?.centroidOffHz };
+    return { status: st.status?.metrics, mode: m?.mode, rssi: c?.rssi, snr: c?.snr, ema: c?.rssiEma, center: c?.centroidOffHz };
   });
-  const ok = lv.status === mode && lv.mode === mode && Number.isFinite(lv.rssi) && lv.ema === null && lv.centre === null &&
+  const ok = lv.status === mode && lv.mode === mode && Number.isFinite(lv.rssi) && lv.ema === null && lv.center === null &&
     (mode === "SNR" ? Number.isFinite(lv.snr) : lv.snr === null);
   check(`METRICS ${mode} -> levels frames`, ok, JSON.stringify(lv));
   await page.screenshot({ path: path.join(out, `metrics-${mode.toLowerCase()}.png`), fullPage: true });
@@ -143,6 +143,38 @@ const enter0 = await page.evaluate(() => window.widscan58.app.rh.seats[0].enter)
 check("EnterAt edit reaches the seat", enter0 === 201, `seat 1 enter ${enter0}`);
 await page.evaluate(() => window.widscan58.app.rh.setThreshold(0, "enter", 190));
 await page.screenshot({ path: path.join(out, "rotorhazard.png"), fullPage: true });
+// Saved defaults: the device applies them on every PROTOCOL RH, and METRICS
+// FULL on PROTOCOL MONITOR. The device's own saved values are put back after.
+const rhCmd = (c) => page.evaluate((c) => window.widscan58.app.rh.command(c), c);
+const rhCfg = () => page.evaluate(() => ({ ...window.widscan58.app.rh.config, metric: window.widscan58.app.rh.metric }));
+const saved0 = await rhCfg();
+await rhCmd("FFT 256");
+await page.evaluate(() => window.widscan58.app.rh.setMetric("SNR"));
+const [saveBtn] = await page.$$("xpath/.//button[@title='Save these settings as default']");
+await saveBtn.click();
+await sleep(500);
+await rhCmd("FFT 512"); // not saved: gone after the next switch
+await menuPick("Monitor mode");
+await sleep(3000);
+const monMetrics = await page.evaluate(() => window.widscan58.store.status?.metrics);
+check("PROTOCOL MONITOR applies METRICS FULL", monMetrics === "FULL", `${monMetrics}`);
+await menuPick("RotorHazard mode");
+await sleep(3000);
+const reapplied = await rhCfg();
+check(
+  "PROTOCOL RH applies the saved settings",
+  reapplied.nfft === 256 && reapplied.metrics === "SNR" && reapplied.metric === "SNR",
+  JSON.stringify({ nfft: reapplied.nfft, metrics: reapplied.metrics, page: reapplied.metric }),
+);
+for (const c of [
+  `FFT ${saved0.nfft}`,
+  `CAPN ${saved0.capture_samples}`,
+  `MODE ${saved0.mode}`,
+  saved0.gain_mode === "MANUAL" ? `GAIN MANUAL ${saved0.gain}` : "GAIN HARDWARE",
+])
+  await rhCmd(c);
+await page.evaluate((m) => window.widscan58.app.rh.setMetric(m), saved0.metrics);
+await page.evaluate(() => window.widscan58.app.rh.saveDefaults());
 await menuPick("Monitor mode");
 await sleep(3000);
 s = await snap();

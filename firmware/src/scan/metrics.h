@@ -1,6 +1,6 @@
 /* Per-channel measurements from one PSD. Target independent. GPL-3.0-or-later.
  *
- * PSD convention (see psd.h): P[k] in natural order, k = 0 is -fs/2, centre bin
+ * PSD convention (see psd.h): P[k] in natural order, k = 0 is -fs/2, center bin
  * nfft/2 is the LO. Bins are integers; P[k] * scale is tone-normalised power: a
  * full-scale complex tone puts 1.0 (0 dBFS) in its bin. enbw_bins converts a
  * bin sum into band power. The per-bin work is integer (the C5 has no FPU);
@@ -47,12 +47,12 @@ typedef struct {
 
 /* Time-averaged occupancy of a channel's search window. One snapshot is too
  * short for analog FM video (51 us is less than a 64 us line: the carrier
- * sits at the picture level or the sync tip), so peak, centre and occupied
+ * sits at the picture level or the sync tip), so peak, center and occupied
  * band come from the excess power above the floor averaged over many hops.
  * Each SIGNAL hop's excess is normalised (every hop weighs the same) into
  * METRICS_AVG_BINS bins across the search window, then averaged with weight
  * 2^-avg_shift (default 7: ~2.3 s at 56 hops/s); peak and band come from these
- * bins (~375 kHz at +/-12 MHz). The centre is the same average of each hop's
+ * bins (~375 kHz at +/-12 MHz). The center is the same average of each hop's
  * exact centroid, so it does not inherit the bin width. Zero it to restart. */
 #define METRICS_AVG_BINS 64
 #define METRICS_AVG_SHIFT_MIN 4
@@ -60,7 +60,7 @@ typedef struct {
 #define METRICS_AVG_ONE 65536u /* one hop's normalised mass */
 typedef struct {
     uint32_t acc[METRICS_AVG_BINS];
-    float centre_sum, centre_weight; /* averaged centroid (Hz vs channel nominal) and its weight */
+    float center_sum, center_weight; /* averaged centroid (Hz vs channel nominal) and its weight */
 } metrics_avg_t;
 
 typedef struct {
@@ -70,7 +70,7 @@ typedef struct {
     float snr_db;
     float peak_db;           /* per-bin dBFS of the strongest bin in the search window (this hop) */
     /* Frequencies relative to channel nominal. With a metrics_avg_t: the most
-     * occupied frequency, the power-weighted centre and the band holding 99 %
+     * occupied frequency, the power-weighted center and the band holding 99 %
      * of the excess power, all time-averaged. Without one (a single
      * snapshot): the strongest bin, the centroid of bins above the centroid
      * threshold, and the -10 dB run of bins around the strongest. */

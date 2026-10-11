@@ -31,7 +31,7 @@ typedef enum { RADIO_GAIN_MANUAL, RADIO_GAIN_HARDWARE } radio_gain_mode_t;
 
 typedef enum {
     RADIO_RECAL_EVERY_LO,   /* full DC/IQ/gain-table calibration whenever the LO changes */
-    RADIO_RECAL_ONCE,       /* calibrate once at the band centre, then tune only */
+    RADIO_RECAL_ONCE,       /* calibrate once at the band center, then tune only */
     RADIO_RECAL_CACHE,      /* calibrate each LO once, then restore its saved calibration (C5, 5 GHz);
                              * elsewhere the same as EVERY_LO */
 } radio_recal_t;
@@ -43,7 +43,7 @@ const char *radio_phy_version(void);
 /* Tune the receive LO (a multiple of lo_step_khz). Applies gain and RX path
  * setup; waits settle_us. */
 esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us);
-void radio_set_recal(radio_recal_t mode, uint32_t centre_khz);
+void radio_set_recal(radio_recal_t mode, uint32_t center_khz);
 void radio_force_recal(void);
 
 /* -1 = PHY calibrated automatic filter. Applied around each capture only. */

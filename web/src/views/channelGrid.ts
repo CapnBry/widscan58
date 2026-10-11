@@ -1,4 +1,4 @@
-// Per-channel tiles: enable toggle, RSSI bar, SNR, floor, centre offset, sparkline.
+// Per-channel tiles: enable toggle, RSSI bar, SNR, floor, center offset, sparkline.
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
 import { smoothedSeries } from "../model/store";
@@ -174,7 +174,7 @@ export class ChannelGrid implements View {
         ["SNR", m.snr === null ? "" : `${m.snr.toFixed(1)} dB`],
         ["floor", m.floor === null ? "" : `${m.floor.toFixed(1)}`],
         ["clear", m.clearFloor === null ? (m.rssiEma === null ? "" : "—") : m.clearFloor.toFixed(1)],
-        ["centre", m.centroidOffHz === null ? "" : occ ? `${m.centroidOffHz >= 0 ? "+" : ""}${(m.centroidOffHz / 1000).toFixed(0)} kHz` : "—"],
+        ["center", m.centroidOffHz === null ? "" : occ ? `${m.centroidOffHz >= 0 ? "+" : ""}${(m.centroidOffHz / 1000).toFixed(0)} kHz` : "—"],
         ["OBW 99 %", m.obwLoHz === null || m.obwHiHz === null ? "" : occ ? `${((m.obwHiHz - m.obwLoHz) / 1e6).toFixed(2)} MHz` : "—"],
       ];
       tile.kv.replaceChildren(...rows.flatMap(([k, v]) => [el("span", {}, k), el("span", {}, v)]));

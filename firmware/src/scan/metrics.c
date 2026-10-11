@@ -48,8 +48,8 @@ float metrics_percentile_bias(unsigned segments, float q) {
 }
 
 uint32_t metrics_floor_raw(const metrics_input_t *in, float q, uint32_t *scratch) {
-    const int centre = (int)(in->nfft / 2), pb = (int)(in->passband_hz / in->bin_hz);
-    int k0 = centre - pb, k1 = centre + pb;
+    const int center = (int)(in->nfft / 2), pb = (int)(in->passband_hz / in->bin_hz);
+    int k0 = center - pb, k1 = center + pb;
     if (k0 < 0) k0 = 0;
     if (k1 > (int)in->nfft - 1) k1 = (int)in->nfft - 1;
     unsigned n = 0;
@@ -71,15 +71,15 @@ void metrics_floor(const metrics_input_t *in, float q, uint32_t *scratch, metric
  * after ~2.1 * 2^avg_shift hops. The decay rounds up so a bin always
  * reaches 0. */
 static void metrics_avg_update(const metrics_input_t *in, int k0, int k1, uint32_t thresh, uint32_t floor_u,
-                               uint64_t total, float centre_hz, metrics_avg_t *avg) {
+                               uint64_t total, float center_hz, metrics_avg_t *avg) {
     const unsigned shift = in->avg_shift;
     const float keep = 1.0f - 1.0f / (float)(1u << shift);
     for (unsigned c = 0; c < METRICS_AVG_BINS; c++) avg->acc[c] -= (avg->acc[c] + (1u << shift) - 1) >> shift;
-    avg->centre_sum *= keep;
-    avg->centre_weight *= keep;
+    avg->center_sum *= keep;
+    avg->center_weight *= keep;
     if (!total) return;
-    avg->centre_sum += centre_hz;
-    avg->centre_weight += 1.0f;
+    avg->center_sum += center_hz;
+    avg->center_weight += 1.0f;
     uint64_t sums[METRICS_AVG_BINS] = {0};
     const unsigned n = (unsigned)(k1 - k0 + 1);
     for (int k = k0; k <= k1; k++) {
@@ -91,7 +91,7 @@ static void metrics_avg_update(const metrics_input_t *in, int k0, int k1, uint32
         if (sums[c]) avg->acc[c] += (uint32_t)((sums[c] * METRICS_AVG_ONE + total / 2) / total);
 }
 
-/* Peak, centre and 99 % band of the averaged occupancy. lo_hz: the low edge
+/* Peak, center and 99 % band of the averaged occupancy. lo_hz: the low edge
  * of the window relative to channel nominal; span_hz: its width. */
 static void metrics_avg_read(const metrics_avg_t *avg, unsigned shift, float lo_hz, float span_hz,
                              metrics_channel_t *out) {
@@ -116,7 +116,7 @@ static void metrics_avg_read(const metrics_avg_t *avg, unsigned shift, float lo_
         if (den < 0) frac = 0.5f * (a - c) / den;
     }
     out->peak_off_hz = lo_hz + (peak_c + 0.5f + frac) * w;
-    out->centroid_off_hz = avg->centre_sum / avg->centre_weight;
+    out->centroid_off_hz = avg->center_sum / avg->center_weight;
     /* Edges where the cumulative share crosses 0.5 % and 99.5 %, interpolated within the bin. */
     const uint64_t lo_mass = sum / 200, hi_mass = sum - sum / 200;
     uint64_t cum = 0;
@@ -139,14 +139,14 @@ void metrics_channel(const metrics_input_t *in, const metrics_floor_t *fl, int32
                      metrics_avg_t *avg, metrics_channel_t *out) {
     memset(out, 0, sizeof(*out));
     const float off = (float)offset_hz;
-    const int centre = (int)(in->nfft / 2), last = (int)in->nfft - 1;
-    int k0 = centre + (int)floorf((off - in->search_hz) / in->bin_hz);
-    int k1 = centre + (int)ceilf((off + in->search_hz) / in->bin_hz);
+    const int center = (int)(in->nfft / 2), last = (int)in->nfft - 1;
+    int k0 = center + (int)floorf((off - in->search_hz) / in->bin_hz);
+    int k1 = center + (int)ceilf((off + in->search_hz) / in->bin_hz);
     if (k0 < 0) k0 = 0;
     if (k1 > last) k1 = last;
-    /* RSSI window: bins whose centre is within +/- rssi_hz of the channel. */
-    int r0 = centre + (int)ceilf((off - in->rssi_hz) / in->bin_hz);
-    int r1 = centre + (int)floorf((off + in->rssi_hz) / in->bin_hz);
+    /* RSSI window: bins whose center is within +/- rssi_hz of the channel. */
+    int r0 = center + (int)ceilf((off - in->rssi_hz) / in->bin_hz);
+    int r1 = center + (int)floorf((off + in->rssi_hz) / in->bin_hz);
     if (r0 < k0) r0 = k0;
     if (r1 > k1) r1 = k1;
     const unsigned total = r1 >= r0 ? (unsigned)(r1 - r0 + 1) : 0;
@@ -188,26 +188,26 @@ void metrics_channel(const metrics_input_t *in, const metrics_floor_t *fl, int32
         if (den < 0) frac = 0.5f * (a - c) / den;
     }
     out->peak_db = metrics_db((float)peak * in->scale);
-    out->peak_off_hz = (peak_k - centre + frac) * in->bin_hz - off;
+    out->peak_off_hz = (peak_k - center + frac) * in->bin_hz - off;
 
     /* Centroid of excess power above the floor. */
     const float thresh_f = fl->floor_units * in->centroid_ratio;
     const uint32_t thresh = thresh_f >= 4294967040.0f ? UINT32_MAX : (uint32_t)thresh_f;
     const uint32_t floor_u = fl->floor_units >= 4294967040.0f ? UINT32_MAX : (uint32_t)fl->floor_units;
     uint64_t wsum = 0;
-    int64_t ksum = 0; /* sum of w * (k - centre) */
+    int64_t ksum = 0; /* sum of w * (k - center) */
     for (int k = k0; k <= k1; k++) {
         uint32_t p = in->p[k];
         if (!in->valid[k] || p <= thresh || p <= floor_u) continue;
         uint32_t w = p - floor_u;
         wsum += w;
-        ksum += (int64_t)w * (k - centre);
+        ksum += (int64_t)w * (k - center);
     }
     if (avg) {
         const bool add = (out->flags & CHF_SIGNAL) && wsum;
         metrics_avg_update(in, k0, k1, thresh, floor_u, add ? wsum : 0,
                            add ? (float)((double)ksum / (double)wsum * in->bin_hz - off) : 0, avg);
-        metrics_avg_read(avg, in->avg_shift, (k0 - centre - 0.5f) * in->bin_hz - off,
+        metrics_avg_read(avg, in->avg_shift, (k0 - center - 0.5f) * in->bin_hz - off,
                          (float)(k1 - k0 + 1) * in->bin_hz, out);
         return;
     }
@@ -219,17 +219,17 @@ void metrics_channel(const metrics_input_t *in, const metrics_floor_t *fl, int32
     int l = peak_k, r = peak_k;
     while (l > k0 && in->valid[l - 1] && in->p[l - 1] > edge) l--;
     while (r < k1 && in->valid[r + 1] && in->p[r + 1] > edge) r++;
-    out->obw_lo_off_hz = (l - centre - 0.5f) * in->bin_hz - off;
-    out->obw_hi_off_hz = (r - centre + 0.5f) * in->bin_hz - off;
+    out->obw_lo_off_hz = (l - center - 0.5f) * in->bin_hz - off;
+    out->obw_hi_off_hz = (r - center + 0.5f) * in->bin_hz - off;
 }
 
 void metrics_level(const metrics_input_t *in, uint32_t floor_raw, int32_t offset_hz, metrics_level_t *out) {
     out->flags = 0;
-    const int centre = (int)(in->nfft / 2), last = (int)in->nfft - 1;
-    /* Bins whose centre is within +/- rssi_hz of the channel, as metrics_channel. */
+    const int center = (int)(in->nfft / 2), last = (int)in->nfft - 1;
+    /* Bins whose center is within +/- rssi_hz of the channel, as metrics_channel. */
     const float off = (float)offset_hz;
-    int r0 = centre + (int)ceilf((off - in->rssi_hz) / in->bin_hz);
-    int r1 = centre + (int)floorf((off + in->rssi_hz) / in->bin_hz);
+    int r0 = center + (int)ceilf((off - in->rssi_hz) / in->bin_hz);
+    int r1 = center + (int)floorf((off + in->rssi_hz) / in->bin_hz);
     if (r0 < 0) r0 = 0;
     if (r1 > last) r1 = last;
     const unsigned total = r1 >= r0 ? (unsigned)(r1 - r0 + 1) : 0;

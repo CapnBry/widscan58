@@ -11,7 +11,7 @@ typedef struct {
     uint32_t lo_khz;
     uint8_t nch;
     uint8_t ch[PLAN_MAX_PER_LO];       /* channel plan indices */
-    int32_t offset_hz[PLAN_MAX_PER_LO]; /* channel centre - LO */
+    int32_t offset_hz[PLAN_MAX_PER_LO]; /* channel center - LO */
 } plan_hop_t;
 
 typedef struct {

@@ -56,7 +56,7 @@ typedef struct __attribute__((packed)) {
     int16_t clear_floor_cdb; /* slow average of RSSI while the channel is empty */
     int16_t peak_cdb;        /* strongest bin this hop, per-bin dBFS */
     /* Time-averaged occupancy (metrics.h, metrics_avg_t), vs channel nominal:
-     * the most occupied frequency, the power-weighted centre, and the band
+     * the most occupied frequency, the power-weighted center, and the band
      * holding 99 % of the power above the floor. */
     int32_t peak_off_hz;
     int32_t centroid_off_hz;
@@ -68,7 +68,7 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint32_t seq;
     uint32_t lo_khz;
-    int32_t start_off_hz;    /* centre of first bin relative to the LO */
+    int32_t start_off_hz;    /* center of first bin relative to the LO */
     uint32_t bin_hz;
     uint16_t n;
     uint8_t detector;        /* 0 mean, 1 max */

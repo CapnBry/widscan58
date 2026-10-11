@@ -9,7 +9,7 @@
 
 typedef struct {
     char name[6];
-    uint32_t khz;          /* nominal centre */
+    uint32_t khz;          /* nominal center */
 } profile_channel_t;
 
 typedef struct {

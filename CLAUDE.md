@@ -8,7 +8,7 @@ device commands and tests. The user-facing description is in
 FPV channel scanner using the ESP32's built-in radio as an SDR, through the raw
 I/Q debug path found by [ESPARGOS/esp-sdr](https://github.com/ESPARGOS/esp-sdr).
 The firmware steps through up to eight FPV channels and reports RSSI, noise
-floor, SNR, peak and video-centre frequency per channel, plus a decimated
+floor, SNR, peak and video-center frequency per channel, plus a decimated
 spectrum. A Web Serial dashboard shows it all live. In RotorHazard mode the
 board is a RotorHazard timer node instead: one USB port with a seat per channel
 (see "RotorHazard mode" below).
@@ -144,7 +144,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 |---|---|
 | `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration (including `rawiq_max`), band profile, DSP time breakdown, masked board spurs |
 | `CHANNELS <name>=<MHz> …`, `CHANNELS DEFAULT` | Channel plan: up to 8 channels by their 5.8 GHz frequency, e.g. `CHANNELS R1=5658 A8=5725` (the S3 maps them into its scaled band). Ids follow the order given; all are enabled. The UI's Channels → Edit sends this on every connect |
-| `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R and E take 4), keeping it clear of every channel centre where it can; `SINGLE` gives each channel its own LO |
+| `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R and E take 4), keeping it clear of every channel center where it can; `SINGLE` gives each channel its own LO |
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
@@ -155,9 +155,10 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `IQCORR 0\|1` | Digital IQ imbalance correction before the FFT (default 1). Removes the mirror image of strong signals, e.g. R1 showing on R2 in pair mode. |
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. |
-| `AVG <shift>` | Averaging of the reported most-occupied frequency, centre and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
-| `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `CAPN`, `FILTER`, `IQCORR` and `MODE GROUP\|SINGLE` work; the rest answer `ERR rh_mode` |
+| `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
+| `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
+| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `CAPN`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them. Without a save: `FFT 128`, `CAPN 512`, `METRICS RSSI`, `MODE GROUP`, the default gain |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `CAPN`, `FILTER`, `IQCORR` and `MODE GROUP\|SINGLE` work; the rest answer `ERR rh_mode` |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
 ## RotorHazard mode
@@ -173,7 +174,9 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   unknown frequency (RotorHazard writes 1111 for "off") is left out of the scan
   plan. The defaults in this mode: `FFT 128`, `CAPN 512`, `METRICS RSSI`, no
   display spectrum; with R1–R6 that is ~3.5 ms between updates of a seat
-  (~285 /s).
+  (~285 /s). `CONFIG SAVE` replaces the gain, FFT, capture, metric and LO
+  plan defaults (NVS, `commands.c`); they are applied on every switch to this
+  mode.
 - **Levels** are the `METRICS` byte codes: RSSI (dBFS = code / 2 − 127.5) or SNR
   (dB = code / 2), clamped to 1–254. `METRICS RSSI|SNR` picks one and resets the
   seats' levels. EnterAt/ExitAt are in the same codes (defaults before the
@@ -203,6 +206,8 @@ npm run dev                         # http://localhost:5808 (Web Serial: Chrome/
   EnterAt/ExitAt (editable, "now" = average of the last second, kept per metric
   in localStorage and written on connect), a level graph with passes, the
   detection events with lap times, and the receiver settings this mode allows.
+  The page takes the metric and receiver settings from the device (`CONFIG?`)
+  and never sets them on connect; Receiver → Save sends `CONFIG SAVE`.
   Seats take the channels of the shared channel plan in frequency order (Edit
   channels). Disconnect before a RotorHazard server opens the port.
 - **Connect device**: Web Serial. Chrome, Edge, Firefox and Android Chrome all

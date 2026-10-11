@@ -6,7 +6,12 @@
  * switch with PROTOCOL MONITOR (allowed in RotorHazard mode, see
  * rh_allowed). In monitor mode a lone RotorHazard probe byte after an idle
  * line switches back, so a server can take over a port a monitor left
- * streaming. */
+ * streaming.
+ *
+ * RotorHazard's UI can't set our receiver settings, so CONFIG SAVE keeps
+ * RotorHazard mode's gain, FFT size, capture length, level metric and LO
+ * plan in NVS; every switch to RotorHazard mode (and boot) applies them.
+ * A switch to monitor mode applies METRICS FULL. */
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -18,6 +23,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "commands.h"
 #include "frames.h"
 #include "link.h"
@@ -94,15 +100,80 @@ static void rh_defaults(scan_config_t *c) {
     rh_apply_plan(c);
 }
 
+/* RotorHazard mode settings saved by CONFIG SAVE (NVS blob, layout by version). */
+#define RH_SAVED_VERSION 1
+typedef struct {
+    uint8_t version;
+    uint8_t gain_mode, gain, metrics_mode, mode;
+    uint16_t nfft, capture_samples;
+} rh_saved_t;
+static rh_saved_t rh_saved; /* applied on every switch to RotorHazard mode */
+#define NVS_NAMESPACE "widscan58"
+#define NVS_KEY_RH "rh"
+
+static void rh_saved_from(rh_saved_t *s, const scan_config_t *c) {
+    *s = (rh_saved_t){.version = RH_SAVED_VERSION, .gain_mode = (uint8_t)c->gain_mode, .gain = c->gain,
+                      .metrics_mode = c->metrics_mode, .mode = (uint8_t)c->mode, .nfft = c->nfft,
+                      .capture_samples = c->capture_samples};
+}
+
+static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
+    c->gain_mode = (radio_gain_mode_t)s->gain_mode;
+    c->gain = s->gain;
+    c->metrics_mode = s->metrics_mode;
+    c->mode = (plan_mode_t)s->mode;
+    c->nfft = s->nfft;
+    c->capture_samples = s->capture_samples;
+}
+
+/* The same limits as the commands that set these. */
+static bool rh_saved_valid(const rh_saved_t *s) {
+    return s->version == RH_SAVED_VERSION &&
+           (s->gain_mode == RADIO_GAIN_HARDWARE || (s->gain_mode == RADIO_GAIN_MANUAL && s->gain <= radio_caps()->gain_max)) &&
+           (s->metrics_mode == METRICS_RSSI || s->metrics_mode == METRICS_SNR) &&
+           (s->mode == PLAN_GROUP || s->mode == PLAN_SINGLE) && s->nfft >= 128 && s->nfft <= PSD_MAX_FFT &&
+           !(s->nfft & (s->nfft - 1)) && s->capture_samples >= 256 && s->capture_samples <= radio_caps()->max_samples;
+}
+
+/* rh_saved from NVS; left alone (the defaults) when there is none. */
+static void rh_saved_load(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+    rh_saved_t s;
+    size_t len = sizeof(s);
+    if (nvs_get_blob(h, NVS_KEY_RH, &s, &len) == ESP_OK && len == sizeof(s) && rh_saved_valid(&s)) rh_saved = s;
+    nvs_close(h);
+}
+
+static esp_err_t rh_saved_store(const rh_saved_t *s) {
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, NVS_KEY_RH, s, sizeof(*s));
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
+/* Switch protocols, or with p == proto just apply the mode's settings again. */
 static void set_proto(proto_t p) {
-    if (p == proto) return;
-    scan_config_t cur, next = other_cfg;
+    scan_config_t cur, next;
     scanner_get_config(&cur);
-    other_cfg = cur;
+    if (p == proto) {
+        next = cur;
+    } else {
+        next = other_cfg;
+        other_cfg = cur;
+    }
     if (p == PROTO_RH) {
+        uint8_t was = next.metrics_mode;
+        rh_saved_apply(&next, &rh_saved);
+        if (next.metrics_mode != was) rh_reset_levels(); /* RSSI and SNR codes don't compare */
         rh_apply_plan(&next); /* the seats may have changed meanwhile */
         link_set_streaming(false);
         link_flush();
+    } else {
+        next.metrics_mode = METRICS_FULL;
     }
     scanner_set_config(&next);
     if (p == PROTO_MONITOR) link_set_streaming(true);
@@ -115,7 +186,7 @@ static void set_proto(proto_t p) {
 static bool rh_allowed(const char *line) {
     static const char *const exact[] = {"PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?",
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
-                                        "FILTER AUTO", "MODE GROUP", "MODE SINGLE"};
+                                        "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE"};
     static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "CAPN ", "FILTER ", "IQCORR "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;
@@ -216,6 +287,15 @@ static void handle(char *line) {
         link_text("OK\n");
     } else if (!strcmp(line, "STATUS?") || !strcmp(line, "CONFIG?")) {
         send_status(line[0] == 'S' ? "STATUS" : "CONFIG");
+    } else if (!strcmp(line, "CONFIG SAVE")) {
+        /* Starts with 'C', not 'S': RotorHazard mode reads 'A'..'P' as ours. */
+        if (proto != PROTO_RH) { link_text("ERR rh_only\n"); return; }
+        rh_saved_t s;
+        rh_saved_from(&s, &c);
+        esp_err_t e = rh_saved_store(&s);
+        if (e != ESP_OK) { link_printf("ERR save %s\n", esp_err_to_name(e)); return; }
+        rh_saved = s;
+        link_text("OK\n");
     } else if (!strcmp(line, "PROTOCOL?")) {
         link_printf("PROTOCOL %s\n", proto == PROTO_RH ? "RH" : "MONITOR");
     } else if (!strcmp(line, "PROTOCOL RH") || !strcmp(line, "PROTOCOL MONITOR")) {
@@ -475,6 +555,9 @@ void commands_task_start(void) {
     scanner_get_config(&c);
     other_cfg = c;
     rh_defaults(&c);
+    rh_saved_from(&rh_saved, &c);
+    rh_saved_load();
+    rh_saved_apply(&c, &rh_saved);
     scanner_set_config(&c);
     link_set_streaming(false);
     xTaskCreatePinnedToCore(commands_task, "cmd", 6144, NULL, 6, NULL, portNUM_PROCESSORS - 1);

@@ -213,7 +213,7 @@ static void test_metrics_level(void) {
 
 /* FM-video-like occupancy: one tone that sits at +1.5 MHz on three hops out
  * of four and at -3.5 MHz (sync) on the fourth. The average sees both: the
- * peak at +1.5, the centre at the time-weighted mean, and the 99 % band
+ * peak at +1.5, the center at the time-weighted mean, and the 99 % band
  * across both tones. Then noise only: it fades to NO_CENTROID. */
 static void test_metrics_avg(void) {
     enum { N = 1024 };

@@ -4,13 +4,11 @@
 
 Widscan58 uses the Wi-Fi radio inside the ESP32-C5 as a software-defined radio.
 Instead of decoding Wi-Fi, it reads raw I/Q samples straight from the radio,
-steps through FPV video channels, and shows what is on each one: signal
-strength, noise floor, SNR, where the video signal actually sits, and a live
-spectrum of the whole band. Use it at the field to find a clear channel, check
-pilot VTX frequencies, or see who is stepping on whom.
+and shows what is on each FPV video channel: signal strength, noise floor, SNR,
+video bandwidth / peak, and a live spectrum of the whole band.
+Use it at the field to find a clear channel or check pilot VTX frequencies from the web browser interface.
 
-There is nothing to install. The dashboard runs in your browser and talks to the
-C5 over USB.
+The device can also act as an 8 channel RX5808 array for RotorHazard race timing.
 
 ## ▶ [Open the live web UI](https://capnbry.github.io/widscan58/)
 
@@ -26,30 +24,29 @@ second.*
 ## Features
 
 - **Eight channels at once.** Raceband by default, or any eight channels from
-  bands A, B, E, F and R. Each one updates about 50 times a second.
-- **Per-channel readings:** RSSI, noise floor, SNR, the measured centre of the
-  video signal (so you can spot a VTX that is off frequency), and the 99 %
+  bands A, B, E, F and R. Each one updates about 50 times a second in monitor mode.
+- **Per-channel readings:** RSSI, noise floor, SNR, the measured center of the
+  video signal (to spot a VTX that is off frequency), and the 99 %
   occupied bandwidth.
 - **Band panorama:** one spectrum stitched together across the whole band, with
   max-hold and average traces, plus a waterfall underneath.
 - **Channel zoom:** a close-up spectrum of the selected channel with markers for
-  the nominal frequency, the measured centre and the occupied band.
+  the nominal frequency, the measured center and the occupied band.
 - **RSSI history:** a lap-timer style graph of every channel over the last 30 s
   or more.
-- **Channel editor:** pick your channels on a frequency chart that looks like
-  the usual FPV band charts, or select a whole band with one click.
 - **Flash from the browser:** the page installs the firmware on the board, so you
   don't need a toolchain.
 - **Simulator:** press *Simulate* to try the whole UI without any hardware.
 - **Record and replay** a session to a file.
-- **RotorHazard timer node:** switch the page (☰ menu) to RotorHazard mode and
-  the board becomes an 8-seat receiver for [RotorHazard](https://github.com/RotorHazard/RotorHazard)
-  lap timing, on one USB port. The page shows each seat's level, lets you set
-  the EnterAt/ExitAt thresholds and lists detected passes; then connect the
-  board to your RotorHazard server instead (add its port to `SERIAL_PORTS` in
-  the server's config).
+- **[RotorHazard](https://github.com/RotorHazard/RotorHazard) timer node:** 
+  automatically switches to an 8-seat receiver for lap timing.
+  The webui shows each seat's level, lets you set the receiver gain and reporting mode (RSSI vs SNR).
+  Then connect the board to your RotorHazard server (add its port to `SERIAL_PORTS` in
+  the server's config). Runs at 200 updates a secon in 8 seat mode, over 1000 Hz in single channel mode.
 - **Deep diagnostics** for the curious: hop timing, raw I/Q snapshots with a
   constellation view, scanner settings and a command console.
+- **Channel editor:** pick your channels on a frequency chart that looks like
+  the usual FPV band charts, or select a whole band with one click.
 
 ![The channel editor: Raceband selected on a 5.6–5.95 GHz frequency chart](images/channel-editor.png)
 
@@ -80,8 +77,7 @@ Widscan58 would not exist without
 **[ESPARGOS](https://github.com/ESPARGOS)** team. They found the hidden debug
 path that lets an ESP32 capture raw I/Q samples from its own radio, and they
 published the code that drives it. The radio capture, tuning and calibration
-code in this project, and the S3's SIMD FFT, come from or build on their work. If you like this project, go look at theirs: it is a remarkable
-piece of reverse engineering, and they are awesome.
+code in this project, and the S3's SIMD FFT, come from or build on their work. If you like this project, go look at theirs: it is a remarkable piece of reverse engineering, and they are awesome.
 
 This project is almost entirely written by AI apart from the esp-sdr source.
 

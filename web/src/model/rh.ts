@@ -3,7 +3,8 @@
 // queued peak/nadir), and turns that into levels, crossings and passes for
 // the views. Seat frequencies come from the shared channel plan; thresholds
 // are kept per metric in localStorage and written on every start, as the
-// server writes its profile's. GPL-3.0-or-later.
+// server writes its profile's. The receiver settings and the level metric
+// are the device's own (its saved defaults, CONFIG SAVE). GPL-3.0-or-later.
 import type { Device } from "../serial/device";
 import type { RhLink } from "../serial/rhLink";
 import { Series, type Store } from "./store";
@@ -72,7 +73,6 @@ export class RhModel {
     try {
       const saved = JSON.parse(localStorage.getItem(KEY) ?? "null");
       if (saved?.thresholds) Object.assign(this.thresholds, saved.thresholds);
-      if (saved?.metric === "SNR") this.metric = "SNR";
     } catch {
       /* storage unavailable or corrupt */
     }
@@ -87,7 +87,7 @@ export class RhModel {
 
   private save() {
     try {
-      localStorage.setItem(KEY, JSON.stringify({ thresholds: this.thresholds, metric: this.metric }));
+      localStorage.setItem(KEY, JSON.stringify({ thresholds: this.thresholds }));
     } catch {
       /* storage unavailable */
     }
@@ -120,7 +120,6 @@ export class RhModel {
       if (rev[0] !== RH_API_MARKER) throw new Error(`unexpected revision code ${rev[0]}.${rev[1]}`);
       const count = (await this.link.read(RH.READ_MULTINODE_COUNT, 1))[0];
       if (count < RH_SEATS) throw new Error(`device reports ${count} seats`);
-      await this.text(`METRICS ${this.metric}`);
       await this.refreshConfig();
       await this.writeSeats(channels);
     } catch (e) {
@@ -149,10 +148,25 @@ export class RhModel {
     return reply;
   }
 
+  /** CONFIG?, taking the level metric from it. */
   async refreshConfig() {
     const reply = await this.text("CONFIG?");
     this.config = JSON.parse(reply.slice(reply.indexOf(" ") + 1));
+    const m = this.config?.metrics;
+    if ((m === "RSSI" || m === "SNR") && m !== this.metric) {
+      this.metric = m;
+      this.loadThresholds();
+      for (const s of this.seats) {
+        s.history.clear();
+        s.peaks = [];
+      }
+    }
     this.store.touch();
+  }
+
+  /** Make the current receiver settings and metric the device's RotorHazard mode defaults. */
+  async saveDefaults() {
+    await this.command("CONFIG SAVE");
   }
 
   /** Our command lines allowed in this mode (rh_allowed in commands.c). */
@@ -213,16 +227,9 @@ export class RhModel {
   }
 
   async setMetric(m: RhMetric) {
-    if (m === this.metric) return;
-    this.metric = m;
-    this.save();
-    this.loadThresholds();
-    for (const s of this.seats) {
-      s.history.clear();
-      s.peaks = [];
-    }
-    if (!this.link) return;
-    await this.command(`METRICS ${m}`);
+    if (m === this.metric || !this.link) return;
+    await this.command(`METRICS ${m}`); // the CONFIG? reply switches this.metric and the thresholds
+    if (this.metric !== m || !this.link) return;
     for (const s of this.seats) {
       await this.link.write(RH.WRITE_CURNODE_INDEX, [s.index]);
       await this.link.write(RH.WRITE_ENTER_AT_LEVEL, [s.enter]);
@@ -268,7 +275,7 @@ export class RhModel {
     const ms = ((t[0] << 24) | (t[1] << 16) | (t[2] << 8) | t[3]) >>> 0;
     if (this.deviceMs >= 0 && ms < this.deviceMs) {
       this.store.addLog("info", "RotorHazard: device restarted; setting the seats up again");
-      await this.text(`METRICS ${this.metric}`);
+      await this.refreshConfig(); // its saved settings, maybe another metric
       await this.writeSeats(this.seats.map((s) => s.channel ?? ""));
       for (const s of this.seats) s.lapId = null;
     }

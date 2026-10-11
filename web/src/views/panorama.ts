@@ -37,7 +37,7 @@ export function composite(app: App, f0: number, f1: number, n: number): Composit
   const segs: Segment[] = [...app.store.segments.values()];
   for (const s of segs) {
     const sp = s.latest;
-    const start = sp.loKhz + sp.startOffHz / 1000; // centre of bin 0
+    const start = sp.loKhz + sp.startOffHz / 1000; // center of bin 0
     const bin = sp.binHz / 1000;
     const fl = app.store.floorByLo.get(sp.loKhz);
     for (let x = 0; x < n; x++) {
@@ -394,7 +394,7 @@ export class Panorama implements View {
       s.ctx.fillText(`-${(now - tt).toFixed(1)}s`, wa.left - 6, wa.top + y);
     }
     s.ctx.textBaseline = "top";
-    // Channel centre ticks along the bottom.
+    // Channel center ticks along the bottom.
     const p = store.profile!;
     s.ctx.textAlign = "center";
     s.ctx.textBaseline = "top";

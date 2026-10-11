@@ -49,7 +49,7 @@ typedef struct {
  * all are. The PHY's own IQ calibration leaves ~20-40 dB of image rejection;
  * this gave 55-58 dB on the C5 (PLAN.md, image rejection). */
 typedef struct {
-    float ii, qq, iq; /* averaged centred moments, counts^2 */
+    float ii, qq, iq; /* averaged centered moments, counts^2 */
     bool init;
 } psd_iq_t;
 

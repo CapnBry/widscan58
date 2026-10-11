@@ -30,7 +30,7 @@ typedef struct {
     float rssi_ema;
     float clear_floor;
     bool clear_init;
-    metrics_avg_t avg; /* time-averaged occupancy: peak, centre, occupied band */
+    metrics_avg_t avg; /* time-averaged occupancy: peak, center, occupied band */
 } channel_state_t;
 
 static struct {

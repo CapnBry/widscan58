@@ -69,7 +69,7 @@ static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
 static unsigned gain_code = 60;
 static int filter_code = -1;
 static radio_recal_t recal_mode = RADIO_RECAL_ONCE;
-static uint32_t recal_centre_khz = 2442000;
+static uint32_t recal_center_khz = 2442000;
 static unsigned calibrated_mhz;
 
 static unsigned gain_max(void) {
@@ -90,9 +90,9 @@ const radio_caps_t *radio_caps(void) {
 
 const char *radio_phy_version(void) { return get_phy_version_str(); }
 
-void radio_set_recal(radio_recal_t mode, uint32_t centre_khz) {
+void radio_set_recal(radio_recal_t mode, uint32_t center_khz) {
     recal_mode = mode;
-    recal_centre_khz = centre_khz;
+    recal_center_khz = center_khz;
     calibrated_mhz = 0;
 }
 
@@ -101,7 +101,7 @@ void radio_force_recal(void) { calibrated_mhz = 0; }
 esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     unsigned mhz = lo_khz / 1000u;
     int offset_khz = (int)(lo_khz % 1000u);
-    unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_centre_khz / 1000u : mhz; /* CACHE: as EVERY_LO */
+    unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_center_khz / 1000u : mhz; /* CACHE: as EVERY_LO */
     bool recalibrated = calibrated_mhz != cal_mhz;
     if (recalibrated) {
         s3_recalibrate(cal_mhz);
@@ -195,8 +195,8 @@ esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, 
 }
 
 esp_err_t radio_init(void) {
-    radio_set_recal(RADIO_RECAL_ONCE, recal_centre_khz);
-    return radio_tune(recal_centre_khz, 3000);
+    radio_set_recal(RADIO_RECAL_ONCE, recal_center_khz);
+    return radio_tune(recal_center_khz, 3000);
 }
 
 void *radio_dsp_region(size_t *bytes) {

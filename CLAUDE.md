@@ -203,9 +203,10 @@ npm run dev                         # http://localhost:5808 (Web Serial: Chrome/
 - **RotorHazard mode page** (`web/src/model/rh.ts`, `views/rh.ts`): polls the
   board as RotorHazard's server does (every 100 ms: per seat, select it and read
   the pass stats and one queued peak/nadir), and shows each seat's level with
-  EnterAt/ExitAt (editable, "now" = average of the last second, kept per metric
-  in localStorage and written on connect), a level graph with passes, the
-  detection events with lap times, and the receiver settings this mode allows.
+  EnterAt/ExitAt (editable, "now" = average of the last second, kept in
+  localStorage and written on connect; a metric change leaves them as they
+  are), a level graph with passes, the detection events with lap times, and
+  the receiver settings this mode allows.
   The page takes the metric and receiver settings from the device (`CONFIG?`)
   and never sets them on connect; Receiver → Save sends `CONFIG SAVE`.
   Seats take the channels of the shared channel plan in frequency order (Edit

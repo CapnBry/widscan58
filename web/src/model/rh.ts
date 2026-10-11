@@ -2,8 +2,8 @@
 // (RHInterface.update: per seat, select it, read the pass stats and one
 // queued peak/nadir), and turns that into levels, crossings and passes for
 // the views. Seat frequencies come from the shared channel plan; thresholds
-// are kept per metric in localStorage and written on every start, as the
-// server writes its profile's. The receiver settings and the level metric
+// are kept in localStorage and written on every start, as the server writes
+// its profile's (a metric change leaves them as they are). The receiver settings and the level metric
 // are the device's own (its saved defaults, CONFIG SAVE). GPL-3.0-or-later.
 import type { Device } from "../serial/device";
 import type { RhLink } from "../serial/rhLink";
@@ -48,10 +48,9 @@ interface Thresholds {
   enter: number[];
   exit: number[];
 }
-const DEFAULTS: Record<RhMetric, Thresholds> = {
-  RSSI: { enter: Array(RH_SEATS).fill(190), exit: Array(RH_SEATS).fill(180) }, // about -32.5 / -37.5 dBFS
-  SNR: { enter: Array(RH_SEATS).fill(40), exit: Array(RH_SEATS).fill(30) }, // 20 / 15 dB
-};
+// The device's own defaults: about -32.5 / -37.5 dBFS in RSSI.
+const DEFAULT_ENTER = 190;
+const DEFAULT_EXIT = 180;
 const KEY = "widscan58.rh";
 
 export class RhModel {
@@ -63,7 +62,7 @@ export class RhModel {
   running = false;
   error: string | null = null;
   cycleMs = 0;
-  private thresholds: Record<RhMetric, Thresholds> = structuredClone(DEFAULTS);
+  private thresholds: Thresholds = { enter: Array(RH_SEATS).fill(DEFAULT_ENTER), exit: Array(RH_SEATS).fill(DEFAULT_EXIT) };
   private link: RhLink | null = null;
   private loop: Promise<void> | null = null;
   private stopFlag = false;
@@ -72,7 +71,7 @@ export class RhModel {
   constructor(private store: Store) {
     try {
       const saved = JSON.parse(localStorage.getItem(KEY) ?? "null");
-      if (saved?.thresholds) Object.assign(this.thresholds, saved.thresholds);
+      if (Array.isArray(saved?.thresholds?.enter) && Array.isArray(saved?.thresholds?.exit)) this.thresholds = saved.thresholds;
     } catch {
       /* storage unavailable or corrupt */
     }
@@ -94,10 +93,9 @@ export class RhModel {
   }
 
   private loadThresholds() {
-    const th = this.thresholds[this.metric];
     for (const s of this.seats) {
-      s.enter = th.enter[s.index] ?? DEFAULTS[this.metric].enter[0];
-      s.exit = th.exit[s.index] ?? DEFAULTS[this.metric].exit[0];
+      s.enter = this.thresholds.enter[s.index] ?? DEFAULT_ENTER;
+      s.exit = this.thresholds.exit[s.index] ?? DEFAULT_EXIT;
     }
   }
 
@@ -155,7 +153,6 @@ export class RhModel {
     const m = this.config?.metrics;
     if ((m === "RSSI" || m === "SNR") && m !== this.metric) {
       this.metric = m;
-      this.loadThresholds();
       for (const s of this.seats) {
         s.history.clear();
         s.peaks = [];
@@ -204,7 +201,7 @@ export class RhModel {
     const v = Math.max(1, Math.min(254, Math.round(value)));
     const s = this.seats[seat];
     s[which] = v;
-    this.thresholds[this.metric][which][seat] = v;
+    this.thresholds[which][seat] = v;
     this.save();
     if (!this.link) return;
     await this.link.write(RH.WRITE_CURNODE_INDEX, [seat]);
@@ -228,13 +225,7 @@ export class RhModel {
 
   async setMetric(m: RhMetric) {
     if (m === this.metric || !this.link) return;
-    await this.command(`METRICS ${m}`); // the CONFIG? reply switches this.metric and the thresholds
-    if (this.metric !== m || !this.link) return;
-    for (const s of this.seats) {
-      await this.link.write(RH.WRITE_CURNODE_INDEX, [s.index]);
-      await this.link.write(RH.WRITE_ENTER_AT_LEVEL, [s.enter]);
-      await this.link.write(RH.WRITE_EXIT_AT_LEVEL, [s.exit]);
-    }
+    await this.command(`METRICS ${m}`); // the CONFIG? reply switches this.metric
   }
 
   clearEvents() {

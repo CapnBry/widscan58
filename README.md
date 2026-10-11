@@ -23,8 +23,8 @@ second.*
 
 ## Features
 
-- **Eight channels at once.** Raceband by default, or any eight channels from
-  bands A, B, E, F and R. Each one updates about 50 times a second in monitor mode.
+- **Eight channels at once.** any eight channels from bands A, B, E, F and R.
+  Each one updates about 50 times a second in monitor mode.
 - **Per-channel readings:** RSSI, noise floor, SNR, the measured center of the
   video signal (to spot a VTX that is off frequency), and the 99 %
   occupied bandwidth.
@@ -38,11 +38,9 @@ second.*
   don't need a toolchain.
 - **Simulator:** press *Simulate* to try the whole UI without any hardware.
 - **Record and replay** a session to a file.
-- **[RotorHazard](https://github.com/RotorHazard/RotorHazard) timer node:** 
-  automatically switches to an 8-seat receiver for lap timing.
-  The webui shows each seat's level, lets you set the receiver gain and reporting mode (RSSI vs SNR).
-  Then connect the board to your RotorHazard server (add its port to `SERIAL_PORTS` in
-  the server's config). Runs at 200 updates a secon in 8 seat mode, over 1000 Hz in single channel mode.
+- **[RotorHazard](https://github.com/RotorHazard/RotorHazard) timer node:**
+  automatically switches to an 8-seat receiver for lap timing. See
+  [our docs](docs/RotorHazard.md) for setup and configuration.
 - **Deep diagnostics** for the curious: hop timing, raw I/Q snapshots with a
   constellation view, scanner settings and a command console.
 - **Channel editor:** pick your channels on a frequency chart that looks like

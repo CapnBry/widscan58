@@ -67,7 +67,7 @@ export class MockTransport implements Transport {
   private group = true;
   private running = true;
   private gainManual = true;
-  private gain = 60;
+  private gain = 50;
   private specEvery = 4;
   private specBins = 256;
   private specSpanHz = race24.usableHz;
@@ -93,7 +93,7 @@ export class MockTransport implements Transport {
   private rhSeats = Array.from({ length: 8 }, (_, j) => ({
     mhz: [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917][j],
     mapped: false,
-    lap: new LapSeat(190, 180),
+    lap: new LapSeat(125, 105),
     nextPass: 0,
     lastMs: 0,
   }));
@@ -104,7 +104,7 @@ export class MockTransport implements Transport {
   private rhNfft = 128;
   private rhCapn = 512;
   // CONFIG SAVE: applied on every PROTOCOL RH, as the firmware (not kept across page loads).
-  private rhSaved = { gainManual: true, gain: 60, group: true, metric: "RSSI" as "RSSI" | "SNR", nfft: 128, capn: 512 };
+  private rhSaved = { gainManual: true, gain: 50, group: true, metric: "RSSI" as "RSSI" | "SNR", nfft: 128, capn: 512 };
 
   async open(onBytes: (c: Uint8Array) => void): Promise<void> {
     this.onBytes = onBytes;
@@ -445,7 +445,7 @@ export class MockTransport implements Transport {
         const t = now - k * 5;
         const bump = peakDb * Math.exp(-(((t - s.nextPass) / 220) ** 2));
         const db = bump + gaussRand() * 0.6;
-        const code = snr ? Math.max(1, 2 * db + 1) : 2 * (db - 47.5) + 255;
+        const code = snr ? Math.max(1, 4 * db + 1) : 4 * (db - 47.5) + 255;
         s.lap.feed(tMs - k * 5, Math.max(1, Math.min(254, Math.round(code))), 5000);
       }
     }
@@ -624,7 +624,8 @@ export class MockTransport implements Transport {
     this.onBytes(encodeFrame(FRAME_METRICS, new Uint8Array(buf.buffer)));
   }
 
-  // METRICS RSSI|SNR: frame_levels_t, level codes (dBFS = code / 2 - 127.5).
+  // METRICS RSSI|SNR: frame_levels_t, level codes (dBFS = code / 4 - 63.75; the
+  // per-bin floor is a spectrum code, dBFS = code / 2 - 127.5).
   private emitLevels(now: number, loKhz: number, tune: number, floorBin: number, chans: HopChannel[]) {
     const snr = this.metricsMode === "SNR";
     const code = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
@@ -646,8 +647,8 @@ export class MockTransport implements Transport {
       const o = 32 + 4 * j;
       buf.setUint8(o, c.id);
       buf.setUint8(o + 1, snr ? c.m.flags & ~(CHF.NO_CENTROID) : c.m.flags & ~(CHF.SIGNAL | CHF.NO_CENTROID));
-      buf.setUint8(o + 2, code(2 * c.m.rssi + 255));
-      buf.setUint8(o + 3, snr ? code(2 * c.m.snr) : 0);
+      buf.setUint8(o + 2, code(4 * c.m.rssi + 255));
+      buf.setUint8(o + 3, snr ? code(4 * c.m.snr) : 0);
     });
     this.onBytes(encodeFrame(FRAME_LEVELS, new Uint8Array(buf.buffer)));
   }

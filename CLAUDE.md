@@ -167,7 +167,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
-| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `CAPN`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them. Without a save: `FFT 128`, `CAPN 512`, `METRICS RSSI`, `MODE GROUP`, the default gain |
+| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `CAPN`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them. Without a save: `FFT 128`, `CAPN 512`, `METRICS RSSI`, `MODE GROUP`, the default gain (manual 50) |
 | `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `CAPN`, `FILTER`, `IQCORR` and `MODE GROUP\|SINGLE` work; the rest answer `ERR rh_mode` |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
@@ -187,10 +187,15 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   (~285 /s). `CONFIG SAVE` replaces the gain, FFT, capture, metric and LO
   plan defaults (NVS, `commands.c`); they are applied on every switch to this
   mode.
-- **Levels** are the `METRICS` byte codes: RSSI (dBFS = code / 2 − 127.5) or SNR
-  (dB = code / 2), clamped to 1–254. `METRICS RSSI|SNR` picks one and resets the
-  seats' levels. EnterAt/ExitAt are in the same codes (defaults before the
-  server writes its own: 190 / 180, about −32.5 / −37.5 dBFS).
+- **Levels** are the `METRICS` byte codes, in 0.25 dB steps: RSSI (dBFS =
+  code / 4 − 63.75) or SNR (dB = code / 4), clamped to 1–254. The RSSI range
+  starts just below the ADC noise in the ±5 MHz window (about −59 to −62
+  dBFS, codes ~13–21, at any gain up to ~40; ~27–41 at the default 50, ~65
+  at 60). `METRICS
+  RSSI|SNR` picks one and resets the seats' levels. EnterAt/ExitAt are in the
+  same codes (defaults before the server writes its own: 125 / 105, −32.5 /
+  −37.5 dBFS). The `LEVELS` frame's per-bin floor stays a 0.5 dB spectrum
+  code (code / 2 − 127.5): per-bin noise is below −63.75 dBFS.
 - **Detection:** a running median over the last 255 ms (at most 255 updates,
   so shorter above 1000 updates/s), as RotorHazard's own nodes use (255
   samples at ~1 kHz); nothing is reported for the first 255 ms after a reset.
@@ -199,13 +204,13 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   below the RF dump bank had only ~5 KB left. Then a crossing from EnterAt
   until below ExitAt, and the pass at the middle of the crossing's highest
   plateau. Peaks
-  and nadirs (2-code hysteresis, 8 queued each) feed the server's RSSI graph.
+  and nadirs (4-code, 1 dB hysteresis, 8 queued each) feed the server's RSSI graph.
   A frequency change keeps the lap count (the server counts passes by its
   change).
 - **Check:** `tools/rh_check.py` runs RotorHazard's own interface code against
-  the board (no VTX: thresholds a code or two above the noise make noise
-  crossings, e.g. `--enter 164 --exit 162` at gain 60, `--enter 140 --exit
-  139` at manual gain 40).
+  the board (no VTX: thresholds inside the filtered noise make noise
+  crossings; at manual gain 60 the seats sit at codes ~64–71 and `--enter 67
+  --exit 67` gave 239 passes in 30 s).
 - **Testing in RotorHazard mode:** `PROTOCOL RH` applies the user's saved
   defaults, so after switching, *set* `MODE`, `CAPN`, `FFT`, `GAIN` and
   `METRICS` to what the test needs, but never `CONFIG SAVE` them. Leave them

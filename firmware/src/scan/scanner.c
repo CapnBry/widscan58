@@ -77,7 +77,7 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->iq_corr = true;
     c->settle_us = 100;
     c->gain_mode = RADIO_GAIN_MANUAL;
-    c->gain = 60;
+    c->gain = 50;
     c->metrics_mode = METRICS_FULL;
     c->rssi_hz = p->rssi_hz;
     c->search_hz = p->search_hz;
@@ -147,7 +147,7 @@ static void apply_config(void) {
     unsigned segs = s.cfg.capture_samples / s.cfg.nfft;
     if (segs > s.cfg.segments) segs = s.cfg.segments;
     s.floor_bias = metrics_percentile_bias(segs ? segs : 1, FLOOR_PERCENTILE);
-    s.floor_bias_q8 = (int32_t)lrintf(20.0f * log10f(s.floor_bias) * 256.0f);
+    s.floor_bias_q8 = (int32_t)lrintf(METRICS_LEVEL_PER_DB * 10.0f * log10f(s.floor_bias) * 256.0f);
     s.centroid_ratio = powf(10.0f, s.cfg.centroid_db / 10.0f);
 }
 
@@ -237,10 +237,12 @@ static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_h
     const scan_config_t *c = &s.cfg;
     const bool snr = c->metrics_mode == METRICS_SNR;
     /* Per hop: the scale in level codes, from the cheap metrics_db. */
-    const int32_t bin_q8 = (int32_t)lrintf((2.0f * metrics_db(psd->scale) + 255.0f) * 256.0f);
-    in->level_q8 = bin_q8 - (int32_t)lrintf(2.0f * metrics_db(psd->enbw_bins) * 256.0f);
+    const float scale_db = metrics_db(psd->scale);
+    in->level_q8 = (int32_t)lrintf((METRICS_LEVEL_PER_DB * (scale_db - metrics_db(psd->enbw_bins)) + 255.0f) * 256.0f);
     in->floor_bias_q8 = s.floor_bias_q8;
-    in->signal_q8 = (int32_t)lrintf(c->signal_snr_db * 512.0f);
+    in->signal_q8 = (int32_t)lrintf(c->signal_snr_db * METRICS_LEVEL_PER_DB * 256.0f);
+    /* The per-bin floor in the header is a spectrum code (0.5 dB, as the spectrum): it sits below the levels' range. */
+    const int32_t spec_bin_q8 = (int32_t)lrintf((2.0f * scale_db + 255.0f) * 256.0f);
     const uint32_t floor_raw = snr ? metrics_floor_raw(in, FLOOR_PERCENTILE, s.scratch) : 0;
     frame_level_t out[PLAN_MAX_PER_LO];
     for (unsigned j = 0; j < hop->nch; j++) {
@@ -270,7 +272,7 @@ static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_h
         .hop_index = (uint8_t)s.hop,
         .hops = s.plan.nhops,
         .mode = c->metrics_mode,
-        .floor_bin = floor_raw ? metrics_code_u8(metrics_code_q8(floor_raw) + s.floor_bias_q8 + bin_q8) : 0,
+        .floor_bin = floor_raw ? metrics_code_u8((metrics_code_q8(floor_raw) + s.floor_bias_q8) / 2 + spec_bin_q8) : 0,
         .nch = hop->nch,
     };
     if (!c->rh) link_frame(FRAME_LEVELS, &h, sizeof(h), out, hop->nch * sizeof(frame_level_t), 0);

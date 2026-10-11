@@ -143,8 +143,10 @@ export function parseMetrics(p: DataView): Metrics {
 
 const LEVELS_HDR = 32; // sizeof(frame_levels_t)
 const LEVEL_SIZE = 4; // sizeof(frame_level_t)
-// Level codes, as the spectrum: dBFS = code / 2 - 127.5.
-const levelDb = (code: number) => code / 2 - 127.5;
+// Level codes (0.25 dB): dBFS = code / 4 - 63.75; SNR dB = code / 4. The
+// header's per-bin floor is a spectrum code: dBFS = code / 2 - 127.5.
+const levelDb = (code: number) => code / 4 - 63.75;
+const specDb = (code: number) => code / 2 - 127.5;
 
 export function parseLevels(p: DataView): Metrics {
   const mode = LEVELS_MODES[p.getUint8(29)] ?? "RSSI";
@@ -161,7 +163,7 @@ export function parseLevels(p: DataView): Metrics {
     hopIndex: p.getUint8(27),
     hops: p.getUint8(28),
     mode,
-    floorBin: snrMode ? levelDb(p.getUint8(30)) : null,
+    floorBin: snrMode ? specDb(p.getUint8(30)) : null,
     dc: null,
     channels: [],
   };
@@ -170,7 +172,7 @@ export function parseLevels(p: DataView): Metrics {
     const o = LEVELS_HDR + j * LEVEL_SIZE;
     if (o + LEVEL_SIZE > p.byteLength) break;
     const rssi = levelDb(p.getUint8(o + 2));
-    const snr = snrMode ? p.getUint8(o + 3) / 2 : null;
+    const snr = snrMode ? p.getUint8(o + 3) / 4 : null;
     m.channels.push({
       id: p.getUint8(o),
       flags: p.getUint8(o + 1),

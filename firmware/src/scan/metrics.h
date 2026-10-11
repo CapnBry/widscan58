@@ -34,9 +34,9 @@ typedef struct {
     float centroid_ratio;    /* centroid uses bins this far above the floor (linear) */
     uint8_t avg_shift;       /* metrics_avg_t weight 2^-avg_shift, METRICS_AVG_SHIFT_MIN..MAX */
     /* metrics_level only, in 1/256 level code (metrics_code_q8): */
-    int32_t level_q8;        /* code of a band power of one unit of p: (2 dB(scale / enbw_bins) + 255) * 256 */
-    int32_t floor_bias_q8;   /* 2 dB(floor_bias) * 256 */
-    int32_t signal_q8;       /* SIGNAL threshold, 2 * signal_snr_db * 256 */
+    int32_t level_q8;        /* code of a band power of one unit of p: (4 dB(scale / enbw_bins) + 255) * 256 */
+    int32_t floor_bias_q8;   /* 4 dB(floor_bias) * 256 */
+    int32_t signal_q8;       /* SIGNAL threshold, 4 * signal_snr_db * 256 */
 } metrics_input_t;
 
 typedef struct {
@@ -80,11 +80,15 @@ typedef struct {
     uint8_t flags;
 } metrics_channel_t;
 
-/* Byte-code levels for lap timing (METRICS RSSI|SNR, frame_level_t). Integer
- * per bin and for the levels; float only for the window edges. */
+/* Byte-code levels for lap timing (METRICS RSSI|SNR, frame_level_t), in
+ * 0.25 dB steps (METRICS_LEVEL_PER_DB): RSSI covers 0 to -63.75 dBFS, which
+ * holds everything from the ADC noise floor in the RSSI window (about -60
+ * dBFS) to full scale; SNR 0 to 63.75 dB. Integer per bin and for the
+ * levels; float only for the window edges. */
+#define METRICS_LEVEL_PER_DB 4
 typedef struct {
-    uint8_t rssi;            /* RSSI window power, level code: dBFS = code / 2 - 127.5 */
-    uint8_t snr;             /* (S+N)/N, dB x 2; 0 without a floor */
+    uint8_t rssi;            /* RSSI window power, level code: dBFS = code / 4 - 63.75 */
+    uint8_t snr;             /* (S+N)/N, dB x 4; 0 without a floor */
     uint8_t flags;           /* CHF_DC_IN_SEARCH, CHF_EDGE; with a floor, CHF_SIGNAL */
 } metrics_level_t;
 
@@ -104,8 +108,8 @@ float metrics_percentile_bias(unsigned segments, float q);
 extern uint16_t metrics_log2_dev[257];
 void metrics_init(void);
 
-/* 20 log10(v) * 256: twice the dB of a power v, i.e. level codes (0.5 dB
- * steps) in 1/256. Integer only; v = 0 gives INT32_MIN / 2. */
+/* 40 log10(v) * 256: four times the dB of a power v, i.e. level codes
+ * (0.25 dB steps) in 1/256. Integer only; v = 0 gives INT32_MIN / 2. */
 static inline int32_t metrics_code_q8(uint64_t v) {
     if (!v) return INT32_MIN / 2;
     int e = 63 - __builtin_clzll(v);
@@ -113,7 +117,7 @@ static inline int32_t metrics_code_q8(uint64_t v) {
     uint32_t i = m >> 8, f = m & 0xffu;
     int32_t d0 = metrics_log2_dev[i], d1 = metrics_log2_dev[i + 1];
     int64_t log2_q16 = (int64_t)e * 65536 + (int32_t)m + d0 + (((d1 - d0) * (int32_t)f) >> 8);
-    return (int32_t)((log2_q16 * 24660 + (1 << 19)) >> 20); /* 20 log10(2) * 256 / 65536 = 24660 / 2^20 */
+    return (int32_t)((log2_q16 * 49321 + (1 << 19)) >> 20); /* 40 log10(2) * 256 / 65536 = 49321 / 2^20 */
 }
 static inline uint8_t metrics_code_u8(int32_t q8) {
     int32_t c = (q8 + 128) >> 8;

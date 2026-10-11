@@ -48,10 +48,13 @@ interface Thresholds {
   enter: number[];
   exit: number[];
 }
-// The device's own defaults: about -32.5 / -37.5 dBFS in RSSI.
-const DEFAULT_ENTER = 190;
-const DEFAULT_EXIT = 180;
-const KEY = "widscan58.rh";
+// The device's own defaults: -32.5 / -37.5 dBFS in RSSI (0.25 dB codes).
+const DEFAULT_ENTER = 125;
+const DEFAULT_EXIT = 105;
+// v2: 0.25 dB codes. Thresholds saved with the 0.5 dB codes are dropped, not
+// converted: they don't record which metric they were set for.
+const KEY = "widscan58.rh.v2";
+const OLD_KEYS = ["widscan58.rh"];
 
 export class RhModel {
   seats: RhSeat[] = [];
@@ -70,6 +73,7 @@ export class RhModel {
 
   constructor(private store: Store) {
     try {
+      for (const k of OLD_KEYS) localStorage.removeItem(k);
       const saved = JSON.parse(localStorage.getItem(KEY) ?? "null");
       if (Array.isArray(saved?.thresholds?.enter) && Array.isArray(saved?.thresholds?.exit)) this.thresholds = saved.thresholds;
     } catch {

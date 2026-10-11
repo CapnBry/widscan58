@@ -66,7 +66,7 @@ void radio_set_tune_skip(unsigned mask) {
     tuned_once = false;
 }
 static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
-static unsigned gain_code = 60;
+static unsigned gain_code = 50;
 static int filter_code = -1;
 static radio_recal_t recal_mode = RADIO_RECAL_ONCE;
 static uint32_t recal_center_khz = 2442000;

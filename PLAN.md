@@ -398,7 +398,7 @@ three together, and old recordings stop replaying.
 | Frame | Contents |
 |---|---|
 | `METRICS` (per hop) | seq, t_us, LO kHz, gain idx, sat count, noise floor (cdB), hop timing (tune / capture / dsp µs), then per channel: `{id, rssi, rssi_ema, snr, clear_floor (cdB), peak_off, centroid_off (Hz/10), obw (kHz), flags}` |
-| `LEVELS` (per hop, `METRICS RSSI\|SNR`) | seq, LO kHz, hop timing, gain, sat count, mode, floor per bin (u8 level code; SNR mode only), then per channel: `{id, flags, rssi (u8 level code), snr (dB × 2; SNR mode only)}`. Level codes are the spectrum's: dBFS = code / 2 − 127.5 |
+| `LEVELS` (per hop, `METRICS RSSI\|SNR`) | seq, LO kHz, hop timing, gain, sat count, mode, floor per bin (u8 spectrum code, dBFS = code / 2 − 127.5; SNR mode only), then per channel: `{id, flags, rssi (u8 level code), snr (dB × 4; SNR mode only)}`. Level codes are 0.25 dB: dBFS = code / 4 − 63.75 |
 | `SPECTRUM` / `PANO` | seq, LO kHz, start kHz, bin Hz, n, detector, u8 codes[] |
 | `TELEMETRY` (≈ 4 Hz) | rotation Hz, hop timing min/avg/max, CPU ‰, heap, TX drops, temperature, recal age per LO |
 | `EVENT` (Phase 4) | channel on/off transition plus the before/after delta vector |
@@ -680,6 +680,20 @@ server drives it with only `SERIAL_PORTS` configured.
   stayed within 2–6 codes (1–3 dB). With `--enter 140 --exit 139`,
   `rh_check.py` saw 15 passes and 35 crossing changes in 30 s, with 0 comm
   errors.
+- **Level codes in 0.25 dB, 2026-10-11:** with 0.5 dB codes (dBFS = code / 2
+  − 127.5) codes 0–129 never occurred: the ADC noise in the ±5 MHz window is
+  about one count per I/Q component at every gain up to ~40–50 (gain 0 is no
+  quieter), −59 to −62 dBFS. Checked against raw I/Q: the board's RSSI codes
+  match a numpy calculation on 16380-sample captures to within 0.5–1 dB at
+  gains 0–83. RSSI and SNR codes are now 0.25 dB (dBFS = code / 4 − 63.75, SNR
+  dB = code / 4), computed from the 1/256-code integer log before rounding, so
+  this is real resolution. The noise floor reads ~13–21 (gain ≤ 50), ~65 at
+  gain 60, ~150 at gain 83. The `LEVELS` per-bin floor stays a 0.5 dB
+  spectrum code. Defaults EnterAt/ExitAt 190/180 became 125/105 (the same
+  dBFS), peak/nadir hysteresis 2 → 4 codes (still 1 dB). The web UI's saved
+  thresholds use a new storage key (old ones are dropped: they don't record
+  their metric). With the 255 ms median, filtered noise at gain 60 moves 3–7
+  codes (1–2 dB) per seat.
 - The stray first-command `ERR command` seen with `widscan58cli.py` right after
   flashing came from the tty: after re-enumeration it starts with echo on, and
   whatever the device streamed in the instant before pyserial set raw mode was

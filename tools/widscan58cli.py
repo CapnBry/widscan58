@@ -129,15 +129,15 @@ def parse_levels(p):
     keys = "seq t_ms lo_khz tune_us capture_us dsp_us saturated gain hop_index hops mode floor_bin nch".split()
     m = dict(zip(keys, h))
     snr_mode = m["mode"] == 2
-    m["floor_bin_cdb"] = (m["floor_bin"] * 50 - 12750) if snr_mode else None
+    m["floor_bin_cdb"] = (m["floor_bin"] * 50 - 12750) if snr_mode else None  # a spectrum code (0.5 dB)
     m["dc_cdb"] = None
     chans = []
     for j in range(m["nch"]):
         cid, flags, rssi, snr = LEVEL.unpack_from(p, LEVELS_HDR.size + j * LEVEL.size)
-        rssi_cdb = rssi * 50 - 12750
+        rssi_cdb = rssi * 25 - 6375  # level codes: 0.25 dB, dBFS = code / 4 - 63.75
         c = dict.fromkeys("ema clear peak peak_off centroid_off obw_lo_khz obw_hi_khz".split())
-        c.update(id=cid, flags=flags, rssi=rssi_cdb, snr=snr * 50 if snr_mode else None,
-                 floor=rssi_cdb - snr * 50 if snr_mode else None)
+        c.update(id=cid, flags=flags, rssi=rssi_cdb, snr=snr * 25 if snr_mode else None,
+                 floor=rssi_cdb - snr * 25 if snr_mode else None)
         chans.append(c)
     m["channels"] = chans
     return m

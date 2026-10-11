@@ -46,9 +46,9 @@ enum {
 #define MIN_FREQ 100
 #define MAX_FREQ 9999
 #define WRITE_TIMEOUT_US 100000
-/* Before the server sets thresholds: RSSI codes, about -32.5 / -37.5 dBFS. */
-#define DEFAULT_ENTER 190
-#define DEFAULT_EXIT 180
+/* Before the server sets thresholds: RSSI codes (0.25 dB), -32.5 / -37.5 dBFS. */
+#define DEFAULT_ENTER 125
+#define DEFAULT_EXIT 105
 
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED; /* seats: scanner vs command task */
 /* On the heap: the median windows (~5 KB) don't fit in the C5's static RAM

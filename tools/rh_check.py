@@ -10,10 +10,11 @@ copy of it:
 
   git clone https://github.com/RotorHazard/RotorHazard ref/RotorHazard
   python3 -m venv /tmp/rhvenv && /tmp/rhvenv/bin/pip install gevent pyserial
-  /tmp/rhvenv/bin/python tools/rh_check.py [-p /dev/ttyACM0] [-s 8] [--enter 200 --exit 190]
+  /tmp/rhvenv/bin/python tools/rh_check.py [-p /dev/ttyACM0] [-s 8] [--enter 145 --exit 125]
 
-Without a VTX, --enter / --exit just above the noise (e.g. 164 / 162 in
-RSSI codes at gain 60) make noise crossings, which exercises the pass path.
+Without a VTX, --enter / --exit inside the filtered noise (e.g. 67 / 67 in
+RSSI codes at manual gain 60) make noise crossings, which exercises the pass
+path.
 
 Opening the port as RotorHazard does resets the board into its saved
 defaults, so receiver settings for the test go in with --cmd, sent once
@@ -38,8 +39,8 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument("-p", "--port", default="/dev/ttyACM0")
 ap.add_argument("-s", "--seconds", type=float, default=8)
 ap.add_argument("--rh", default=os.path.join(here, "..", "ref", "RotorHazard"), help="RotorHazard checkout")
-ap.add_argument("--enter", type=int, default=200, help="EnterAt for every seat (level code)")
-ap.add_argument("--exit", type=int, default=190, help="ExitAt for every seat (level code)")
+ap.add_argument("--enter", type=int, default=145, help="EnterAt for every seat (level code)")
+ap.add_argument("--exit", type=int, default=125, help="ExitAt for every seat (level code)")
 ap.add_argument("--seats", type=int, default=6, help="seats given R1.. (the rest off, as RotorHazard does)")
 ap.add_argument("--cmd", action="append", default=[], metavar="LINE",
                 help="device command to send after discovery, e.g. 'METRICS RSSI' (repeatable; not saved)")

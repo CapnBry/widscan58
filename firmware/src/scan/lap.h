@@ -23,7 +23,7 @@
 #include <stdint.h>
 
 #define LAP_HISTORY 8      /* queued peaks and nadirs each, oldest dropped when full */
-#define LAP_HYSTERESIS 2   /* level codes a reversal must exceed to end a peak or nadir */
+#define LAP_HYSTERESIS 4   /* level codes (1 dB) a reversal must exceed to end a peak or nadir */
 #define LAP_WINDOW_MS 255  /* median window */
 #define LAP_MAX_SAMPLES 255 /* window cap: one byte per histogram bin */
 #define LAP_TS_EVERY 8     /* updates per stored timestamp */

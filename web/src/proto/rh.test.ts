@@ -26,7 +26,7 @@ describe("RotorHazard codec", () => {
   });
 
   it("converts level codes", () => {
-    expect(levelDb(159, "RSSI")).toBe(-48);
-    expect(levelDb(41, "SNR")).toBe(20.5);
+    expect(levelDb(63, "RSSI")).toBe(-48);
+    expect(levelDb(82, "SNR")).toBe(20.5);
   });
 });

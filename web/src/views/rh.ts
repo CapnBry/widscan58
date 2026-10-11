@@ -140,8 +140,8 @@ export class RhSeats implements View {
     if (s.level === null) t.big.replaceChildren("—");
     else t.big.replaceChildren(`${s.level}`, el("small", {}, ` ${levelDb(s.level, m).toFixed(1)} ${unit(m)}`));
     // Bar from below the lowest of nadir and ExitAt to above the highest of peak and EnterAt.
-    const lo = Math.max(0, Math.min(s.nodeNadir ?? 255, s.exit) - 10);
-    const hi = Math.min(255, Math.max(s.nodePeak ?? 0, s.enter) + 10);
+    const lo = Math.max(0, Math.min(s.nodeNadir ?? 255, s.exit) - 20);
+    const hi = Math.min(255, Math.max(s.nodePeak ?? 0, s.enter) + 20);
     const pos = (v: number) => `${(((v - lo) / Math.max(1, hi - lo)) * 100).toFixed(1)}%`;
     t.fill.style.width = s.level === null ? "0" : pos(Math.max(lo, s.level));
     t.fill.style.background = s.crossing ? theme().good : channelColor(s.index);
@@ -273,7 +273,7 @@ export class RhGraph implements View {
     ctx.font = "10px system-ui";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(`level (${rh.metric === "RSSI" ? "dBFS = level / 2 − 127.5" : "dB = level / 2"})`, 2, 1);
+    ctx.fillText(`level (${rh.metric === "RSSI" ? "dBFS = level / 4 − 63.75" : "dB = level / 4"})`, 2, 1);
   }
 }
 

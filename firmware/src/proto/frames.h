@@ -94,8 +94,9 @@ typedef struct __attribute__((packed)) {
     int8_t filter;           /* -1 = automatic */
 } frame_telemetry_t;
 
-/* One per hop in METRICS RSSI|SNR mode. Levels are byte codes, like the
- * spectrum: dBFS = code / 2 - 127.5; ratios: dB = code / 2. */
+/* One per hop in METRICS RSSI|SNR mode. Levels are byte codes in 0.25 dB
+ * steps: dBFS = code / 4 - 63.75; ratios: dB = code / 4. floor_bin is a
+ * spectrum code (dBFS = code / 2 - 127.5): per-bin noise is below -63.75. */
 typedef struct __attribute__((packed)) {
     uint32_t seq;
     uint32_t t_ms;
@@ -105,7 +106,7 @@ typedef struct __attribute__((packed)) {
     uint8_t gain;            /* 255 = hardware AGC */
     uint8_t hop_index, hops;
     uint8_t mode;            /* METRICS_RSSI or METRICS_SNR */
-    uint8_t floor_bin;       /* mean noise per FFT bin, level code; 0 in RSSI mode */
+    uint8_t floor_bin;       /* mean noise per FFT bin, spectrum code; 0 in RSSI mode */
     uint8_t nch;
 } frame_levels_t;
 
@@ -113,7 +114,7 @@ typedef struct __attribute__((packed)) {
     uint8_t id;              /* profile channel index */
     uint8_t flags;           /* CHF_* (metrics.h) */
     uint8_t rssi;            /* channel power, level code */
-    uint8_t snr;             /* (S+N)/N, dB x 2; 0 in RSSI mode */
+    uint8_t snr;             /* (S+N)/N, dB x 4; 0 in RSSI mode */
 } frame_level_t;
 
 /* web/src/proto/frames.ts and tools/widscan58cli.py hard-code these sizes. */

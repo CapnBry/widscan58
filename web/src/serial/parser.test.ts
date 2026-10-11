@@ -48,10 +48,10 @@ function levelsPayload(mode: number): DataView {
   dv.setUint8(31, 2);
   dv.setUint8(H, 0);
   dv.setUint8(H + 1, 1);
-  dv.setUint8(H + 2, 183); // -36 dBFS
-  dv.setUint8(H + 3, mode === 2 ? 41 : 0); // 20.5 dB
+  dv.setUint8(H + 2, 111); // -36 dBFS
+  dv.setUint8(H + 3, mode === 2 ? 82 : 0); // 20.5 dB
   dv.setUint8(H + 4, 1);
-  dv.setUint8(H + 6, 140); // -57.5 dBFS
+  dv.setUint8(H + 6, 25); // -57.5 dBFS
   return dv;
 }
 

@@ -88,5 +88,5 @@ export const validLevel = (v: number) => v > 0 && v < 255;
 export type RhMetric = "RSSI" | "SNR";
 /** A level code in display units: dBFS for RSSI, dB for SNR (metrics.h codes). */
 export function levelDb(code: number, metric: RhMetric): number {
-  return metric === "RSSI" ? code / 2 - 127.5 : code / 2;
+  return metric === "RSSI" ? code / 4 - 63.75 : code / 4;
 }

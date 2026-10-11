@@ -13,8 +13,10 @@ port in its config.
    **RotorHazard mode**. The firmware also boots in this mode.
 3. Under **Receiver**, set the RX gain and pick the level the seats report:
    - **RSSI**: the power in the channel's ±5 MHz window, in dBFS
-     (level / 2 − 127.5). It moves with the gain and the noise.
-   - **SNR**: that power over the channel's noise floor, in dB (level / 2). It
+     (level / 4 − 63.75, 0.25 dB steps). It moves with the gain and the
+     noise: with no VTX it sits around 13–25 at gains up to about 40,
+     around 27–41 at the default gain of 50, and around 65 at gain 60.
+   - **SNR**: that power over the channel's noise floor, in dB (level / 4). It
      sits near 0 with no VTX on the channel, whatever the gain.
 4. Click **Save** so the board keeps these settings. RotorHazard's own UI can't
    set them, and the board applies the saved ones every time it enters
@@ -106,6 +108,7 @@ window's middle read, about 128 ms back.
 | Updates per seat | ~1000 /s | 210–1750 /s (see Performance) |
 | One update | one ADC read of the RX5808 RSSI voltage | the power in the channel's ±5 MHz window, from four averaged FFTs of one capture |
 | Median window | 255 reads, ~255 ms | 255 ms, at most 255 updates |
+| Level steps | ADC counts, 0–255 | 0.25 dB (RSSI or SNR codes, 1–254) |
 | Filter delay | ~128 ms, reported with the middle read's time | the same |
 
 ## Notes

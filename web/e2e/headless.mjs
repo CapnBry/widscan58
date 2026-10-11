@@ -141,7 +141,7 @@ await page.keyboard.press("Tab");
 await sleep(500);
 const enter0 = await page.evaluate(() => window.widscan58.app.rh.seats[0].enter);
 check("EnterAt edit reaches the seat", enter0 === 201, `seat 1 enter ${enter0}`);
-await page.evaluate(() => window.widscan58.app.rh.setThreshold(0, "enter", 190));
+await page.evaluate(() => window.widscan58.app.rh.setThreshold(0, "enter", 125));
 await page.screenshot({ path: path.join(out, "rotorhazard.png"), fullPage: true });
 // Saved defaults: the device applies them on every PROTOCOL RH, and METRICS
 // FULL on PROTOCOL MONITOR. The device's own saved values are put back after.

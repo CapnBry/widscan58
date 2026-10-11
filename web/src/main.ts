@@ -50,14 +50,14 @@ document.documentElement.dataset.theme = themeName;
 // ---- Header -----------------------------------------------------------------
 const dot = el("span", { class: "dot" });
 const connText = el("span", {}, "Disconnected");
-const fwText = el("span", { class: "fw" }); // firmware version, and whether this page offers another
 const connectBtn = el("button", { class: "primary" }, "Connect"); // becomes Disconnect while connected
 const flashBtn = el("button", { title: "Install the scanner firmware on a board" }, "Flash device");
 const simBtn = el("button", {}, "Simulate");
 const replayInput = el("input", { type: "file", accept: ".widscan58", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
 const recordBtn = el("button", { title: "Record the raw device stream to a .widscan58 file" }, "● Record");
-// Menu: the page / device protocol (monitor or RotorHazard) and the theme.
+// Menu: the page / device protocol (monitor or RotorHazard), the theme, and
+// about: the project link and the connected device's firmware version.
 const menuBtn = el("button", { class: "menu-btn", title: "Menu", "aria-haspopup": "true", "aria-expanded": "false" }, "☰");
 const modeItems = {
   monitor: el("button", { class: "menu-item", role: "menuitemradio" }, "Monitor mode"),
@@ -66,6 +66,8 @@ const modeItems = {
 const rhNote = el("div", { class: "menu-note" });
 const darkSwitch = el("input", { type: "checkbox", role: "switch" }) as HTMLInputElement;
 darkSwitch.checked = themeName !== "light";
+const fwValue = el("span", { class: "menu-value" }, "not connected");
+const fwNote = el("div", { class: "menu-note", hidden: "" }); // a newer firmware this page can flash
 const menu = el(
   "div",
   { class: "menu", role: "menu", hidden: "" },
@@ -75,12 +77,17 @@ const menu = el(
   rhNote,
   el("div", { class: "menu-sep" }),
   el("label", { class: "menu-item menu-switch" }, el("span", {}, "Dark mode"), darkSwitch),
+  el("div", { class: "menu-sep" }),
+  el("div", { class: "menu-label" }, "About"),
+  el("a", { class: "menu-item", role: "menuitem", href: "https://github.com/CapnBry/widscan58", target: "_blank", rel: "noopener" }, "GitHub project ↗"),
+  el("div", { class: "menu-info" }, el("span", {}, "Firmware"), fwValue),
+  fwNote,
 );
 const header = el(
   "header",
   { class: "top" },
   el("span", { class: "brand" }, el("span", { class: "menu-wrap" }, menuBtn, menu), el("h1", {}, "Widscan58")),
-  el("span", { class: "conn-state" }, dot, connText, fwText),
+  el("span", { class: "conn-state" }, dot, connText),
   el("span", { class: "spacer" }),
   connectBtn,
   flashBtn,
@@ -237,12 +244,18 @@ function updateBanner() {
   updateFirmwareText();
 }
 
-// INFO is "widscan58 <target> <proto_ver> <fw_ver> <phy_ver>".
+// INFO is "widscan58 <target> <proto_ver> <fw_ver> <phy_ver>". Shown in the
+// menu for any connected device; the offer of another version only over Web
+// Serial, where the page can flash it.
 let offeredFw: string | null = null;
 function updateFirmwareText() {
-  const fw = app.device?.transport instanceof WebSerialTransport ? store.info.split(" ")[3] : undefined;
-  const text = !fw ? "" : offeredFw && offeredFw !== fw ? `· firmware ${fw} (${offeredFw} available)` : `· firmware ${fw}`;
-  if (fwText.textContent !== text) fwText.textContent = text;
+  const fw = app.device ? store.info.split(" ")[3] : undefined;
+  const value = !app.device ? "not connected" : fw || "unknown";
+  if (fwValue.textContent !== value) fwValue.textContent = value;
+  const offer = fw && offeredFw && offeredFw !== fw && app.device?.transport instanceof WebSerialTransport;
+  const note = offer ? `${offeredFw} available` : "";
+  if (fwNote.textContent !== note) fwNote.textContent = note;
+  fwNote.hidden = !note;
 }
 
 async function syncDevice(device: Device) {

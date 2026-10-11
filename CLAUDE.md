@@ -232,6 +232,9 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
 - **Menu** (☰, top left): Monitor mode / RotorHazard mode, and the dark-mode
   switch. The choice is remembered and applied on every connect (`PROTOCOL?`,
   then `PROTOCOL MONITOR|RH`; firmware without `PROTOCOL` is monitor only).
+  An About section below them links to the GitHub project and shows the
+  connected device's firmware version (from `INFO`; over Web Serial also a
+  newer version the page can flash).
 - **RotorHazard mode page** (`web/src/model/rh.ts`, `views/rh.ts`): polls the
   board as RotorHazard's server does (every 100 ms: per seat, select it and read
   the pass stats and one queued peak/nadir), and shows each seat's level with

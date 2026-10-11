@@ -87,6 +87,16 @@ platform pins ESP-IDF 5.5.5. Before changing the platform version, run
 and the same with `esp32c5`. The firmware depends on private PHY functions, and
 they must stay identical. Both targets pass against IDF 5.5.5.
 
+**Firmware version:** `INFO` (and RotorHazard's firmware version) reports
+`PROJECT_VER`, the `git describe --tags --always --dirty` that
+`firmware/CMakeLists.txt` takes at CMake configure time. PlatformIO only
+reconfigures when `CMakeLists.txt` or `sdkconfig*` change, so incremental builds
+used to keep an old hash; `firmware/version_check.py` (a pre-build script)
+forces a reconfigure when `git describe` differs from the build's
+`project_description.json`. That costs one near-full rebuild (~25 s on the C5)
+after each commit or clean/dirty change. The date at the end of `INFO` belongs
+to the PHY library (`radio_phy_version()`), not to our build.
+
 **Web UI says "The device has been lost" right after connecting** (while the board
 stays plugged in): an earlier pyserial user of the port, such as esptool,
 `pio device monitor` or a script, left the tty at VMIN=0. Chrome (up to at least

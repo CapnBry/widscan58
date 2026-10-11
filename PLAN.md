@@ -199,6 +199,11 @@ const char *radio_phy_version(void);
   envs use the same SDK, as esp-sdr does.
 - At boot, compare the PHY lib version string with the value recorded at build
   time. On a mismatch, refuse to start RF (`ERR phy_abi`).
+- The app version (`INFO`, the image header, the web flasher's manifest) is
+  `git describe` at CMake configure time. PlatformIO skips the reconfigure
+  after a commit, so `version_check.py` (`extra_scripts = pre:`) forces it when
+  the description changes; until 2026-10-11 local builds could report a stale
+  hash (a C5 build reported `6e0c22d-dirty` three commits later).
 - The layout also builds with plain `idf.py` (`-DIDF_TARGET=…`), as a fallback if
   PlatformIO cannot use the pinned commit.
 - sdkconfig from esp-sdr:

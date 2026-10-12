@@ -48,8 +48,10 @@ extern void phy_i2c_writeReg(unsigned, unsigned, unsigned, unsigned);
 /* Found with an LO sweep (5600-5975 MHz in 5 MHz steps, dummy load on the
  * antenna port, gain 40): lines fixed in RF and seen from >= 75 % of the LOs
  * covering them, ~7-10 dB over the floor in 39 kHz bins. 5600/5680/5760/5920
- * are multiples of 80 MHz; 5712 and 5760 are 48 MHz crystal harmonics. */
-static const uint32_t c5_spurs_khz[] = {5600000, 5680000, 5712000, 5760000, 5920000};
+ * are multiples of 80 MHz; 5712 and 5760 are 48 MHz crystal harmonics.
+ * 5840 (80 MHz x 73, 10-15 dB, in R6's RSSI window) shows only from LOs at
+ * or below 5830 MHz, R6's group LO among them. */
+static const uint32_t c5_spurs_khz[] = {5600000, 5680000, 5712000, 5760000, 5840000, 5920000};
 
 static radio_caps_t caps = {
     .target = "esp32c5",

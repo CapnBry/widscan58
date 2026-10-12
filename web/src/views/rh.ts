@@ -41,7 +41,6 @@ export class RhSeats implements View {
   private grid = el("div", { class: "tiles" });
   private status = el("span", { class: "muted" });
   private tiles: SeatTile[] = [];
-  private metric;
 
   constructor(private app: App) {
     const dialog = new ChannelPlanDialog();
@@ -52,13 +51,12 @@ export class RhSeats implements View {
         app.updateDeviceSettings({ channels });
         if (app.rh.running) void app.rh.writeSeats(channels);
       });
-    this.metric = segButtons<RhMetric>([["RSSI", "RSSI"], ["SNR", "SNR"]], (m) => void app.rh.setMetric(m));
     for (let j = 0; j < RH_SEATS; j++) this.tiles.push(this.buildTile(j));
     this.grid.append(...this.tiles.map((t) => t.root));
     this.el = el(
       "section",
       { class: "card span-12" },
-      el("h2", {}, "RotorHazard seats", this.status, el("span", { class: "tools" }, el("span", { class: "muted" }, "Level"), this.metric.el, edit)),
+      el("h2", {}, "RotorHazard seats", this.status, el("span", { class: "tools" }, edit)),
       this.grid,
     );
   }
@@ -117,7 +115,6 @@ export class RhSeats implements View {
   render() {
     const rh = this.app.rh;
     const m = rh.metric;
-    this.metric.sync(m);
     const active = rh.seats.filter((s) => s.channel).length;
     const hz = rh.seats.find((s) => s.channel && s.loopUs)?.loopUs;
     this.status.textContent = !this.app.device
@@ -342,6 +339,7 @@ export class RhSettings implements View {
   private gain = el("input", { type: "range", min: "0", max: "82", step: "1" }) as HTMLInputElement;
   private gainVal = el("span", { class: "val" });
   private mode;
+  private metric;
 
   constructor(private app: App) {
     const rh = app.rh;
@@ -351,11 +349,13 @@ export class RhSettings implements View {
     this.capn.onchange = () => void rh.command(`CAPN ${this.capn.value}`);
     this.gain.oninput = () => (this.gainVal.textContent = this.gain.value);
     this.gain.onchange = () => void rh.command(`GAIN MANUAL ${this.gain.value}`);
+    this.metric = segButtons<RhMetric>([["RSSI", "RSSI"], ["SNR", "SNR"]], (m) => void rh.setMetric(m));
     this.mode = segButtons([["GROUP", "Grouped LOs"], ["SINGLE", "LO per channel"]], (v) => void rh.command(`MODE ${v}`));
     const ctl = (label: string, ...children: Node[]) =>
       this.body.append(el("div", { class: "ctl" }, el("label", {}, label), el("div", { class: "row" }, ...children)));
     ctl("RX gain (PHY table index)", this.gain, this.gainVal);
-    ctl("FFT and capture (FFTs averaged = samples / FFT size, at most 4)", this.fft, this.capn);
+    ctl("Output value", this.metric.el);
+    ctl("FFT bins and capture count", this.fft, this.capn);
     ctl("LO plan", this.mode.el);
     // RotorHazard's UI can't change these: the device applies its saved ones on every switch to this mode.
     const save = el("button", { title: "Save these settings as default" }, "Save");
@@ -366,6 +366,7 @@ export class RhSettings implements View {
 
   render() {
     const rh = this.app.rh;
+    this.metric.sync(rh.metric);
     const c = rh.config as { nfft?: number; capture_samples?: number; gain?: number; gain_max?: number; mode?: string } | null;
     if (c) {
       // Show whatever the device reports, also values outside the lists.

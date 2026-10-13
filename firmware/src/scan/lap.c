@@ -1,6 +1,11 @@
 /* GPL-3.0-or-later. */
 #include <string.h>
 #include "lap.h"
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#else
+#define IRAM_ATTR /* host builds (test/) */
+#endif
 
 static void queue_push(lap_queue_t *q, const lap_extremum_t *e) {
     if (q->n == LAP_HISTORY) { /* drop the oldest */
@@ -100,7 +105,7 @@ static void filtered(lap_seat_t *s, uint32_t t, uint8_t v) {
 
 /* Time of update k in the window: stored for every LAP_TS_EVERY-th update,
  * interpolated in between (towards the next stored one, or the newest). */
-static uint32_t time_of(const lap_seat_t *s, uint32_t k) {
+static IRAM_ATTR uint32_t time_of(const lap_seat_t *s, uint32_t k) {
     uint32_t k0 = k - k % LAP_TS_EVERY, k1 = k0 + LAP_TS_EVERY;
     uint32_t t0 = s->ts[(k0 / LAP_TS_EVERY) % LAP_TS_SLOTS], t1;
     if (k == k0) return t0;
@@ -131,7 +136,7 @@ static void drop_oldest(lap_seat_t *s) {
     s->first++;
 }
 
-void lap_feed(lap_seat_t *s, uint32_t t_ms, uint8_t level, uint32_t loop_us) {
+IRAM_ATTR void lap_feed(lap_seat_t *s, uint32_t t_ms, uint8_t level, uint32_t loop_us) {
     s->loop_us = loop_us > 65535 ? 65535 : (uint16_t)loop_us;
     s->feed_ms = t_ms;
     if (s->seq - s->first == LAP_MAX_SAMPLES) { /* full: the window is shorter than LAP_WINDOW_MS */

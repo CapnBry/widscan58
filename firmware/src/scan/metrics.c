@@ -3,6 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include "metrics.h"
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#else
+#define IRAM_ATTR /* host builds (test/) */
+#endif
 
 uint16_t metrics_log2_dev[257];
 
@@ -12,7 +17,7 @@ void metrics_init(void) {
 }
 
 /* Hoare quickselect: k-th smallest of a[0..n). Reorders a. */
-static uint32_t select_kth(uint32_t *a, unsigned n, unsigned k) {
+static IRAM_ATTR uint32_t select_kth(uint32_t *a, unsigned n, unsigned k) {
     unsigned lo = 0, hi = n - 1;
     while (lo < hi) {
         uint32_t pivot = a[(lo + hi) / 2];
@@ -47,7 +52,7 @@ float metrics_percentile_bias(unsigned segments, float q) {
     return (float)(segments / x);
 }
 
-uint32_t metrics_floor_raw(const metrics_input_t *in, float q, uint32_t *scratch) {
+IRAM_ATTR uint32_t metrics_floor_raw(const metrics_input_t *in, float q, uint32_t *scratch) {
     const int center = (int)(in->nfft / 2), pb = (int)(in->passband_hz / in->bin_hz);
     int k0 = center - pb, k1 = center + pb;
     if (k0 < 0) k0 = 0;
@@ -223,7 +228,7 @@ void metrics_channel(const metrics_input_t *in, const metrics_floor_t *fl, int32
     out->obw_hi_off_hz = (r - center + 0.5f) * in->bin_hz - off;
 }
 
-void metrics_level(const metrics_input_t *in, uint32_t floor_raw, int32_t offset_hz, metrics_level_t *out) {
+IRAM_ATTR void metrics_level(const metrics_input_t *in, uint32_t floor_raw, int32_t offset_hz, metrics_level_t *out) {
     out->flags = 0;
     const int center = (int)(in->nfft / 2), last = (int)in->nfft - 1;
     /* Bins whose center is within +/- rssi_hz of the channel, as metrics_channel. */

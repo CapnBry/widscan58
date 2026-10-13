@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "driver/usb_serial_jtag.h"
+#include "esp_attr.h"
 #include "esp_rom_crc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/ringbuf.h"
@@ -59,7 +60,7 @@ unsigned link_fill_permille(void) {
     return free >= max ? 0 : (unsigned)(1000 - free * 1000 / max);
 }
 
-static bool frame_put(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free,
+static IRAM_ATTR bool frame_put(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free,
                       TickType_t wait) {
     if (!streaming) return false; /* not a drop: nobody is listening for frames */
     size_t len = alen + blen;
@@ -84,7 +85,7 @@ static bool frame_put(uint8_t type, const void *a, size_t alen, const void *b, s
     return true;
 }
 
-bool link_frame(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free) {
+IRAM_ATTR bool link_frame(uint8_t type, const void *a, size_t alen, const void *b, size_t blen, size_t min_free) {
     return frame_put(type, a, alen, b, blen, min_free, 0);
 }
 
@@ -103,7 +104,7 @@ bool link_raw(const void *data, size_t n) {
 bool link_text(const char *text) { return link_raw(text, strlen(text)); }
 
 void link_set_streaming(bool on) { streaming = on; }
-bool link_streaming(void) { return streaming; }
+IRAM_ATTR bool link_streaming(void) { return streaming; }
 
 void link_flush(void) {
     size_t size;

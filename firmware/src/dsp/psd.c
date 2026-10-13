@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dsps_fft2r.h"
+#include "esp_attr.h"
 #include "dsps_fft4r.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -14,13 +15,21 @@
 static float *work;     /* 2 * PSD_MAX_FFT interleaved complex */
 /* Float FFT tables and work buffer in radio_dsp_region() instead of the heap
  * (the C5's heap is small and fragmented): 16 KiB R4 table, 8 KiB work,
- * 4 KiB R2 table. NULL where there is no such region. */
+ * 4 KiB R2 table, then seg_stats. NULL where there is no such region. */
 static uint8_t *region;
 #define REGION_R4 0
 #define REGION_WORK (16 * 1024)
 #define REGION_R2 (24 * 1024)
+#define REGION_SEG (28 * 1024) /* seg_stats, 768 bytes */
 static int16_t *work16; /* same, for the fixed-point FFT */
 static int16_t *window16; /* Q15 Hann */
+/* Pass 1 per segment: integer sums. Kept for all segments first, so the IQ
+ * correction is worked out once per capture (soft float on the C5 cost
+ * ~33 us per segment when done per segment). */
+typedef struct {
+    int32_t si, sq, peak;
+} seg_stats_t;
+static seg_stats_t *seg_stats; /* PSD_MAX_SEGMENTS; in the region, else the heap */
 static psd_fft_t fft_type = PSD_FFT_S16R;
 /* S16 input scaling is block floating point: each segment is shifted left by
  * the most bits that keep it within half the int16 range (one bit of headroom
@@ -50,7 +59,7 @@ extern int s3_fft2r_sc16_rnd(int16_t *data, int N, int16_t *w);
 #endif
 
 void psd_set_fft(psd_fft_t type) { fft_type = type < PSD_FFT_COUNT ? type : PSD_FFT_F32_R4; }
-psd_fft_t psd_get_fft(void) { return fft_type; }
+IRAM_ATTR psd_fft_t psd_get_fft(void) { return fft_type; }
 const char *psd_fft_name(psd_fft_t type) {
     static const char *names[] = {"R2", "R4", "S16", "S16R"};
     return type < PSD_FFT_COUNT ? names[type] : "?";
@@ -146,6 +155,10 @@ esp_err_t psd_init(void) {
     size_t region_bytes;
     region = radio_dsp_region(&region_bytes);
     if (region_bytes < PSD_REGION_BYTES || PSD_MAX_FFT > 1024) region = NULL; /* layout assumes these */
+    _Static_assert(PSD_MAX_SEGMENTS * sizeof(seg_stats_t) <= PSD_REGION_BYTES - REGION_SEG, "seg_stats");
+    seg_stats = region ? (seg_stats_t *)(region + REGION_SEG)
+                       : heap_caps_malloc(PSD_MAX_SEGMENTS * sizeof(seg_stats_t), MALLOC_CAP_INTERNAL);
+    if (!seg_stats) return ESP_ERR_NO_MEM;
     esp_err_t err = dsps_fft4r_init_fc32(region ? (float *)(region + REGION_R4) : NULL, R4_MAX_FFT); /* kept for life, see R4_MAX_FFT */
     if (err != ESP_OK) return err;
     loaded_r4 = true;
@@ -227,18 +240,11 @@ static void iq_coefficients(const psd_iq_t *iq, float *c1, float *c2) {
 }
 #define IQ_AVG 0.0625f /* per segment: ~4 captures of 4 segments */
 
-/* Pass 1 per segment: integer sums. Kept for all segments first, so the IQ
- * correction is worked out once per capture (soft float on the C5 cost
- * ~33 us per segment when done per segment). */
-typedef struct {
-    int32_t si, sq, peak;
-} seg_stats_t;
-static seg_stats_t seg_stats[PSD_MAX_SEGMENTS];
 
 /* round(v / 2^bits), half up; bits >= 1. */
 static inline int32_t round_shift(int32_t v, unsigned bits) { return (v + (1 << (bits - 1))) >> bits; }
 
-esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned max_segments,
+IRAM_ATTR esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned max_segments,
                       float rate_hz, bool conjugate, float usable_hz, unsigned dc_guard,
                       psd_iq_t *iq, psd_result_t *out) {
     if (nfft < 64 || nfft > PSD_MAX_FFT || (nfft & (nfft - 1))) return ESP_ERR_INVALID_ARG;

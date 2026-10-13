@@ -10,6 +10,7 @@
  * during this synchronous call. */
 #include <stdint.h>
 #include <string.h>
+#include "esp_attr.h"
 #include "soc/soc.h"
 #include "recal_c5.h"
 
@@ -41,7 +42,7 @@ void __wrap_phy_set_rx_gain_cal_dc(uintptr_t a, uintptr_t b, uintptr_t c, uintpt
     if (!measurement_mhz) foreign_dc++;
 }
 
-bool c5_cal_replaced(void) {
+IRAM_ATTR bool c5_cal_replaced(void) {
     static unsigned seen;
     unsigned now = foreign_dc;
     bool replaced = now != seen;
@@ -83,14 +84,22 @@ void c5_recalibrate(unsigned mhz) {
 static const struct { uint16_t off, len; } cal_areas[] = {{222, 14}, {384, 272}, {912, 56}};
 #define CAL_BYTES (14 + 272 + 56)
 #define CAL_SLOTS 16
-static struct {
+typedef struct {
     uint16_t mhz; /* 0 = empty */
     uint32_t used;
     uint8_t data[CAL_BYTES];
-} cal_cache[CAL_SLOTS];
+} cal_slot_t;
+static cal_slot_t *cal_cache; /* CAL_SLOTS, in memory from c5_cal_init */
+
+size_t c5_cal_bytes(void) { return CAL_SLOTS * sizeof(cal_slot_t); }
+
+void c5_cal_init(void *mem) {
+    cal_cache = mem;
+    c5_cal_clear();
+}
 static uint32_t cal_clock;
 
-static void cal_copy(uint8_t *data, bool save) {
+static IRAM_ATTR void cal_copy(uint8_t *data, bool save) {
     for (unsigned j = 0, o = 0; j < sizeof(cal_areas) / sizeof(cal_areas[0]); o += cal_areas[j++].len) {
         uint8_t *p = phy_param + cal_areas[j].off;
         if (save) memcpy(data + o, p, cal_areas[j].len);
@@ -98,8 +107,8 @@ static void cal_copy(uint8_t *data, bool save) {
     }
 }
 
-bool c5_cal_restore(unsigned mhz) {
-    if (!phy_param[42]) return false;
+IRAM_ATTR bool c5_cal_restore(unsigned mhz) {
+    if (!cal_cache || !phy_param[42]) return false;
     for (unsigned j = 0; j < CAL_SLOTS; j++) {
         if (cal_cache[j].mhz != mhz) continue;
         cal_copy(cal_cache[j].data, false); /* the channel setup that follows rebuilds the gain table */
@@ -110,7 +119,7 @@ bool c5_cal_restore(unsigned mhz) {
 }
 
 void c5_cal_save(unsigned mhz) {
-    if (!phy_param[42]) return;
+    if (!cal_cache || !phy_param[42]) return;
     unsigned victim = 0;
     for (unsigned j = 0; j < CAL_SLOTS; j++) {
         if (cal_cache[j].mhz == mhz || !cal_cache[j].mhz) { victim = j; break; }
@@ -121,4 +130,6 @@ void c5_cal_save(unsigned mhz) {
     cal_copy(cal_cache[victim].data, true);
 }
 
-void c5_cal_clear(void) { memset(cal_cache, 0, sizeof(cal_cache)); }
+void c5_cal_clear(void) {
+    if (cal_cache) memset(cal_cache, 0, c5_cal_bytes());
+}

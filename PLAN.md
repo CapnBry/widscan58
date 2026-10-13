@@ -805,6 +805,7 @@ server drives it with only `SERIAL_PORTS` configured.
   - Timing moves with the build by up to ~100 µs per hop with no change to
     the code involved (this last build: DSP 305 → 345 µs, 8 seats in
     RotorHazard mode ~2.2 → ~2.4 ms): code placement and flash cache misses.
+    Fixed by running the scan loop from IRAM (next entry).
   - Tune (median, R1–R8, `GROUP`): 607 → 299 µs. Same build, R1–R8,
     `METRICS RSSI`: `FFT 64` 216 → 337 /s, `FFT 128` 182 → 261 /s; `METRICS
     FULL` (4 × 1024) 50 → 54 /s; `MODE SINGLE` at `FFT 64` 108 → 159 /s.
@@ -827,6 +828,49 @@ server drives it with only `SERIAL_PORTS` configured.
     and 404 µs with no change on that path. Both the PHY code and our DSP run
     from flash through the cache, and the DSP time also drops with the
     shorter tune (404 → 340 µs), so code placement decides some of it.
+- Scan loop in IRAM on the C5 (2026-10-13). Hop times moved by up to ~10 %
+  between builds with no change to the code involved: the scan loop ran from
+  flash, and its cache misses depended on where the linker put everything.
+  Now in IRAM: our hot path (`do_hop`, `psd_compute`, `metrics_level`,
+  `metrics_floor_raw`, `lap_feed`/`rh_feed`, frame output, `tune_locked` with
+  the PLL-only retune and gain table replay, `radio_capture`, the cal cache
+  lookup; `IRAM_ATTR`), and through `src/radio/c5/hot_iram.lf` the libm
+  helpers it calls (`lrintf`, `ceilf`, `floorf`, `sqrtf`, `ldexpf`, …; the
+  soft-float routines are already in ROM) and the PLL-only retune's PHY
+  functions (~4 KB, by section name: libphy is linked as `-lphy`, so ldgen
+  cannot map its functions by symbol). `metrics_channel` and the rest of
+  `METRICS FULL`, the spectrum and full channel setup stay in flash. Found
+  with a call-graph walk over the linked ELF from `do_hop`.
+  - Room: IRAM and static data share the SRAM below the RF dump bank
+    (0x40800000–0x40820000), which had ~4.2 KB free for ~20 KB of code. Made
+    by moving the cal cache (5.6 KB) and the gain tables (6.3 KB, from the
+    heap) into the top 24 KB of the dump bank's lower half (the DSP keeps
+    40 KB of it; it uses ~37 KB), `seg_stats` (768 B) into psd's region, the
+    scanner state (4.2 KB) and the command reply buffer (3 KB) to the heap,
+    and IDF's heap functions to flash (`CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH`,
+    1.5 KB). IRAM 74.7 → 92.5 KB; 264 bytes are left below the bank. Free heap
+    in monitor mode 24.9 → 19.9 KB (~1 KB more than the moves account for,
+    not explained).
+  - Test: a block of dead code (0, 1, 3, 7 KB) in flash moves everything
+    linked after it. Per build, 3 s per mode, `FFT 64`, `METRICS RSSI`, R1–R8
+    `GROUP`:
+
+    | Pad | IRAM, `TUNESKIP 3` | Flash (previous commit), `TUNESKIP 3` |
+    |---:|---|---|
+    | 0 | 464.1 /s, tune 225 µs, DSP 255 µs | 329.5 /s, tune 298 µs, DSP 346 µs |
+    | 1 KB | 464.4 /s, 225, 254 | 320.2 /s, 309, 378 |
+    | 3 KB | 464.4 /s, 225, 254 | 308.2 /s, 314, 377 |
+    | 7 KB | 464.1 /s, 225, 254 | 331.9 /s, 307, 349 |
+
+    With `TUNESKIP 0` (full channel setup every hop, still from flash):
+    318.0–318.2 /s vs 227–243 /s. Levels with both tunes within 0.16 dB.
+  - Now: `METRICS FULL` (4 × 1024) 60 /s (hop 4.0 ms: tune 0.23, DSP 3.65);
+    `METRICS RSSI` `FFT 128` 332 /s, `SNR` 318 /s. RotorHazard mode
+    (`rh_check.py`): 8 seats 1.96 ms (~510 /s), 6 seats 1.52 ms, 4 seats
+    0.98 ms; 8 seats SNR 2.0 ms, `FFT 128` 2.73 ms, `FFT 256` 4.29 ms,
+    `SINGLE` 3.86 ms. No comm errors.
+  - PlatformIO's builder runs ldgen into `.pio/build/esp32c5/sections.ld`
+    and does not redo it when a `.lf` file changes; delete it after editing.
 - Not yet tested with a VTX flying through a gate: EnterAt/ExitAt calibration
   for real passes, pass-time accuracy vs RotorHazard's RX5808 nodes, and RSSI vs
   SNR as the level.

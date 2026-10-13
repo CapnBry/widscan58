@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 void c5_recalibrate(unsigned mhz);
 
 /* True once after the PHY replaced the RX calibration on its own (tracking);
@@ -12,3 +13,6 @@ bool c5_cal_replaced(void);
 bool c5_cal_restore(unsigned mhz);
 void c5_cal_save(unsigned mhz);
 void c5_cal_clear(void);
+/* Its memory (c5_cal_bytes), cleared here; without it nothing is cached. */
+size_t c5_cal_bytes(void);
+void c5_cal_init(void *mem);

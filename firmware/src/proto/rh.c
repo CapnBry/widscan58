@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -106,7 +107,7 @@ void rh_reset_levels(void) {
     portEXIT_CRITICAL(&mux);
 }
 
-void rh_feed(unsigned seat_idx, int64_t t_us, uint8_t level) {
+IRAM_ATTR void rh_feed(unsigned seat_idx, int64_t t_us, uint8_t level) {
     if (seat_idx >= RH_SEATS) return;
     if (level < 1) level = 1;
     if (level > 254) level = 254;

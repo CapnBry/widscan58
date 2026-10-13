@@ -41,9 +41,10 @@ typedef struct {
     uint32_t prep_us, fft_us, power_us; /* time breakdown */
 } psd_result_t;
 
-/* Where radio_dsp_region() exists, psd keeps the float FFT tables and work
- * buffer in its first PSD_REGION_BYTES; the rest is free for others. */
-#define PSD_REGION_BYTES (28 * 1024)
+/* Where radio_dsp_region() exists, psd keeps the float FFT tables, work
+ * buffer and per-segment sums in its first PSD_REGION_BYTES; the rest is
+ * free for others. */
+#define PSD_REGION_BYTES (29 * 1024)
 
 /* Digital IQ imbalance correction, one state per LO. The I/Q gain ratio and
  * correlation are averaged over segments (each segment's mean removed), the

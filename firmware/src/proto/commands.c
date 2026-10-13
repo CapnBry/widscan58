@@ -37,19 +37,21 @@
 /* Multi-part replies are assembled here and queued as one item: the scanner
  * task queues frames concurrently, and a frame landing between the pieces of
  * a line cuts it in two on the host. Only the command task uses it. */
-static char reply[3072];
+#define REPLY_BYTES 3072
+static char *reply; /* heap: static SRAM goes to hot code in IRAM on the C5 */
 
 static size_t reply_len;
 static bool reply_overflow;
 
 static void reply_add(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void reply_add(const char *fmt, ...) {
+    if (!reply) reply_overflow = true;
     if (reply_overflow) return;
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(reply + reply_len, sizeof(reply) - reply_len, fmt, ap);
+    int n = vsnprintf(reply + reply_len, REPLY_BYTES - reply_len, fmt, ap);
     va_end(ap);
-    if (n < 0 || (size_t)n >= sizeof(reply) - reply_len) reply_overflow = true;
+    if (n < 0 || (size_t)n >= REPLY_BYTES - reply_len) reply_overflow = true;
     else reply_len += (size_t)n;
 }
 
@@ -57,7 +59,7 @@ static void reply_send(void) {
     link_text(reply_overflow ? "ERR reply_length\n" : reply);
     reply_len = 0;
     reply_overflow = false;
-    reply[0] = 0;
+    if (reply) reply[0] = 0;
 }
 
 static const char *metrics_mode_name(unsigned m) {
@@ -582,6 +584,8 @@ static void commands_task(void *arg) {
 }
 
 void commands_task_start(void) {
+    reply = malloc(REPLY_BYTES);
+    if (reply) reply[0] = 0;
     /* Boot in RotorHazard mode (rh_init has run); monitor mode starts from the defaults. */
     scan_config_t c;
     scanner_get_config(&c);

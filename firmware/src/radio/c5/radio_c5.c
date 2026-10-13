@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/lock.h>
+#include "esp_attr.h"
 #include "esp_phy_init.h"
 #include "esp_private/phy.h"
 #include "esp_rom_sys.h"
@@ -22,6 +23,13 @@
  * of static sections. */
 SOC_RESERVE_MEMORY_REGION(0x40820000, 0x40840000, widscan58_rf_dump);
 #define IQ_BUFFER ((uint32_t *)0x40830000)
+/* The lower half: DSP tables and scratch (radio_dsp_region, psd and FFTEVAL
+ * use ~37 KiB), then our own caches (cal cache, gain tables), here rather
+ * than in static RAM or the heap. A capture leaves it alone; it is not
+ * accessible during one. */
+#define DSP_REGION_BYTES 0xa000u
+#define RADIO_RAM ((uint8_t *)0x40820000 + DSP_REGION_BYTES)
+#define RADIO_RAM_BYTES (0x10000u - DSP_REGION_BYTES)
 #define IQ_WORDS 16380u
 #define IQ_GUARD_WORDS 4u /* overrun sentinels after the last sample; ends at the bank end */
 #define SRAM_OWNER_REG 0x60095004u
@@ -106,18 +114,18 @@ static uint32_t recal_center_khz = 5787000;
 static unsigned calibrated_mhz;
 static uint32_t cal_gen = 1; /* bumped whenever the DC/IQ tables may have changed */
 
-static unsigned gain_max(void) {
+static IRAM_ATTR unsigned gain_max(void) {
     unsigned maximum = (REG_READ(GAIN_REG) >> 8) & 127u;
     return maximum < 90u ? maximum : 0u; /* never expose uncalibrated slots */
 }
 
-static void gain_apply(void) {
+static IRAM_ATTR void gain_apply(void) {
     unsigned maximum = gain_max();
     if (gain_code > maximum) gain_code = maximum;
     force_rx_gain(gain_mode == RADIO_GAIN_MANUAL, gain_code, 0);
 }
 
-const radio_caps_t *radio_caps(void) {
+IRAM_ATTR const radio_caps_t *radio_caps(void) {
     caps.gain_max = gain_max();
     return &caps;
 }
@@ -150,7 +158,7 @@ void radio_force_recal(void) {
  * PLAN.md, tune time on the C5. */
 static volatile bool rx_tuning;
 extern void __real_ets_delay_us(uint32_t us);
-void __wrap_ets_delay_us(uint32_t us) {
+IRAM_ATTR void __wrap_ets_delay_us(uint32_t us) {
     if (rx_tuning && us == 300) return;
     __real_ets_delay_us(us);
 }
@@ -188,7 +196,7 @@ typedef struct {
     uint8_t w2[GAIN_MEM_N];
     uint8_t agc_max[3]; /* phy_param +292..294 */
 } gain_slot_t;
-static gain_slot_t *gain_slots; /* heap, on first use (TUNESKIP bit 0) */
+static gain_slot_t *gain_slots; /* GAIN_SLOTS, in RADIO_RAM (radio_init) */
 static gain_slot_t *gain_rec;   /* recording into this slot */
 static unsigned gain_rec_n;
 static bool gain_rec_ok;
@@ -198,7 +206,7 @@ static uint32_t gain_gen; /* ... from this calibration */
 
 /* Prototype unknown (four register values, the last one the entry index). */
 extern void __real_phy_write_gain_mem(uint32_t, uint32_t, uint32_t, uint32_t);
-void __wrap_phy_write_gain_mem(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+IRAM_ATTR void __wrap_phy_write_gain_mem(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
     __real_phy_write_gain_mem(a0, a1, a2, a3);
     if (!gain_rec) return;
     if (a3 != gain_rec_n || gain_rec_n >= GAIN_MEM_N || a2 > 255u) {
@@ -211,7 +219,7 @@ void __wrap_phy_write_gain_mem(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a
 }
 
 /* The slot holding this LO's table for the current calibration, or NULL. */
-static gain_slot_t *gain_slot_for(unsigned mhz) {
+static IRAM_ATTR gain_slot_t *gain_slot_for(unsigned mhz) {
     for (unsigned j = 0; gain_slots && j < GAIN_SLOTS; j++)
         if (gain_slots[j].mhz == mhz && gain_slots[j].gen == cal_gen) return &gain_slots[j];
     return NULL;
@@ -219,7 +227,6 @@ static gain_slot_t *gain_slot_for(unsigned mhz) {
 
 /* An empty or stale slot, else the least recently used one. */
 static gain_slot_t *gain_slot_victim(void) {
-    if (!gain_slots) gain_slots = calloc(GAIN_SLOTS, sizeof(gain_slot_t));
     gain_slot_t *victim = NULL;
     for (unsigned j = 0; gain_slots && j < GAIN_SLOTS; j++) {
         gain_slot_t *slot = &gain_slots[j];
@@ -246,7 +253,7 @@ static void gain_rec_end(unsigned mhz, int64_t now) {
     slot->built_us = now;
 }
 
-static void gain_table_load(unsigned mhz, int64_t now) {
+static IRAM_ATTR void gain_table_load(unsigned mhz, int64_t now) {
     gain_slot_t *slot = gain_slot_for(mhz);
     if (slot && now - slot->built_us <= GAIN_SLOT_MAX_AGE_US) {
         for (unsigned k = 0; k < GAIN_MEM_N; k++) __real_phy_write_gain_mem(slot->w0[k], slot->w1[k], slot->w2[k], k);
@@ -267,7 +274,7 @@ static void gain_table_load(unsigned mhz, int64_t now) {
  * LO's gain table is refreshed once per cycle; it waits at most a rotation
  * for its LO. Without a plan, or if that LO does not come within another
  * interval (a RAWIQ snapshot elsewhere), it runs on the current LO. */
-static bool full_tune_here(uint32_t lo_khz, int64_t now) {
+static IRAM_ATTR bool full_tune_here(uint32_t lo_khz, int64_t now) {
     if (!plan_n || now - last_full_tune > 2 * FULL_TUNE_INTERVAL_US) return true;
     return lo_khz == plan_lo_khz[plan_next];
 }
@@ -284,7 +291,7 @@ static bool full_tune_here(uint32_t lo_khz, int64_t now) {
  * - the RX gain table, replayed from gain_slots where possible.
  * With the gain re-apply, a hop's tune takes ~0.3 ms instead of ~0.5-0.6 ms
  * (PLAN.md, PLL-only retune on the C5). */
-static void pll_retune(unsigned mhz, bool restored, int64_t now) {
+static IRAM_ATTR void pll_retune(unsigned mhz, bool restored, int64_t now) {
     *(uint16_t *)(phy_param + 288) = (uint16_t)mhz;
     phy_rfpll_set_adc_rate();
     phy_set_channel_rfpll_freq_new(mhz, phy_param[49], *(int16_t *)(phy_param + 30));
@@ -293,7 +300,7 @@ static void pll_retune(unsigned mhz, bool restored, int64_t now) {
     phy_xtal_duty_set(mhz);
 }
 
-static esp_err_t tune_locked(uint32_t lo_khz) {
+static IRAM_ATTR esp_err_t tune_locked(uint32_t lo_khz) {
     /* Tracking recalibrated at its reference channels: our tables, cached
      * ones included, are stale (they also predate a temperature change). */
     if (c5_cal_replaced()) {
@@ -355,7 +362,7 @@ static esp_err_t tune_locked(uint32_t lo_khz) {
 /* Under the PHY lock: PHY tracking (an esp_timer callback every second) takes
  * it, and its calibration interleaved with ours hung the scanner within
  * seconds (PLAN.md, PHY tracking on the C5). */
-esp_err_t radio_tune(uint32_t lo_khz) {
+IRAM_ATTR esp_err_t radio_tune(uint32_t lo_khz) {
     if (lo_khz % 1000u || lo_khz < 100000u || lo_khz > 6000000u) return ESP_ERR_INVALID_ARG;
     _lock_t lock = phy_get_lock();
     _lock_acquire(&lock);
@@ -373,7 +380,7 @@ void radio_set_gain(radio_gain_mode_t mode, unsigned index) {
     gain_apply();
 }
 
-radio_gain_mode_t radio_get_gain(unsigned *index) {
+IRAM_ATTR radio_gain_mode_t radio_get_gain(unsigned *index) {
     if (index) *index = gain_code;
     return gain_mode;
 }
@@ -382,14 +389,14 @@ radio_gain_mode_t radio_get_gain(unsigned *index) {
  * Applied only around a snapshot and restored before any retune, so PHY
  * calibration always sees its own setting. */
 static unsigned filter_saved[2];
-static void filter_apply(void) {
+static IRAM_ATTR void filter_apply(void) {
     for (unsigned j = 0; j < 2; j++) {
         filter_saved[j] = phy_chip_i2c_readReg(0x67, 1, 6 + j);
         if (filter_code >= 0)
             phy_i2c_writeReg(0x67, 1, 6 + j, (filter_saved[j] & ~63u) | (unsigned)filter_code);
     }
 }
-static void filter_restore(void) {
+static IRAM_ATTR void filter_restore(void) {
     if (filter_code >= 0)
         for (unsigned j = 0; j < 2; j++) phy_i2c_writeReg(0x67, 1, 6 + j, filter_saved[j]);
 }
@@ -403,7 +410,7 @@ static void filter_restore(void) {
 #define DUMP_CTRL_REG 0x600a9004u /* [16:0] length, 17, 18 done, 19 trigger, [21:20], 31 enable */
 #define DUMP_CONF_REG 0x600a9008u /* [20:17] source, [23:21] rate code */
 #define DUMP_PACK_REG 0x600a9018u /* four 6-bit lane selectors, 24 enable */
-static bool dump_capture(unsigned n, unsigned rate_code) {
+static IRAM_ATTR bool dump_capture(unsigned n, unsigned rate_code) {
     REG_WRITE(DUMP_CONF_REG, (REG_READ(DUMP_CONF_REG) & ~(7u << 21)) | ((rate_code & 7u) << 21));
     REG_WRITE(0x600a9c04u, 0xffffffffu);
     REG_SET_BIT(0x600a0800u, 4u);
@@ -423,7 +430,7 @@ static bool dump_capture(unsigned n, unsigned rate_code) {
     return done;
 }
 
-esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
+IRAM_ATTR esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
                         uint32_t *elapsed_us) {
     if (n < 16 || n > IQ_WORDS || rate_code >= RADIO_MAX_RATES) return ESP_ERR_INVALID_ARG;
     for (unsigned j = 0; j < n; j++) IQ_BUFFER[j] = FILL_WORD;
@@ -451,6 +458,11 @@ esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, cons
 }
 
 esp_err_t radio_init(void) {
+    _Static_assert(GAIN_SLOTS * sizeof(gain_slot_t) <= RADIO_RAM_BYTES, "gain slots");
+    gain_slots = (gain_slot_t *)RADIO_RAM;
+    memset(gain_slots, 0, GAIN_SLOTS * sizeof(gain_slot_t));
+    size_t gain_bytes = (GAIN_SLOTS * sizeof(gain_slot_t) + 15u) & ~15u;
+    if (gain_bytes + c5_cal_bytes() <= RADIO_RAM_BYTES) c5_cal_init(RADIO_RAM + gain_bytes);
     radio_set_recal(RADIO_RECAL_ONCE, recal_center_khz);
     esp_err_t err = radio_tune(recal_center_khz);
     esp_rom_delay_us(3000);
@@ -462,7 +474,7 @@ esp_err_t radio_init(void) {
  * survive captures (checked on hardware: 4000+ captures of every size and
  * rate, recalibration on every tune, hardware AGC). */
 void *radio_dsp_region(size_t *bytes) {
-    if (bytes) *bytes = 0x10000u;
+    if (bytes) *bytes = DSP_REGION_BYTES;
     return (void *)0x40820000;
 }
 

@@ -14,7 +14,7 @@ board is a RotorHazard timer node instead: one USB port with a seat per channel
 (see "RotorHazard mode" below).
 
 Targets: the **ESP32-C5** (real 5.8 GHz) runs on a Seeed XIAO ESP32-C5 and works
-with the web UI: ~4.75 ms/hop, about 53 rotations/s over R1–R8 (PLAN.md, Status,
+with the web UI: ~4.0 ms/hop, about 60 rotations/s over R1–R8 (PLAN.md, Status,
 has the breakdown). The **ESP32-S3** runs a scaled 2.4 GHz mock-up of the 5.8 GHz
 band (PLAN.md §2.2); it is a development target only.
 
@@ -87,6 +87,19 @@ platform pins ESP-IDF 5.5.5. Before changing the platform version, run
 and the same with `esp32c5`. The firmware depends on private PHY functions, and
 they must stay identical. Both targets pass against IDF 5.5.5.
 
+**Scan loop in IRAM (C5):** the code each hop runs is in IRAM, so the hop time
+no longer depends on code placement; from flash it moved by up to ~10 % with
+unrelated changes (flash cache misses; PLAN.md, Status). Ours is `IRAM_ATTR`
+in the sources; the libm helpers and the PLL-only tune's PHY functions are
+placed by `src/radio/c5/hot_iram.lf`. When a hot-path function is added, mark
+it too. Static RAM below the RF dump bank (0x40820000) is down to a few hundred
+bytes: a new static variable or IRAM function can fail the link with "RF dump
+bank overlaps BSS" (`sram_guard.ld`). The scanner state and command reply
+buffer are on the heap; the cal cache and gain tables are in the dump bank's
+lower half (`radio_c5.c`, `RADIO_RAM`). PlatformIO does not regenerate its
+`sections.ld` when a `.lf` file changes: delete
+`.pio/build/esp32c5/sections.ld` after editing one.
+
 **Firmware version:** `INFO` (and RotorHazard's firmware version) reports
 `PROJECT_VER`, the `git describe --tags --always --dirty` that
 `firmware/CMakeLists.txt` takes at CMake configure time. PlatformIO only
@@ -117,26 +130,26 @@ ESP32-C5, all 8 channels (4 pair LOs), 4096 samples at 80 MS/s, 4 × 1024-point 
 
 | FFT | Hop | Updates per channel |
 |---|---:|---:|
-| S16R (default) | ~4.75 ms (tune 0.70, capture 0.12, DSP 3.9) | ~53 /s |
+| S16R (default) | ~4.0 ms (tune 0.23, DSP 3.65) | ~60 /s |
 | S16 | ~6.4 ms (DSP 5.6) | ~39 /s |
 | R4 / R2 (soft float, no FPU) | ~65 / ~67 ms | ~3.8 / ~3.7 /s |
 | S16R, `FFT 256` (4 × 256-point, 312.5 kHz bins) | ~2.1 ms (DSP 1.2) | ~122 /s |
 | S16, `FFT 256` | ~2.35 ms (DSP 1.6) | ~106 /s |
 | S16R, `FFT 128`, `CAPN 512` (4 × 128-point, 625 kHz bins), `SPEC 0` | ~1.69 ms (DSP 0.90) | ~143 /s |
-| the same, `METRICS SNR` | ~1.27 ms (tune 0.60, DSP 0.63) | ~184 /s |
-| the same, `METRICS RSSI` | ~0.97 ms (tune 0.48, DSP 0.46) | ~239 /s |
+| the same, `METRICS SNR` | ~0.73 ms (tune 0.23, DSP 0.47) | ~318 /s |
+| the same, `METRICS RSSI` | ~0.71 ms (tune 0.23, DSP 0.45) | ~332 /s |
 | `METRICS RSSI`, `FFT 128`, `SEGMENTS 2`, `CAPN 256` | ~0.96 ms (DSP 0.35) | ~248 /s |
-| `METRICS RSSI`, `FFT 64`, `CAPN 256` (4 × 64-point, 1.25 MHz bins) | ~0.78 ms (tune 0.48, DSP 0.27) | ~296 /s |
+| `METRICS RSSI`, `FFT 64`, `CAPN 256` (4 × 64-point, 1.25 MHz bins) | ~0.51 ms (tune 0.23, DSP 0.25) | ~464 /s |
 | `METRICS RSSI`, `FFT 64`, `SEGMENTS 8`, `CAPN 512` | ~1.04 ms (DSP 0.45) | ~227 /s |
 
 The tune includes the per-LO calibration cache restore (`RECALMODE CACHE`, the
 C5 default); DSP is most of the hop (PLAN.md, Status). Each hop tunes the next
 hop's LO right after its capture, so the settle time (`SETTLE`, 100 µs) runs
 during the DSP; the capture only waits for what is left of it (none below
-~350 µs at `FFT 64`). The rows above 1.06 ms predate that (~0.1 ms more). All
-rows predate the PLL-only retune (PLAN.md, Status), which cut the tune to
-~0.3 ms with `TUNESKIP 1` and ~0.26 ms with the default 3: `METRICS RSSI`,
-`FFT 64` now runs ~376 /s, `FFT 128` ~282 /s. The DSP includes the
+~350 µs at `FFT 64`). The default row, the `METRICS SNR|RSSI` rows and the
+`FFT 64` row are from 2026-10-13, with the PLL-only retune (`TUNESKIP 3`)
+and the scan loop in IRAM (below); the others are older, with a full channel
+setup every hop (tune ~0.5–0.7 ms) and the scan loop in flash. The DSP includes the
 digital IQ correction (`IQCORR`, on by default): ~0.17 ms per hop at 1024
 points, ~0.07 ms at 256, ~0.04 ms at 4 × 128 (its coefficients are worked
 out once per capture). The R4/R2 rows predate it. With `METRICS RSSI|SNR` the
@@ -194,8 +207,8 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   unknown frequency (RotorHazard writes 1111 for "off") is left out of the scan
   plan. The capture is always 4 × the FFT size (4 segments; `CAPN` answers
   `ERR rh_mode`). The defaults in this mode: `FFT 64` (256 samples),
-  `METRICS RSSI`, no display spectrum; with R1–R6 that is ~1.6 ms between
-  updates of a seat (~620 /s; R1–R8 ~2.2 ms, ~460 /s; `rh_check.py`'s
+  `METRICS RSSI`, no display spectrum; with R1–R6 that is ~1.5 ms between
+  updates of a seat (~660 /s; R1–R8 ~1.96 ms, ~510 /s; `rh_check.py`'s
   `loop_time`, docs/RotorHazard.md). `CONFIG SAVE` replaces the gain, FFT, metric and LO
   plan defaults (NVS, `commands.c`); they are applied on every switch to this
   mode.
@@ -213,7 +226,7 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   samples at ~1 kHz); nothing is reported for the first 255 ms after a reset.
   It comes from a histogram of the level codes, with a timestamp every 8th
   update; the seats are on the heap (~7.6 KB for 8), since the C5's static RAM
-  below the RF dump bank had only ~5 KB left. Then a crossing from EnterAt
+  below the RF dump bank is nearly full (scan loop in IRAM). Then a crossing from EnterAt
   until below ExitAt, and the pass at the middle of the crossing's highest
   plateau. Peaks
   and nadirs (4-code, 1 dB hysteresis, 8 queued each) feed the server's RSSI graph.

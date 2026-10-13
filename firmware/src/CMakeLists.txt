@@ -20,6 +20,7 @@ elseif(IDF_TARGET STREQUAL "esp32c5")
     list(APPEND sources "radio/c5/radio_c5.c" "radio/c5/recal_c5.c")
     set(target_dir "radio/c5")
     set(wrapped_chan_ana "phy_chip_set_chan_ana")
+    set(ldfragments "radio/c5/hot_iram.lf") # the scan loop's library code in IRAM
     # Parts of channel setup a receiver does not need (radio_c5.c, radio_tune).
     set(wrapped_extra "-Wl,--wrap=ets_delay_us" "-Wl,--wrap=phy_wifi_set_tx_gain_new"
         "-Wl,--wrap=phy_set_rx_gain_cal_dc" # counts PHY tracking's recalibrations (recal_c5.c)
@@ -30,6 +31,7 @@ endif()
 
 idf_component_register(SRCS ${sources}
     INCLUDE_DIRS ${includes}
+    LDFRAGMENTS ${ldfragments}
     REQUIRES esp_app_format esp_driver_usb_serial_jtag esp_wifi esp_phy esp_timer esp_hw_support
              nvs_flash esp_rom espressif__esp-dsp)
 

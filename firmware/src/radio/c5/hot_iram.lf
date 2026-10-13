@@ -1,0 +1,77 @@
+# The scan loop's library code in IRAM (ESP32-C5): libm helpers the DSP and
+# metrics call per hop, and the PHY functions of the PLL-only retune
+# (radio_c5.c, pll_retune). From flash, their cache misses made the hop time
+# move with the build's code placement. Our own scan-loop functions are
+# IRAM_ATTR in the sources.
+# GPL-3.0-or-later.
+
+[mapping:widscan58_libm]
+archive: libm.a
+entries:
+    libm_a-sf_lrint (noflash)
+    libm_a-sf_ceil (noflash)
+    libm_a-sf_floor (noflash)
+    libm_a-wf_sqrt (noflash)
+    libm_a-ef_sqrt (noflash)
+    libm_a-sf_ldexp (noflash)
+    libm_a-sf_scalbn (noflash)
+    libm_a-sf_finite (noflash)
+    libm_a-sf_fmax (noflash)
+    libm_a-sf_fpclassify (noflash)
+    libm_a-sf_finite (noflash)
+
+[mapping:widscan58_libc]
+archive: libc.a
+entries:
+    libc_a-errno (noflash)
+    libm_a-sf_ldexp (noflash)
+    libm_a-sf_scalbn (noflash)
+    libm_a-sf_finite (noflash)
+
+# libphy.a is linked by name (-lphy), so ldgen does not read it and cannot
+# map single functions of it; its function sections are named instead.
+[sections:widscan58_phy_hot]
+entries:
+    .text.phy_set_channel_rfpll_freq_new
+    .text.phy_set_rf_freq_offset
+    .text.phy_set_rfpll_freq
+    .text.phy_rfpll_set_freq
+    .text.phy_write_rfpll_sdm
+    .text.phy_restart_cal
+    .text.phy_wait_rfpll_cal_end_new
+    .text.phy_rfpll_set_adc_rate
+    .text.phy_set_freq_i2c_new
+    .text.phy_get_vco_init_new
+    .text.phy_get_i2c_hostid_
+    .text.phy_get_i2c_read_mask_
+    .text.phy_freq_mem_change_5g_
+    .text.phy_wr_freq_mem
+    .text.phy_freq_mem_data
+    .text.phy_freq_i2c_mem_write
+    .text.phy_band_change
+    .text.phy_band_reg
+    .text.phy_tatget_pwr_band
+    .text.phy_set_rx_pbus_freq
+    .text.phy_set_pbus_mem
+    .text.phy_set_pbus_mem_5g
+    .text.phy_write_pbus_mem
+    .text.phy_pbus_reg_store
+    .text.phy_xtal_duty_set
+    .text.phy_get_xtal_duty
+    .text.phy_write_gain_mem
+    .text.phy_rx_filter_mode
+    .text.phy_abs_temp
+
+[scheme:widscan58_phy_hot]
+entries:
+    widscan58_phy_hot -> iram0_text
+
+[mapping:widscan58_phy]
+archive: libphy.a
+entries:
+    * (widscan58_phy_hot)
+
+[mapping:widscan58_esp_phy]
+archive: libesp_phy.a
+entries:
+    phy_init:phy_get_lock (noflash)

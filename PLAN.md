@@ -755,6 +755,49 @@ server drives it with only `SERIAL_PORTS` configured.
   wait ~1650 µs, so up to ~350 µs of settle is free at `FFT 64`. In
   RotorHazard mode (`rh_check.py`, 8 seats) 3.38–3.41 → 3.18–3.22 ms, a
   smaller gain (~50 µs per hop) than in monitor mode (~80 µs); not explained.
+- PLL-only retune on the C5 (2026-10-13, `TUNESKIP 1`; the C5 default is now 3):
+  between full tunes (every 200 ms, and after a fresh calibration) a hop runs
+  only the frequency-dependent parts of `phy_chip_set_chan` (`radio_c5.c`,
+  `pll_retune`): `phy_rfpll_set_adc_rate` (ADC rate and RX filter mode; this
+  is the 5830/5831 MHz switch above: without it R7 read ~1 dB high, with the
+  filter of whichever LO had the last full tune), `phy_set_channel_rfpll_freq_new`
+  (band, SDM, 5 GHz ckgen and PLL calibration; given the kHz correction at
+  `phy_param+30` that channel setup passes, which `phy_chip_set_chan_ana`
+  leaves at 0), the pbus memory (~14 µs) and the crystal duty (~13 µs), plus
+  the RX gain table. Left out: AGC off/on, TX power and gain tables, DC
+  memory clear, packet-detect DC cal, bandwidth registers.
+  - The gain table (`phy_set_rx_gain_table`, ~170–200 µs) is most of what
+    is left. It writes 84 entries through `phy_write_gain_mem` (~35 µs of
+    it), now wrapped: the first build per LO is recorded and later visits
+    replay it. A replay matched a fresh build bit for bit (0 differing
+    entries in ~2600 comparisons, `ONCE` and `CACHE`). The table build also
+    sets the AGC's maximum gain (`phy_param+292..294`,
+    `phy_agc_max_gain_set`), which differs between LOs: replaying the
+    entries alone read 2–5 dB high on R1/R2 with `RECALMODE ONCE`, so it is
+    replayed too. Slots (8, ~6 KB heap) follow the calibration and expire
+    after 1 s.
+  - Tune (median, R1–R8, `GROUP`): 607 → 299 µs. Same build, R1–R8,
+    `METRICS RSSI`: `FFT 64` 216 → 337 /s, `FFT 128` 182 → 261 /s; `METRICS
+    FULL` (4 × 1024) 50 → 54 /s; `MODE SINGLE` at `FFT 64` 108 → 159 /s.
+    `TUNESKIP 3` (also no RX path re-apply) saves ~35 µs more (376 /s), same
+    levels; now the C5 default (RotorHazard mode, 8 seats: ~2.2 ms). The
+    mask is reported as `tskip` in `STATUS?`/`CONFIG?`, and the UI's Scanner
+    controls have a toggle per bit. `TUNESKIP 7` reads +27 dB: the PLL-only
+    tune resets the manual gain too.
+  - Levels vs the full tune (`CACHE`, dummy load, gain 50): channel RSSI and
+    floor within 0.1–0.3 dB at `FFT 64`, 128 and 1024, per-bin floor within
+    0.1 dB at every LO, DC within its run-to-run spread, same flags. Board
+    spurs at 5680/5760/5920 MHz within ±0.4 kHz in `RAWIQ` captures, as with
+    the full tune. `RECALMODE ONCE` scatters ±0.5 dB between runs either way.
+  - RotorHazard mode (`rh_check.py`, `loop_time` median): 4 seats 1.6 → 1.22
+    ms, 6 seats 2.4 → 1.81 ms, 8 seats 3.2 → 2.45 ms; 8 seats SNR 2.59 ms,
+    `FFT 128` 3.22 ms, `FFT 256` 4.80 ms, `SINGLE` 4.89 ms. 2 minutes with 8
+    seats: no comm errors, no resets.
+  - The full-tune numbers move with the build: HEAD measured 473 µs tune,
+    304 µs DSP and 284 /s at `FFT 64`; this build with `TUNESKIP 0` 607 µs
+    and 404 µs with no change on that path. Both the PHY code and our DSP run
+    from flash through the cache, and the DSP time also drops with the
+    shorter tune (404 → 340 µs), so code placement decides some of it.
 - Not yet tested with a VTX flying through a gate: EnterAt/ExitAt calibration
   for real passes, pass-time accuracy vs RotorHazard's RX5808 nodes, and RSSI vs
   SNR as the level.
@@ -781,7 +824,7 @@ server drives it with only `SERIAL_PORTS` configured.
 - Largest items: a fixed 300 µs `ets_delay_us` at the end of `phy_set_rfpll_freq`; `phy_set_rx_gain_table` (~160 µs, rebuilds the RX gain memory from the DC tables); `phy_wifi_set_tx_gain_new` (~85 µs, the TX gain table); 14 `phy_i2c_writeReg_Mask` + 11 `phy_i2c_readReg` (~75 µs); `phy_freq_i2c_data_write` (~46 µs). Settle (`SETTLE`, 100 µs) is outside it.
 - The 300 µs wait is redundant: right after it, `phy_wait_rfpll_cal_end_new` restarts the PLL calibration itself, waits 20 µs and checks the VCO code (retrying up to 10 times while it reads 125–130). With the wait skipped, spurs land within 4 kHz of their frequency after 50–350 MHz jumps (300 captures, none off; the stock sequence had 2 off-frequency captures in 300, both raised-floor bursts).
 - Now skipped while `radio_tune` runs channel setup (`--wrap` of `ets_delay_us` and `phy_wifi_set_tx_gain_new`, gated by a flag): the 300 µs wait and the TX gain table. `c5_cal_restore` no longer rebuilds the gain table itself, since channel setup does (that was a duplicate ~160 µs per hop in `CACHE` mode). Full-spectrum comparison against the stock sequence at five LOs: floor within 0.07 dB, no new lines, same DC.
-- What remains in channel setup (~560 µs) is mostly the gain-table rebuild (~170 µs) and I2C register traffic. Further cuts would mean a PLL-only retune like the S3's (`phy_set_rf_freq_offset`), which skips the per-frequency settings that channel setup applies (band, pbus memory, RX compensation, the 5831 MHz filter change), so it needs care.
+- What remains in channel setup (~560 µs) is mostly the gain-table rebuild (~170 µs) and I2C register traffic. Further cuts would mean a PLL-only retune like the S3's (`phy_set_rf_freq_offset`), which skips the per-frequency settings that channel setup applies (band, pbus memory, RX compensation, the 5831 MHz filter change), so it needs care. (Done 2026-10-13: "PLL-only retune on the C5" above.)
 
 **Peak, center and occupied BW are time-averaged (2026-10-08).**
 - With a VTX on R1 (SNR ~42 dB), the per-snapshot values scattered: peak sd 1.3 MHz, centroid sd 0.84 MHz, −10 dB width mostly 0.2–1.1 MHz. Recomputing them in Python from raw captures gave the same numbers, so the arithmetic was right; the definitions were the problem. A capture is 51 µs, less than one 64 µs line, and the carrier sat at about +1.5 MHz (picture level) with ~5 µs dips to −3.5 MHz (sync) every line, so each snapshot saw one or two of those.

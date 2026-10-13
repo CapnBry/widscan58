@@ -133,7 +133,10 @@ The tune includes the per-LO calibration cache restore (`RECALMODE CACHE`, the
 C5 default); DSP is most of the hop (PLAN.md, Status). Each hop tunes the next
 hop's LO right after its capture, so the settle time (`SETTLE`, 100 µs) runs
 during the DSP; the capture only waits for what is left of it (none below
-~350 µs at `FFT 64`). The rows above 1.06 ms predate that (~0.1 ms more). The DSP includes the
+~350 µs at `FFT 64`). The rows above 1.06 ms predate that (~0.1 ms more). All
+rows predate the PLL-only retune (PLAN.md, Status), which cut the tune to
+~0.3 ms with `TUNESKIP 1` and ~0.26 ms with the default 3: `METRICS RSSI`,
+`FFT 64` now runs ~376 /s, `FFT 128` ~282 /s. The DSP includes the
 digital IQ correction (`IQCORR`, on by default): ~0.17 ms per hop at 1024
 points, ~0.07 ms at 256, ~0.04 ms at 4 × 128 (its coefficients are worked
 out once per capture). The R4/R2 rows predate it. With `METRICS RSSI|SNR` the
@@ -170,7 +173,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as consecutive 1024-sample `RAWIQ` frames (header: total `n` and this chunk's `offset`). At most `rawiq_max` samples, the capture buffer: 16380 on both targets. The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `IQCORR 0\|1` | Digital IQ imbalance correction before the FFT (default 1). Removes the mirror image of strong signals, e.g. R1 showing on R2 in pair mode. |
-| `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. `SETTLE` overlaps the DSP: the next capture waits for what is left of it. |
+| `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. `SETTLE` overlaps the DSP: the next capture waits for what is left of it. `TUNESKIP` bit 0 retunes only the PLL between full tunes (S3 default 7, C5 default 3; `TUNESKIP 0` runs the C5's full channel setup every hop), bit 1 skips the RX path re-apply, bit 2 the gain re-apply (wrong on the C5: +27 dB). Reported as `tskip` in `STATUS?`/`CONFIG?`, and set from the UI's Scanner controls |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
 | `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, the default gain (manual 50) |
@@ -191,8 +194,8 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   unknown frequency (RotorHazard writes 1111 for "off") is left out of the scan
   plan. The capture is always 4 × the FFT size (4 segments; `CAPN` answers
   `ERR rh_mode`). The defaults in this mode: `FFT 64` (256 samples),
-  `METRICS RSSI`, no display spectrum; with R1–R6 that is ~2.4 ms between
-  updates of a seat (~410 /s; R1–R8 ~3.2 ms, ~310 /s; `rh_check.py`'s
+  `METRICS RSSI`, no display spectrum; with R1–R6 that is ~1.6 ms between
+  updates of a seat (~620 /s; R1–R8 ~2.2 ms, ~460 /s; `rh_check.py`'s
   `loop_time`, docs/RotorHazard.md). `CONFIG SAVE` replaces the gain, FFT, metric and LO
   plan defaults (NVS, `commands.c`); they are applied on every switch to this
   mode.

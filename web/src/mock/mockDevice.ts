@@ -148,10 +148,13 @@ export class MockTransport implements Transport {
   // CONFIG SAVE: applied on every PROTOCOL RH, as the firmware (not kept across page loads).
   private static readonly RH_BUILTIN = { gainManual: true, gain: 50, group: true, metric: "RSSI" as "RSSI" | "SNR", nfft: 64 };
   private rhSaved = { ...MockTransport.RH_BUILTIN };
+  private readonly tskipDefault: number; // the firmware's TUNESKIP default per target
+  private tskip: number;
 
   constructor(target: SimTarget = "c5") {
     this.profile = target === "s3" ? race24 : c5race;
     this.channels = this.profile.channels;
+    this.tskipDefault = this.tskip = target === "s3" ? 7 : 3;
   }
 
   async open(onBytes: (c: Uint8Array) => void): Promise<void> {
@@ -266,6 +269,7 @@ export class MockTransport implements Transport {
             conjugate: 1,
             iq_corr: 1,
             settle_us: 100,
+            tskip: this.tskip,
             gain_mode: this.gainManual ? "MANUAL" : "HARDWARE",
             gain: this.gain,
             gain_max: 82,
@@ -351,7 +355,11 @@ export class MockTransport implements Transport {
         return this.text(`SPURS ${p.spursKhz.length} ${p.spursKhz.join(" ")} guard 60000\n`);
       case line === "RECAL":
         return this.text("OK RECAL\n");
-      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "WIN", "SPURS", "TUNESKIP", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
+      case parts[0] === "TUNESKIP":
+        if (parts.length !== 2 || !/^[0-7]$/.test(parts[1])) return this.text("ERR command\n");
+        this.tskip = num(1);
+        return ok();
+      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "WIN", "SPURS", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
         return ok();
       case line === "REBOOT":
         // Like the firmware: back to defaults, silent in RotorHazard mode.
@@ -361,6 +369,7 @@ export class MockTransport implements Transport {
           this.channels = p.channels;
           this.enabled = (1 << this.channels.length) - 1;
           this.metricsMode = "FULL";
+          this.tskip = this.tskipDefault;
           this.reset();
           this.applyRhSaved();
         }, 300);

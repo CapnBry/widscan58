@@ -167,6 +167,30 @@ export class Controls implements View {
       settle,
     );
     this.syncs.push((st) => (settle.value = String(st.settle_us)));
+    // Tune skip: TUNESKIP bits, each a toggle (S3 default 7, C5 3)
+    const tskip = el("span", { class: "seg" });
+    const tskipBits = (
+      [
+        [1, "PLL only"],
+        [2, "Skip RX path"],
+        [4, "Skip gain"],
+      ] as const
+    ).map(([bit, label]) => {
+      const b = el("button", {}, label);
+      b.onclick = () => {
+        const mask = this.app.store.status?.tskip;
+        if (mask !== undefined) void this.apply(`TUNESKIP ${mask ^ bit}`);
+      };
+      tskip.append(b);
+      return [bit, b] as const;
+    });
+    this.ctl("Tune skip between full tunes (debug; skipping gain is wrong on the C5)", tskip);
+    this.syncs.push((st) => {
+      for (const [bit, b] of tskipBits) {
+        b.classList.toggle("on", st.tskip !== undefined && (st.tskip & bit) !== 0);
+        b.disabled = st.tskip === undefined;
+      }
+    });
     this.ctl(
       "Spectrum orientation",
       this.seg([["1", "Conjugate (default)"], ["0", "Raw"]], (v) => void this.apply(`CONJ ${v}`), (st) => String(st.conjugate)),

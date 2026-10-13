@@ -328,6 +328,7 @@ export interface Status {
   conjugate: number;
   iq_corr: number;
   settle_us: number;
+  tskip?: number; // TUNESKIP mask; absent from firmware before it was reported
   gain_mode: "MANUAL" | "HARDWARE";
   gain: number;
   gain_max: number;

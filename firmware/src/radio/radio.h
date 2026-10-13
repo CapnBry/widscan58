@@ -60,9 +60,11 @@ radio_gain_mode_t radio_get_gain(unsigned *index);
 esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
                         uint32_t *elapsed_us);
 
-/* Debug: skip parts of the per-hop tune sequence (bit 0: channel setup,
- * bit 1: PBUS/RX clock re-enable, bit 2: gain re-apply). */
+/* Debug: skip parts of the per-hop tune sequence between full tunes (bit 0:
+ * channel setup, retuning only the PLL; bit 1: PBUS/RX clock re-enable;
+ * bit 2: gain re-apply). Defaults: S3 7, C5 3. */
 void radio_set_tune_skip(unsigned mask);
+unsigned radio_get_tune_skip(void);
 
 /* The capture aperture, for scratch use between captures (it is overwritten
  * by the next radio_capture). */

@@ -64,24 +64,24 @@ the seat, the interval between updates:
 
 | Seats on | LOs | Time between updates | Updates per seat |
 |---:|---:|---:|---:|
-| 1 | 1 | ~0.28 ms | ~3600 /s |
+| 1 | 1 | ~0.26 ms | ~3800 /s |
 | 2 | 1 | ~0.28 ms | ~3500 /s |
-| 3 | 2 | ~1.6 ms | ~625 /s |
-| 4 | 2 | ~1.6 ms | ~620 /s |
-| 5 | 3 | ~2.4 ms | ~415 /s |
-| 6 | 3 | ~2.4 ms | ~410 /s |
-| 7 | 4 | ~3.2 ms | ~315 /s |
-| 8 | 4 | ~3.2 ms | ~310 /s |
+| 3 | 2 | ~1.07 ms | ~930 /s |
+| 4 | 2 | ~1.09 ms | ~915 /s |
+| 5 | 3 | ~1.63 ms | ~615 /s |
+| 6 | 3 | ~1.61 ms | ~620 /s |
+| 7 | 4 | ~2.14 ms | ~465 /s |
+| 8 | 4 | ~2.18 ms | ~460 /s |
 
 - The LO count decides the rate, not the seat count. Bands R and E need 4 LOs
   for 8 channels; A, B and F need 3. Spread-out mixed channels can need one LO
   per seat.
-- RSSI and SNR run at the same rate (8 seats: ~3.25 ms with SNR).
+- RSSI and SNR run at nearly the same rate (8 seats: ~2.3 ms with SNR).
 - Larger FFTs cost more processing per hop and lower all the rates: with 8
-  seats, ~4.0 ms (~250 /s) at 128 points and ~5.6 ms (~180 /s) at 256. They
+  seats, ~3.1 ms (~320 /s) at 128 points and ~4.5 ms (~220 /s) at 256. They
   give finer bins, which RSSI and SNR output typically don't need.
 - **SINGLE mode** (LO per channel) gives every seat its own LO, so it runs at
-  roughly half the GROUP rate for the same seats (8 seats: ~6.5 ms, ~150 /s).
+  roughly half the GROUP rate for the same seats (8 seats: ~4.5 ms, ~220 /s).
 
 ## Smoothing
 

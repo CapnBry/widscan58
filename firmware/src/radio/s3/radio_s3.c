@@ -66,6 +66,7 @@ void radio_set_tune_skip(unsigned mask) {
     tune_skip = mask;
     tuned_once = false;
 }
+unsigned radio_get_tune_skip(void) { return tune_skip; }
 static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
 static unsigned gain_code = 50;
 static int filter_code = -1;

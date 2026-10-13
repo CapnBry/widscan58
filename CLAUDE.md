@@ -124,13 +124,16 @@ ESP32-C5, all 8 channels (4 pair LOs), 4096 samples at 80 MS/s, 4 × 1024-point 
 | S16, `FFT 256` | ~2.35 ms (DSP 1.6) | ~106 /s |
 | S16R, `FFT 128`, `CAPN 512` (4 × 128-point, 625 kHz bins), `SPEC 0` | ~1.69 ms (DSP 0.90) | ~143 /s |
 | the same, `METRICS SNR` | ~1.27 ms (tune 0.60, DSP 0.63) | ~184 /s |
-| the same, `METRICS RSSI` | ~1.21 ms (tune 0.59, DSP 0.59) | ~196 /s |
+| the same, `METRICS RSSI` | ~1.06 ms (tune 0.57, DSP 0.46) | ~227 /s |
 | `METRICS RSSI`, `FFT 128`, `SEGMENTS 2`, `CAPN 256` | ~0.96 ms (DSP 0.35) | ~248 /s |
+| `METRICS RSSI`, `FFT 64`, `CAPN 256` (4 × 64-point, 1.25 MHz bins) | ~0.86 ms (DSP 0.27) | ~272 /s |
+| `METRICS RSSI`, `FFT 64`, `SEGMENTS 8`, `CAPN 512` | ~1.04 ms (DSP 0.45) | ~227 /s |
 
 The tune includes the per-LO calibration cache restore (`RECALMODE CACHE`, the
 C5 default); DSP is most of the hop (PLAN.md, Status). The DSP includes the
 digital IQ correction (`IQCORR`, on by default): ~0.17 ms per hop at 1024
-points, ~0.07 ms at 256. The R4/R2 rows predate it. With `METRICS RSSI|SNR` the
+points, ~0.07 ms at 256, ~0.04 ms at 4 × 128 (its coefficients are worked
+out once per capture). The R4/R2 rows predate it. With `METRICS RSSI|SNR` the
 per-channel work drops from ~0.27–0.4 ms to ~0.035 / ~0.05 ms per hop, and the
 tune measures ~0.15 ms shorter (not yet explained; the frames are much smaller).
 
@@ -158,7 +161,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
-| `CAPN <samples>`, `FFT <n>` | Capture length (from 256) and FFT size (from 128; S3: up to 2048; C5: up to 1024) |
+| `CAPN <samples>`, `FFT <n>` | Capture length (from 256) and FFT size (from 64; S3: up to 2048; C5: up to 1024). In RotorHazard mode `CAPN` is refused: the capture is always 4 × the FFT size |
 | `METRICS FULL\|RSSI\|SNR`, `METRICS?` | Per-channel measurements. `FULL` (default): everything, `METRICS` frames. `RSSI`: only the RSSI-window power; `SNR`: that plus noise floor and SNR. Both send compact `LEVELS` frames of byte codes (integer math per channel, for lap timing); the UI leaves the rest blank. They do not mask board spurs (at `FFT 128` the mask would cover ~1.9 MHz of R8 on the C5; the unmasked spur adds ~2 dB to the empty channel) |
 | `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
 | `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as consecutive 1024-sample `RAWIQ` frames (header: total `n` and this chunk's `offset`). At most `rawiq_max` samples, the capture buffer: 16380 on both targets. The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
@@ -167,8 +170,9 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
-| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `CAPN`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them. Without a save: `FFT 128`, `CAPN 512`, `METRICS RSSI`, `MODE GROUP`, the default gain (manual 50) |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `CAPN`, `FILTER`, `IQCORR` and `MODE GROUP\|SINGLE` work; the rest answer `ERR rh_mode` |
+| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, the default gain (manual 50) |
+| `CONFIG RESET` | RotorHazard mode only: erase the saved RotorHazard mode defaults and apply the built-in ones |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR` and `MODE GROUP\|SINGLE` work; the rest answer `ERR rh_mode` |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
 ## RotorHazard mode
@@ -182,9 +186,11 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   server-side code, `src/interface/serial_node.py` and `RHInterface.py`) and
   `src/scan/lap.c` (crossing detection per seat, host-tested). A seat set to an
   unknown frequency (RotorHazard writes 1111 for "off") is left out of the scan
-  plan. The defaults in this mode: `FFT 128`, `CAPN 512`, `METRICS RSSI`, no
-  display spectrum; with R1–R6 that is ~3.5 ms between updates of a seat
-  (~285 /s). `CONFIG SAVE` replaces the gain, FFT, capture, metric and LO
+  plan. The capture is always 4 × the FFT size (4 segments; `CAPN` answers
+  `ERR rh_mode`). The defaults in this mode: `FFT 64` (256 samples),
+  `METRICS RSSI`, no display spectrum; with R1–R6 that is ~2.5 ms between
+  updates of a seat (~400 /s; R1–R8 ~3.35 ms, ~300 /s; `rh_check.py`'s
+  `loop_time`, docs/RotorHazard.md). `CONFIG SAVE` replaces the gain, FFT, metric and LO
   plan defaults (NVS, `commands.c`); they are applied on every switch to this
   mode.
 - **Levels** are the `METRICS` byte codes, in 0.25 dB steps: RSSI (dBFS =
@@ -212,14 +218,14 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   crossings; at manual gain 60 the seats sit at codes ~64–71 and `--enter 67
   --exit 67` gave 239 passes in 30 s).
 - **Testing in RotorHazard mode:** `PROTOCOL RH` applies the user's saved
-  defaults, so after switching, *set* `MODE`, `CAPN`, `FFT`, `GAIN` and
-  `METRICS` to what the test needs, but never `CONFIG SAVE` them. Leave them
+  defaults, so after switching, *set* `MODE`, `FFT`, `GAIN` and
+  `METRICS` to what the test needs, but never `CONFIG SAVE` them (or `CONFIG RESET`). Leave them
   as the test set them afterwards; there is no need to restore anything.
   RotorHazard's port open (DTR and RTS cleared, as `rh_check.py` does through
   its code) resets the C5, which boots with the saved defaults: settings
   sent before `rh_check.py` connects are lost. Give them to it instead:
   `--cmd "METRICS RSSI" --cmd "GAIN MANUAL 60"` (sent after discovery, on its
-  own port; it stops on an `ERR` reply and refuses `CONFIG SAVE`).
+  own port; it stops on an `ERR` reply and refuses `CONFIG SAVE` and `CONFIG RESET`).
 
 ## Web UI
 
@@ -243,7 +249,7 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   are), a level graph with passes, the detection events with lap times, and
   the receiver settings this mode allows.
   The page takes the metric and receiver settings from the device (`CONFIG?`)
-  and never sets them on connect; Receiver → Save sends `CONFIG SAVE`.
+  and never sets them on connect; Receiver → Save sends `CONFIG SAVE`, Reset `CONFIG RESET`.
   Seats take the channels of the shared channel plan in frequency order (Edit
   channels). Disconnect before a RotorHazard server opens the port.
 - **Connect device**: Web Serial. Chrome, Edge, Firefox and Android Chrome all

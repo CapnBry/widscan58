@@ -25,6 +25,9 @@ const char *psd_fft_name(psd_fft_t type);
  * selected type does not need (FFTEVAL loads all of them temporarily). */
 void psd_release_unused(void);
 
+/* psd_compute uses at most this many segments (the SEGMENTS limit). */
+#define PSD_MAX_SEGMENTS 64
+
 typedef struct {
     unsigned nfft;
     unsigned segments;      /* actually used */
@@ -43,8 +46,9 @@ typedef struct {
 #define PSD_REGION_BYTES (28 * 1024)
 
 /* Digital IQ imbalance correction, one state per LO. The I/Q gain ratio and
- * correlation are averaged over segments (each segment's mean removed) and Q
- * is rebuilt orthogonal to I with I's power before the FFT. Valid for proper
+ * correlation are averaged over segments (each segment's mean removed), the
+ * state updated once per capture, and Q is rebuilt orthogonal to I with I's
+ * power before the FFT. Valid for proper
  * (circular) signals, which noise, FM video and pairs of independent signals
  * all are. The PHY's own IQ calibration leaves ~20-40 dB of image rejection;
  * this gave 55-58 dB on the C5 (PLAN.md, image rejection). */
@@ -55,7 +59,8 @@ typedef struct {
 
 esp_err_t psd_init(void);
 /* words: packed I/Q (radio.h). Uses floor(n/nfft) non-overlapping Hann
- * segments (at most max_segments). Each segment has its mean removed.
+ * segments (at most max_segments and PSD_MAX_SEGMENTS). Each segment has its
+ * mean removed.
  * Bins within +/-dc_guard of the LO and beyond +/-usable_hz are marked invalid.
  * iq: IQ correction state for this LO, updated and applied; NULL = off. */
 esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned max_segments,

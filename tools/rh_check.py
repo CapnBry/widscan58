@@ -20,8 +20,8 @@ Opening the port as RotorHazard does resets the board into its saved
 defaults, so receiver settings for the test go in with --cmd, sent once
 discovery is done (before the seats are set up), e.g.
   --cmd "METRICS RSSI" --cmd "GAIN MANUAL 60"
-Only commands RotorHazard mode allows work (see CLAUDE.md); CONFIG SAVE is
-refused here, so a test never changes the saved defaults.
+Only commands RotorHazard mode allows work (see CLAUDE.md); CONFIG SAVE and
+CONFIG RESET are refused here, so a test never changes the saved defaults.
 """
 import argparse
 import logging
@@ -45,8 +45,8 @@ ap.add_argument("--seats", type=int, default=6, help="seats given R1.. (the rest
 ap.add_argument("--cmd", action="append", default=[], metavar="LINE",
                 help="device command to send after discovery, e.g. 'METRICS RSSI' (repeatable; not saved)")
 args = ap.parse_args()
-if any(c.strip().upper().startswith("CONFIG SAVE") for c in args.cmd):
-    ap.error("--cmd CONFIG SAVE would change the saved RotorHazard defaults")
+if any(c.strip().upper().startswith(("CONFIG SAVE", "CONFIG RESET")) for c in args.cmd):
+    ap.error("--cmd CONFIG SAVE/RESET would change the saved RotorHazard defaults")
 sys.path.insert(0, os.path.join(args.rh, "src", "interface"))
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 

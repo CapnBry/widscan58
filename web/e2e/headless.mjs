@@ -163,12 +163,20 @@ await sleep(3000);
 const reapplied = await rhCfg();
 check(
   "PROTOCOL RH applies the saved settings",
-  reapplied.nfft === 256 && reapplied.metrics === "SNR" && reapplied.metric === "SNR",
-  JSON.stringify({ nfft: reapplied.nfft, metrics: reapplied.metrics, page: reapplied.metric }),
+  reapplied.nfft === 256 && reapplied.capture_samples === 1024 && reapplied.metrics === "SNR" && reapplied.metric === "SNR",
+  JSON.stringify({ nfft: reapplied.nfft, capn: reapplied.capture_samples, metrics: reapplied.metrics, page: reapplied.metric }),
+);
+const [resetBtn] = await page.$$("xpath/.//button[normalize-space()='Reset']");
+await resetBtn.click();
+await sleep(500);
+const reset = await rhCfg();
+check(
+  "Reset applies the built-in defaults",
+  reset.nfft === 64 && reset.capture_samples === 256 && reset.metrics === "RSSI" && reset.metric === "RSSI" && reset.mode === "GROUP",
+  JSON.stringify({ nfft: reset.nfft, capn: reset.capture_samples, metrics: reset.metrics, page: reset.metric, mode: reset.mode }),
 );
 for (const c of [
   `FFT ${saved0.nfft}`,
-  `CAPN ${saved0.capture_samples}`,
   `MODE ${saved0.mode}`,
   saved0.gain_mode === "MANUAL" ? `GAIN MANUAL ${saved0.gain}` : "GAIN HARDWARE",
 ])

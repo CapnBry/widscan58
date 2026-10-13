@@ -227,12 +227,24 @@ static void iq_coefficients(const psd_iq_t *iq, float *c1, float *c2) {
 }
 #define IQ_AVG 0.0625f /* per segment: ~4 captures of 4 segments */
 
+/* Pass 1 per segment: integer sums. Kept for all segments first, so the IQ
+ * correction is worked out once per capture (soft float on the C5 cost
+ * ~33 us per segment when done per segment). */
+typedef struct {
+    int32_t si, sq, peak;
+} seg_stats_t;
+static seg_stats_t seg_stats[PSD_MAX_SEGMENTS];
+
+/* round(v / 2^bits), half up; bits >= 1. */
+static inline int32_t round_shift(int32_t v, unsigned bits) { return (v + (1 << (bits - 1))) >> bits; }
+
 esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned max_segments,
                       float rate_hz, bool conjugate, float usable_hz, unsigned dc_guard,
                       psd_iq_t *iq, psd_result_t *out) {
     if (nfft < 64 || nfft > PSD_MAX_FFT || (nfft & (nfft - 1))) return ESP_ERR_INVALID_ARG;
     unsigned segments = n / nfft;
     if (segments > max_segments) segments = max_segments;
+    if (segments > PSD_MAX_SEGMENTS) segments = PSD_MAX_SEGMENTS;
     if (!segments) return ESP_ERR_INVALID_SIZE;
     psd_fft_t type = fft_type == PSD_FFT_F32_R4 && !is_power_of_4(nfft) ? PSD_FFT_F32_R2 : fft_type;
     esp_err_t err = ensure(type);
@@ -240,6 +252,7 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
     const bool natural = natural_out(type);
     window_setup(nfft, natural);
     memset(acc, 0, nfft * sizeof(*acc));
+    const unsigned log2n = 31 - (unsigned)__builtin_clz(nfft);
 
     /* S16: acc holds integer power in units of 2^acc_exp (see S16_UNIT_EXP).
      * A segment with less input shift (a stronger signal) needs a coarser
@@ -250,18 +263,20 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
     int acc_exp = -1; /* nothing accumulated yet */
 
     unsigned saturated = 0;
-    double dci = 0, dcq = 0;
+    int64_t dci = 0, dcq = 0;
+    /* Centered moments summed over segments, times nfft: nfft * sum(i^2) -
+     * sum(i)^2 per segment (< 2^39 each). */
+    int64_t cii = 0, cqq = 0, ciq = 0;
     int64_t t_prep = 0, t_fft = 0, t_power = 0, t = esp_timer_get_time(), t2;
     const float qsign = conjugate ? -1.0f : 1.0f;
     const unsigned half = nfft / 2;
+    /* Pass 1: unpack, sum for the mean, count rail hits, peak. The peak uses
+     * one's-complement magnitudes (v ^ sign): both rails, -512 and 511, map to
+     * 511, so one compare finds them. The S16 shift bound below has room for
+     * the 1 it can under-read. */
     for (unsigned s = 0; s < segments; s++) {
         const uint32_t *seg = words + s * nfft;
-        /* Pass 1: unpack, sum for the mean, count rail hits, peak. The peak
-         * uses one's-complement magnitudes (v ^ sign): both rails, -512 and
-         * 511, map to 511, so one compare finds them. The S16 shift bound
-         * below has room for the 1 it can under-read. */
         int32_t si = 0, sq = 0, peak = 0;
-        int64_t sii = 0, sqq = 0, siq = 0;
         if (iq) {
             /* Products of 10-bit values: 2^18 each, so a segment's sums fit 2^29. */
             int32_t pii = 0, pqq = 0, piq = 0;
@@ -277,9 +292,9 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
                 saturated += m >= 511;
                 if (m > peak) peak = m;
             }
-            sii = pii;
-            sqq = pqq;
-            siq = piq;
+            cii += ((int64_t)pii << log2n) - (int64_t)si * si;
+            cqq += ((int64_t)pqq << log2n) - (int64_t)sq * sq;
+            ciq += ((int64_t)piq << log2n) - (int64_t)si * sq;
         } else {
             for (unsigned j = 0; j < nfft; j++) {
                 int32_t i = radio_word_i(seg[j]), q = radio_word_q(seg[j]);
@@ -291,31 +306,49 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
                 if (m > peak) peak = m;
             }
         }
-        float mi = (float)si / nfft, mq = (float)sq / nfft;
-        dci += mi;
-        dcq += mq;
-        float c1 = 1.0f, c2 = 0.0f;
-        if (iq) {
-            float ii = (float)sii / nfft - mi * mi, qq = (float)sqq / nfft - mq * mq, iqm = (float)siq / nfft - mi * mq;
-            if (!iq->init) {
-                iq->ii = ii;
-                iq->qq = qq;
-                iq->iq = iqm;
-                iq->init = true;
-            } else {
-                iq->ii += IQ_AVG * (ii - iq->ii);
-                iq->qq += IQ_AVG * (qq - iq->qq);
-                iq->iq += IQ_AVG * (iqm - iq->iq);
-            }
-            iq_coefficients(iq, &c1, &c2);
+        seg_stats[s] = (seg_stats_t){.si = si, .sq = sq, .peak = peak};
+        dci += si;
+        dcq += sq;
+    }
+    /* IQ correction, once per capture: the moments' average updates the
+     * per-LO state with the weight the per-segment updates would have had
+     * together, 1 - (1 - IQ_AVG)^segments. */
+    float c1 = 1.0f, c2 = 0.0f;
+    if (iq) {
+        const float k = 1.0f / ((float)segments * (float)nfft * (float)nfft);
+        const float ii = (float)cii * k, qq = (float)cqq * k, iqm = (float)ciq * k;
+        if (!iq->init) {
+            iq->ii = ii;
+            iq->qq = qq;
+            iq->iq = iqm;
+            iq->init = true;
+        } else {
+            float keep = 1.0f;
+            for (unsigned s = 0; s < segments; s++) keep *= 1.0f - IQ_AVG;
+            const float a = 1.0f - keep;
+            iq->ii += a * (ii - iq->ii);
+            iq->qq += a * (qq - iq->qq);
+            iq->iq += a * (iqm - iq->iq);
         }
+        iq_coefficients(iq, &c1, &c2);
+    }
+    /* Q14, as window_s16 applies them; the S16 shift bound uses the same
+     * values, so it covers the gain the correction really applies. */
+    const int32_t k1 = (int32_t)lrintf(c1 * 16384.0f), k2 = (int32_t)lrintf(c2 * 16384.0f);
+    const int32_t gain_q14 = abs(k1) + abs(k2) > 16384 ? abs(k1) + abs(k2) : 16384;
+    t2 = esp_timer_get_time(); t_prep += t2 - t; t = t2;
+
+    for (unsigned s = 0; s < segments; s++) {
+        const uint32_t *seg = words + s * nfft;
+        const seg_stats_t *st = &seg_stats[s];
         /* Pass 2: remove the mean (DC/LO leakage), window, optional conjugate. */
         unsigned power_shift = 0;
         if (is_s16(type)) {
             /* |v - mean| <= peak + |mean|, and the IQ correction can grow Q by
              * up to |c1| + |c2|; keep that below 2^14 after the shift.
              * Windowed values then stay within int16 without clamping. */
-            int32_t bound = (int32_t)ceilf((peak + fmaxf(fabsf(mi), fabsf(mq))) * fmaxf(1.0f, fabsf(c1) + fabsf(c2)));
+            const int32_t ami = (abs(st->si) + (int32_t)nfft - 1) >> log2n, amq = (abs(st->sq) + (int32_t)nfft - 1) >> log2n;
+            const int32_t bound = ((st->peak + (ami > amq ? ami : amq)) * gain_q14 + 16383) >> 14;
             int shift = 0;
             while (shift < S16_MAX_SHIFT && (bound << (shift + 1)) <= 16383) shift++;
             int e = 2 * (S16_MAX_SHIFT - shift) + (int)headroom;
@@ -325,8 +358,10 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
                 acc_exp = e;
             }
             power_shift = (unsigned)(acc_exp - 2 * (S16_MAX_SHIFT - shift));
-            const int32_t m_i = (int32_t)lrintf(ldexpf(mi, shift)), m_q = (int32_t)lrintf(ldexpf(mq, shift));
-            const int32_t k1 = (int32_t)lrintf(c1 * 16384.0f), k2 = (int32_t)lrintf(c2 * 16384.0f);
+            /* The mean at the segment's scale, rounded: sum * 2^shift / nfft.
+             * No overflow: |mean| <= peak + 1 and peak << shift < 2^14. */
+            const int32_t m_i = shift >= (int)log2n ? st->si << (shift - (int)log2n) : round_shift(st->si, log2n - (unsigned)shift);
+            const int32_t m_q = shift >= (int)log2n ? st->sq << (shift - (int)log2n) : round_shift(st->sq, log2n - (unsigned)shift);
             if (natural) {
                 if (conjugate) window_s16(seg, nfft, shift, m_i, m_q, k1, k2, true, true);
                 else window_s16(seg, nfft, shift, m_i, m_q, k1, k2, true, false);
@@ -335,6 +370,7 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
                 else window_s16(seg, nfft, shift, m_i, m_q, k1, k2, false, false);
             }
         } else {
+            const float mi = (float)st->si / nfft, mq = (float)st->sq / nfft;
             for (unsigned j = 0; j < nfft; j++) {
                 float w = window[j];
                 float ci = radio_word_i(seg[j]) - mi, cq = radio_word_q(seg[j]) - mq;
@@ -407,8 +443,8 @@ esp_err_t psd_compute(const uint32_t *words, unsigned n, unsigned nfft, unsigned
     out->bin_hz = bin_hz;
     out->enbw_bins = nfft * window_s2 / (window_s1 * window_s1);
     out->saturated = saturated;
-    out->dc_i = (float)(dci / segments);
-    out->dc_q = (float)(dcq / segments);
+    out->dc_i = (float)dci / (float)(segments * nfft);
+    out->dc_q = (float)dcq / (float)(segments * nfft);
     out->prep_us = (uint32_t)t_prep;
     out->fft_us = (uint32_t)t_fft;
     out->power_us = (uint32_t)t_power;

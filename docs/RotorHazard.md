@@ -56,31 +56,32 @@ mode, channels within 40 MHz share an LO, so one capture covers two Raceband
 channels. A full pass over the seats is "number of LOs × hop time". With only
 one LO the board never retunes, which is much faster.
 
-Measured on the C5 with the default RotorHazard settings (`FFT 128`, `CAPN 512`:
-four 128-point FFTs with 625 kHz bins, averaged), GROUP LO, Raceband
-R1 up to Rn, using RotorHazard's own interface code (`tools/rh_check.py`). The
-time is the board's `loop_time` for the seat, the interval between updates:
+Measured on the C5 with the default RotorHazard settings (a 64-point FFT:
+each capture is four 64-point FFTs with 1.25 MHz bins, averaged), RSSI, GROUP
+LO, Raceband R1 up to Rn, using RotorHazard's own interface code
+(`tools/rh_check.py`). The time is the median of the board's `loop_time` for
+the seat, the interval between updates:
 
 | Seats on | LOs | Time between updates | Updates per seat |
 |---:|---:|---:|---:|
-| 1 | 1 | ~0.57 ms | ~1750 /s |
-| 2 | 1 | ~0.59 ms | ~1700 /s |
-| 3 | 2 | ~2.35 ms | ~425 /s |
-| 4 | 2 | ~2.4 ms | ~415 /s |
-| 5 | 3 | ~3.6 ms | ~280 /s |
-| 6 | 3 | ~3.6 ms | ~280 /s |
-| 7 | 4 | ~4.75 ms | ~210 /s |
-| 8 | 4 | ~4.75 ms | ~210 /s |
+| 1 | 1 | ~0.26 ms | ~3850 /s |
+| 2 | 1 | ~0.28 ms | ~3600 /s |
+| 3 | 2 | ~1.66 ms | ~600 /s |
+| 4 | 2 | ~1.67 ms | ~600 /s |
+| 5 | 3 | ~2.5 ms | ~400 /s |
+| 6 | 3 | ~2.5 ms | ~400 /s |
+| 7 | 4 | ~3.35 ms | ~300 /s |
+| 8 | 4 | ~3.35 ms | ~300 /s |
 
 - The LO count decides the rate, not the seat count. Bands R and E need 4 LOs
   for 8 channels; A, B and F need 3. Spread-out mixed channels can need one LO
   per seat.
-- RSSI and SNR run at the same rate.
-- Larger FFTs (256-bin, 512-bin) and longer captures cost more processing per hop and
-  lower all the rates. They give finer bins, which RSSI and SNR output typically
-  don't need.
+- RSSI and SNR run at the same rate (8 seats: ~3.4 ms with SNR).
+- Larger FFTs cost more processing per hop and lower all the rates: with 8
+  seats, ~4.15 ms (~240 /s) at 128 points and ~5.7 ms (~175 /s) at 256. They
+  give finer bins, which RSSI and SNR output typically don't need.
 - **SINGLE mode** (LO per channel) gives every seat its own LO, so it runs at
-  roughly half the GROUP rate for the same seats.
+  roughly half the GROUP rate for the same seats (8 seats: ~6.6 ms, ~150 /s).
 
 ## Smoothing
 
@@ -105,7 +106,7 @@ window's middle read, about 128 ms back.
 
 | | RotorHazard node | Widscan58 |
 |---|---|---|
-| Updates per seat | ~1000 /s | 210–1750 /s (see Performance) |
+| Updates per seat | ~1000 /s | 300–3850 /s (see Performance) |
 | One update | one ADC read of the RX5808 RSSI voltage | the power in the channel's ±5 MHz window, from four averaged FFTs of one capture |
 | Median window | 255 reads, ~255 ms | 255 ms, at most 255 updates |
 | Level steps | ADC counts, 0–255 | 0.25 dB (RSSI or SNR codes, 1–254) |

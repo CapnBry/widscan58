@@ -335,7 +335,6 @@ export class RhSettings implements View {
   private body = el("div", { class: "controls" });
   private stats = el("div", { class: "muted" });
   private fft = el("select") as HTMLSelectElement;
-  private capn = el("select") as HTMLSelectElement;
   private gain = el("input", { type: "range", min: "0", max: "82", step: "1" }) as HTMLInputElement;
   private gainVal = el("span", { class: "val" });
   private mode;
@@ -343,40 +342,40 @@ export class RhSettings implements View {
 
   constructor(private app: App) {
     const rh = app.rh;
-    for (const v of [128, 256, 512]) this.fft.append(new Option(`${v}-pt FFT`, String(v)));
-    for (const v of [256, 512, 1024, 2048]) this.capn.append(new Option(`${v} samples`, String(v)));
+    // The device captures 4 FFTs' worth of samples in this mode.
+    for (const v of [64, 128, 256, 512]) this.fft.append(new Option(`${v}-pt FFT (${4 * v} samples)`, String(v)));
     this.fft.onchange = () => void rh.command(`FFT ${this.fft.value}`);
-    this.capn.onchange = () => void rh.command(`CAPN ${this.capn.value}`);
     this.gain.oninput = () => (this.gainVal.textContent = this.gain.value);
     this.gain.onchange = () => void rh.command(`GAIN MANUAL ${this.gain.value}`);
     this.metric = segButtons<RhMetric>([["RSSI", "RSSI"], ["SNR", "SNR"]], (m) => void rh.setMetric(m));
-    this.mode = segButtons([["GROUP", "Grouped LOs"], ["SINGLE", "LO per channel"]], (v) => void rh.command(`MODE ${v}`));
+    this.mode = segButtons([["GROUP", "Grouped"], ["SINGLE", "Per channel"]], (v) => void rh.command(`MODE ${v}`));
     const ctl = (label: string, ...children: Node[]) =>
       this.body.append(el("div", { class: "ctl" }, el("label", {}, label), el("div", { class: "row" }, ...children)));
     ctl("RX gain (PHY table index)", this.gain, this.gainVal);
     ctl("Output value", this.metric.el);
-    ctl("FFT bins and capture count", this.fft, this.capn);
+    ctl("FFT size", this.fft);
     ctl("LO plan", this.mode.el);
     // RotorHazard's UI can't change these: the device applies its saved ones on every switch to this mode.
     const save = el("button", { title: "Save these settings as default" }, "Save");
     save.onclick = () => void rh.saveDefaults();
-    ctl("Save these settings as default", save);
+    const reset = el("button", {}, "Reset");
+    reset.onclick = () => void rh.resetDefaults();
+    ctl("Save these settings as default", save, reset);
     this.el = el("section", { class: "card span-12" }, el("h2", {}, "Receiver"), this.body, this.stats);
   }
 
   render() {
     const rh = this.app.rh;
     this.metric.sync(rh.metric);
-    const c = rh.config as { nfft?: number; capture_samples?: number; gain?: number; gain_max?: number; mode?: string } | null;
+    const c = rh.config as { nfft?: number; gain?: number; gain_max?: number; mode?: string } | null;
     if (c) {
       // Show whatever the device reports, also values outside the lists.
-      const pick = (sel: HTMLSelectElement, v: unknown, label: string) => {
-        if (document.activeElement === sel || v === undefined) return;
-        if (![...sel.options].some((o) => o.value === String(v))) sel.append(new Option(`${v} ${label}`, String(v)));
-        sel.value = String(v);
-      };
-      pick(this.fft, c.nfft, "-pt FFT");
-      pick(this.capn, c.capture_samples, "samples");
+      const v = c.nfft;
+      if (document.activeElement !== this.fft && v !== undefined) {
+        if (![...this.fft.options].some((o) => o.value === String(v)))
+          this.fft.append(new Option(`${v}-pt FFT (${4 * v} samples)`, String(v)));
+        this.fft.value = String(v);
+      }
       if (document.activeElement !== this.gain) {
         this.gain.max = String(c.gain_max ?? 82);
         this.gain.value = String(c.gain);

@@ -98,10 +98,10 @@ export class Controls implements View {
     this.syncs.push((st) => (filter.value = String(st.filter)));
     // FFT / capture
     const fftSel = el("select") as HTMLSelectElement;
-    for (const v of [128, 256, 512, 1024, 2048]) fftSel.append(new Option(`${v}-pt FFT`, String(v)));
+    for (const v of [64, 128, 256, 512, 1024, 2048]) fftSel.append(new Option(`${v}-pt FFT`, String(v)));
     fftSel.onchange = () => void this.apply(`FFT ${fftSel.value}`);
     const capSel = el("select") as HTMLSelectElement;
-    for (const v of [1024, 2048, 4096, 8192, 16380]) capSel.append(new Option(`${v} samples`, String(v)));
+    for (const v of [256, 512, 1024, 2048, 4096, 8192, 16380]) capSel.append(new Option(`${v} samples`, String(v)));
     capSel.onchange = () => void this.apply(`CAPN ${capSel.value}`);
     const segs = this.num(1, 64, 1, 56);
     segs.onchange = () => void this.apply(`SEGMENTS ${segs.value}`);

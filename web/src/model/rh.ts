@@ -170,6 +170,10 @@ export class RhModel {
     await this.command("CONFIG SAVE");
   }
 
+  async resetDefaults() {
+    await this.command("CONFIG RESET");
+  }
+
   /** Our command lines allowed in this mode (rh_allowed in commands.c). */
   async command(line: string) {
     if (!this.link) return;

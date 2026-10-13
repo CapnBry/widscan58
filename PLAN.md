@@ -712,6 +712,35 @@ server drives it with only `SERIAL_PORTS` configured.
   `METRICS` on entering RotorHazard mode; it reads the metric from `CONFIG?`.
   Checked on the C5: save, monitor round trip and reboot all bring back the
   saved values; an unsaved change is dropped on the next `PROTOCOL RH`.
+- FFT size only (2026-10-13): in RotorHazard mode the capture is 4 × the FFT
+  size, set by the firmware with `FFT` (`CAPN` answers `ERR rh_mode`), and the
+  saved defaults no longer hold a capture length (blob version 2; a version 1
+  blob is read without it). `FFT 64` (1.25 MHz bins, 256 samples) is allowed
+  in both modes. Model of the ±5 MHz window: noise bandwidth 10.6 → 11.3 MHz
+  from 128 to 64 points, a 10 MHz-wide signal 20 MHz away −88 → −72 dB, so
+  still far below the image and ADC limits. Measured on the C5 (R1–R8,
+  `GROUP`, `METRICS RSSI`): `FFT 128` 208 /s, `FFT 64` 240 /s (DSP 554 →
+  367 µs). With 8 × 64 over 512 samples it was slower than 4 × 128 (184 /s:
+  FFT −23 µs, prep +134 µs): each segment cost ~33 µs of soft-float setup.
+- Per-segment setup in `psd_compute` (2026-10-13): pass 1 now runs over all
+  segments first and keeps integer sums per segment; the IQ moments update
+  the per-LO state once per capture (weight 1 − (1 − 1/16)^segments, what
+  the per-segment updates added up to) and `iq_coefficients` runs once; the
+  S16 mean, shift bound and Q14 coefficients are integers. `FFTEVAL SYNTH`
+  and `LIVE` match the float reference as before (S16R dmean 0.000 dB, drms
+  0.08 / 0.04 dB). Prep and rate on the C5 (R1–R8, `GROUP`, `METRICS RSSI`):
+
+  | Setup | Prep µs | Updates per channel |
+  |---|---:|---:|
+  | 4 × 128, 512 samples | 276 → 171 | 207 → 227 /s |
+  | 4 × 64, 256 samples | 209 → 106 | 236 → 272 /s |
+  | 8 × 64, 512 samples | 405 → 180 | 183 → 227 /s |
+  | 4 × 1024 (`METRICS FULL`) | 1256 → 1106 | 50.9 → 51.1 /s |
+
+  `IQCORR` now costs ~45 µs per hop at 4 × 128 (it was ~190 µs at 8 × 64).
+  Levels with `IQCORR 1` vs `0` differed by up to 1.4 dB on R1/R2 right
+  after a boot and 0–0.3 dB after a `RECAL`: the first-calibration problem
+  in "Next steps" 8, not this change.
 - Not yet tested with a VTX flying through a gate: EnterAt/ExitAt calibration
   for real passes, pass-time accuracy vs RotorHazard's RX5808 nodes, and RSSI vs
   SNR as the level.
@@ -765,7 +794,7 @@ Next steps, in order:
    - **PHY lock and stale-calibration detection on the S3.** The S3 runs the same 1 Hz PHY tracking, and `radio_s3.c` tunes and calibrates without `phy_get_lock()`, so the hang seen on the C5 (see "PHY tracking on the C5") can happen there too. Take the lock in `radio_tune`; for stale detection, esp-sdr wraps `set_rx_gain_cal_dc` (10 word arguments) on the S3. Check first whether the S3's tracker recalibrates RX (its `phy_param_track_tot` callees), and reproduce with the threshold forced low as on the C5.
    - **Test whether `RECALMODE CACHE` would help the S3.** On the S3, `CACHE` currently behaves like `EVERY` (no cache; its calibration snapshot layout is uninvestigated, §4.4). First repeat the C5 comparison of `ONCE` vs `EVERY` there: DC offset per LO across the band, and bursts of raised floor (dummy load, single mode, several `RECAL`s). If `EVERY` is clearly better, find what the S3 calibration writes (diff its `phy_param` areas as on the C5) and port the cache; if not, keep `ONCE`.
 8. **Bad first calibration after boot on the C5.** In 4 of 8 reboots the first calibration of LO 5677 left ~20 dB image rejection (mostly an I/Q gain error, Q ≈ 1.2 × I); `RECAL` always fixed it (37–40 dB). `CACHE` keeps a bad entry until `RECAL` or a tracking recalibration. `IQCORR` hides it from the scanner, but `RAWIQ` still shows it, and it may be related to the bursts of raised floor seen in the first ~20 calibrations of a session under `ONCE` ("Calibration on the C5"). Find out whether it is the first calibration after boot or the first per LO (log the IQ words at +222 per calibration), then fix it (e.g. a throw-away calibration in `radio_init`, or recalibrate when the IQ words are implausible).
-9. **IQ correction cost.** `IQCORR` adds ~0.17 ms per hop at 1024 points (3 multiplies per sample for the moments in pass 1, 2 in pass 2). Once a hop's estimate has settled, the moments could be updated on every Nth capture only, leaving just the pass-2 multiplies.
+9. **IQ correction cost.** `IQCORR` adds ~0.17 ms per hop at 1024 points (3 multiplies per sample for the moments in pass 1, 2 in pass 2). Once a hop's estimate has settled, the moments could be updated on every Nth capture only, leaving just the pass-2 multiplies. ~~Per-segment soft-float setup~~ (done 2026-10-13: IQ coefficients once per capture, integer means; see "Per-segment setup in `psd_compute`" above).
 10. **Revisit the IQ part of the PHY calibration.** With `IQCORR`, per-LO IQ calibration (a transmitted loopback tone each time) matters less. Options measured with the VTX: IQ once at the band center then DC-only per LO matched per-LO IQ; startup IQ only (esp-sdr's policy) gave ~20 dB, which `IQCORR` should now fix up as well (untested). Either would also shrink cache entries to the DC tables.
 
 ## 7. Risks and open questions

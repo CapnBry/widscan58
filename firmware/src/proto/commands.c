@@ -9,8 +9,9 @@
  * streaming.
  *
  * RotorHazard's UI can't set our receiver settings, so CONFIG SAVE keeps
- * RotorHazard mode's gain, FFT size, capture length, level metric and LO
- * plan in NVS; every switch to RotorHazard mode (and boot) applies them.
+ * RotorHazard mode's gain, FFT size, level metric and LO plan in NVS; every
+ * switch to RotorHazard mode (and boot) applies them. CONFIG RESET erases
+ * them and applies the built-in defaults.
  * A switch to monitor mode applies METRICS FULL. */
 #include <inttypes.h>
 #include <stdarg.h>
@@ -83,33 +84,45 @@ static proto_t proto = PROTO_RH;
 /* Scan configuration of the protocol not in use, restored on a switch. */
 static scan_config_t other_cfg;
 
+/* In RotorHazard mode the capture is always four FFT segments. */
+#define RH_SEGMENTS 4
+static void rh_set_fft(scan_config_t *c, unsigned nfft) {
+    c->nfft = (uint16_t)nfft;
+    c->capture_samples = (uint16_t)(RH_SEGMENTS * nfft);
+    c->segments = RH_SEGMENTS;
+}
+
 /* RotorHazard mode defaults: per-channel levels only, small FFT, no spectrum. */
 static void rh_defaults(scan_config_t *c) {
     c->rh = true;
     c->metrics_mode = METRICS_RSSI;
-    c->nfft = 128;
-    c->capture_samples = 512;
-    c->segments = 4;
+    rh_set_fft(c, 64);
     c->spec_every = 0;
     c->mode = PLAN_GROUP;
     rh_apply_plan(c);
 }
 
-/* RotorHazard mode settings saved by CONFIG SAVE (NVS blob, layout by version). */
-#define RH_SAVED_VERSION 1
+/* RotorHazard mode settings saved by CONFIG SAVE (NVS blob, layout by version).
+ * The capture length follows the FFT size (rh_set_fft); version 1 also
+ * stored it, and is read without it. */
+#define RH_SAVED_VERSION 2
 typedef struct {
     uint8_t version;
     uint8_t gain_mode, gain, metrics_mode, mode;
-    uint16_t nfft, capture_samples;
+    uint16_t nfft;
 } rh_saved_t;
+typedef struct {
+    rh_saved_t v2;
+    uint16_t capture_samples;
+} rh_saved_v1_t;
 static rh_saved_t rh_saved; /* applied on every switch to RotorHazard mode */
+static rh_saved_t rh_builtin; /* the defaults without a save (boot) */
 #define NVS_NAMESPACE "widscan58"
 #define NVS_KEY_RH "rh"
 
 static void rh_saved_from(rh_saved_t *s, const scan_config_t *c) {
     *s = (rh_saved_t){.version = RH_SAVED_VERSION, .gain_mode = (uint8_t)c->gain_mode, .gain = c->gain,
-                      .metrics_mode = c->metrics_mode, .mode = (uint8_t)c->mode, .nfft = c->nfft,
-                      .capture_samples = c->capture_samples};
+                      .metrics_mode = c->metrics_mode, .mode = (uint8_t)c->mode, .nfft = c->nfft};
 }
 
 static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
@@ -117,27 +130,43 @@ static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
     c->gain = s->gain;
     c->metrics_mode = s->metrics_mode;
     c->mode = (plan_mode_t)s->mode;
-    c->nfft = s->nfft;
-    c->capture_samples = s->capture_samples;
+    rh_set_fft(c, s->nfft);
 }
 
 /* The same limits as the commands that set these. */
 static bool rh_saved_valid(const rh_saved_t *s) {
-    return s->version == RH_SAVED_VERSION &&
+    return
            (s->gain_mode == RADIO_GAIN_HARDWARE || (s->gain_mode == RADIO_GAIN_MANUAL && s->gain <= radio_caps()->gain_max)) &&
            (s->metrics_mode == METRICS_RSSI || s->metrics_mode == METRICS_SNR) &&
-           (s->mode == PLAN_GROUP || s->mode == PLAN_SINGLE) && s->nfft >= 128 && s->nfft <= PSD_MAX_FFT &&
-           !(s->nfft & (s->nfft - 1)) && s->capture_samples >= 256 && s->capture_samples <= radio_caps()->max_samples;
+           (s->mode == PLAN_GROUP || s->mode == PLAN_SINGLE) && s->nfft >= 64 && s->nfft <= PSD_MAX_FFT &&
+           !(s->nfft & (s->nfft - 1));
 }
 
 /* rh_saved from NVS; left alone (the defaults) when there is none. */
 static void rh_saved_load(void) {
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
-    rh_saved_t s;
-    size_t len = sizeof(s);
-    if (nvs_get_blob(h, NVS_KEY_RH, &s, &len) == ESP_OK && len == sizeof(s) && rh_saved_valid(&s)) rh_saved = s;
+    rh_saved_v1_t b;
+    size_t len = sizeof(b);
+    rh_saved_t *s = &b.v2;
+    if (nvs_get_blob(h, NVS_KEY_RH, &b, &len) == ESP_OK &&
+        ((len == sizeof(rh_saved_t) && s->version == RH_SAVED_VERSION) || (len == sizeof(b) && s->version == 1)) &&
+        rh_saved_valid(s)) {
+        rh_saved = *s;
+        rh_saved.version = RH_SAVED_VERSION;
+    }
     nvs_close(h);
+}
+
+static esp_err_t rh_saved_erase(void) {
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_erase_key(h, NVS_KEY_RH);
+    if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
 }
 
 static esp_err_t rh_saved_store(const rh_saved_t *s) {
@@ -181,8 +210,9 @@ static void set_proto(proto_t p) {
 static bool rh_allowed(const char *line) {
     static const char *const exact[] = {"PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?",
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
-                                        "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE"};
-    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "CAPN ", "FILTER ", "IQCORR "};
+                                        "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE",
+                                        "CONFIG RESET"};
+    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;
     for (unsigned j = 0; j < sizeof(prefix) / sizeof(prefix[0]); j++)
@@ -291,6 +321,13 @@ static void handle(char *line) {
         if (e != ESP_OK) { link_printf("ERR save %s\n", esp_err_to_name(e)); return; }
         rh_saved = s;
         link_text("OK\n");
+    } else if (!strcmp(line, "CONFIG RESET")) {
+        if (proto != PROTO_RH) { link_text("ERR rh_only\n"); return; }
+        esp_err_t e = rh_saved_erase();
+        if (e != ESP_OK) { link_printf("ERR reset %s\n", esp_err_to_name(e)); return; }
+        rh_saved = rh_builtin;
+        set_proto(PROTO_RH); /* apply them now */
+        link_text("OK\n");
     } else if (!strcmp(line, "PROTOCOL?")) {
         link_printf("PROTOCOL %s\n", proto == PROTO_RH ? "RH" : "MONITOR");
     } else if (!strcmp(line, "PROTOCOL RH") || !strcmp(line, "PROTOCOL MONITOR")) {
@@ -335,8 +372,9 @@ static void handle(char *line) {
         c.capture_samples = (uint16_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
-    } else if (sscanf(line, "FFT %" SCNu32 " %c", &a, &extra) == 1 && a >= 128 && a <= PSD_MAX_FFT && !(a & (a - 1))) {
-        c.nfft = (uint16_t)a;
+    } else if (sscanf(line, "FFT %" SCNu32 " %c", &a, &extra) == 1 && a >= 64 && a <= PSD_MAX_FFT && !(a & (a - 1))) {
+        if (proto == PROTO_RH) rh_set_fft(&c, a);
+        else c.nfft = (uint16_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (sscanf(line, "SEGMENTS %" SCNu32 " %c", &a, &extra) == 1 && a >= 1 && a <= 64) {
@@ -549,7 +587,8 @@ void commands_task_start(void) {
     scanner_get_config(&c);
     other_cfg = c;
     rh_defaults(&c);
-    rh_saved_from(&rh_saved, &c);
+    rh_saved_from(&rh_builtin, &c);
+    rh_saved = rh_builtin;
     rh_saved_load();
     rh_saved_apply(&c, &rh_saved);
     scanner_set_config(&c);

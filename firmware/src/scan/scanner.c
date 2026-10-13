@@ -47,6 +47,9 @@ typedef struct {
     uint32_t *scratch;
     uint32_t seq_metrics, seq_spectrum; /* seq_metrics counts FRAME_LEVELS too */
     uint8_t spec_codes[1024];
+    /* Display spectrum cadence: every spec_every hops, one hop later after
+     * spec_cycle spectra so that it moves on to the other LOs. */
+    uint16_t spec_countdown, spec_k, spec_cycle;
     /* Telemetry window */
     int64_t window_start;
     uint32_t rotations, hops_total, capture_errors;
@@ -134,6 +137,7 @@ static void apply_config(void) {
     bool channels_changed = sp->cfg.nch != shared.nch || memcmp(sp->cfg.ch, shared.ch, sizeof(shared.ch));
     bool measure_changed = profile_changed || channels_changed || sp->cfg.nfft != shared.nfft ||
                            sp->cfg.rssi_hz != shared.rssi_hz || sp->cfg.metrics_mode != shared.metrics_mode;
+    bool spec_changed = sp->cfg.spec_every != shared.spec_every || sp->plan.nhops != shared_plan.nhops;
     sp->cfg = shared;
     sp->plan = shared_plan;
     sp->psd_error_reported = false;
@@ -142,6 +146,19 @@ static void apply_config(void) {
     if (measure_changed) memset(sp->ch, 0, sizeof(sp->ch));
     memset(sp->iq, 0, sizeof(sp->iq)); /* the plan, gain or calibration may have changed */
     if (sp->hop >= sp->plan.nhops) sp->hop = 0;
+    if (spec_changed) {
+        /* N hops apart, the spectra step through the LOs gcd(N, nhops) at a
+         * time and repeat after nhops / gcd of them. */
+        unsigned a = sp->cfg.spec_every, b = sp->plan.nhops;
+        while (b) {
+            unsigned t = a % b;
+            a = b;
+            b = t;
+        }
+        sp->spec_cycle = a ? (uint16_t)(sp->plan.nhops / a) : 0;
+        sp->spec_countdown = sp->cfg.spec_every;
+        sp->spec_k = 0;
+    }
     _Static_assert(PROFILE_MAX_CHANNELS <= RADIO_PLAN_MAX_LOS, "plan LOs");
     uint32_t los[RADIO_PLAN_MAX_LOS];
     for (unsigned j = 0; j < sp->plan.nhops; j++) los[j] = sp->plan.hop[j].lo_khz;
@@ -226,9 +243,14 @@ void scanner_timing(scan_timing_t *t) { *t = timing; }
 /* After the measurements: the display spectrum and the timing breakdown. */
 static int64_t finish_hop(const psd_result_t *psd, const plan_hop_t *hop, int64_t t2, int64_t tm0, int64_t tm1) {
     const scan_config_t *c = &sp->cfg;
-    /* One spectrum per spec_every hops, rotating through the LOs: a plain
-     * hops_total % N would pick the same LO forever when N divides the plan. */
-    if (c->spec_every && sp->hop % c->spec_every == sp->rotations % c->spec_every) emit_spectrum(psd, hop->lo_khz);
+    /* One spectrum per spec_every hops, rotating through the LOs: every N
+     * hops alone would pick the same LO forever when N divides the plan. */
+    if (c->spec_every && --sp->spec_countdown == 0) {
+        emit_spectrum(psd, hop->lo_khz);
+        bool wrap = ++sp->spec_k >= sp->spec_cycle;
+        if (wrap) sp->spec_k = 0;
+        sp->spec_countdown = c->spec_every + wrap;
+    }
     int64_t t3 = esp_timer_get_time();
     timing = (scan_timing_t){.prep_us = psd->prep_us, .fft_us = psd->fft_us, .power_us = psd->power_us,
                              .psd_us = (uint32_t)(tm0 - t2), .metrics_us = (uint32_t)(tm1 - tm0),

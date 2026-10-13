@@ -165,7 +165,7 @@ ESP32-S3:
 | One channel, or one neighbouring pair (1 LO: the tune is skipped) | ~445 /s (S16R), ~344 /s (R4) |
 
 - A hop with 4 LOs is about 0.83 ms tune (median; bursty long tunes add ~15 %), 0.17 ms capture (4096 samples at 40 MS/s), and about 2.2 ms DSP with S16R.
-- The display spectrum is sent every 4th hop by default (`SPEC`).
+- The display spectrum is sent every 4th hop by default (`SPEC`), one hop later each time the LOs would repeat: every 5th hop with 4 LOs.
 - Full tables and the FFT accuracy study are in PLAN.md.
 
 ## Useful commands
@@ -182,7 +182,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
 | `CAPN <samples>`, `FFT <n>` | Capture length (from 256) and FFT size (from 64; S3: up to 2048; C5: up to 1024). In RotorHazard mode `CAPN` is refused: the capture is always 4 × the FFT size |
 | `METRICS FULL\|RSSI\|SNR`, `METRICS?` | Per-channel measurements. `FULL` (default): everything, `METRICS` frames. `RSSI`: only the RSSI-window power; `SNR`: that plus noise floor and SNR. Both send compact `LEVELS` frames of byte codes (integer math per channel, for lap timing); the UI leaves the rest blank. They do not mask board spurs (at `FFT 128` the mask would cover ~1.9 MHz of R8 on the C5; the unmasked spur adds ~2 dB to the empty channel) |
-| `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 11300000 MAX`) |
+| `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 <usable span> MAX`: 40000000 on the C5, 11300000 on the S3). Spectra are N hops apart, N+1 each time the LO sequence would repeat (when N shares a factor with the number of LOs), so they cycle through all LOs |
 | `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as consecutive 1024-sample `RAWIQ` frames (header: total `n` and this chunk's `offset`). At most `rawiq_max` samples, the capture buffer: 16380 on both targets. The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `IQCORR 0\|1` | Digital IQ imbalance correction before the FFT (default 1). Removes the mirror image of strong signals, e.g. R1 showing on R2 in pair mode. |

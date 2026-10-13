@@ -141,19 +141,6 @@ uint32_t __wrap_phy_wifi_set_tx_gain_new(uint32_t a0, uint32_t a1, uint32_t a2, 
     return __real_phy_wifi_set_tx_gain_new(a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
-/* Under the PHY lock: PHY tracking (an esp_timer callback every second) takes
- * it, and its calibration interleaved with ours hung the scanner within
- * seconds (PLAN.md, PHY tracking on the C5). */
-static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us);
-esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
-    if (lo_khz % 1000u || lo_khz < 100000u || lo_khz > 6000000u) return ESP_ERR_INVALID_ARG;
-    _lock_t lock = phy_get_lock();
-    _lock_acquire(&lock);
-    esp_err_t err = tune_locked(lo_khz, settle_us);
-    _lock_release(&lock);
-    return err;
-}
-
 static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us) {
     /* Tracking recalibrated at its reference channels: our tables, cached
      * ones included, are stale (they also predate a temperature change). */
@@ -191,6 +178,18 @@ static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us) {
     tuned_lo_khz = lo_khz;
     if (settle_us) esp_rom_delay_us(settle_us);
     return ESP_OK;
+}
+
+/* Under the PHY lock: PHY tracking (an esp_timer callback every second) takes
+ * it, and its calibration interleaved with ours hung the scanner within
+ * seconds (PLAN.md, PHY tracking on the C5). */
+esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
+    if (lo_khz % 1000u || lo_khz < 100000u || lo_khz > 6000000u) return ESP_ERR_INVALID_ARG;
+    _lock_t lock = phy_get_lock();
+    _lock_acquire(&lock);
+    esp_err_t err = tune_locked(lo_khz, settle_us);
+    _lock_release(&lock);
+    return err;
 }
 
 void radio_set_filter(int code) { filter_code = code > 63 ? 63 : code; }

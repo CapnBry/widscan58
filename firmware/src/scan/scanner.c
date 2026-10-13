@@ -228,7 +228,18 @@ static int64_t finish_hop(const psd_result_t *psd, const plan_hop_t *hop, int64_
     return t3;
 }
 
-static void hop_stats(int64_t t0, int64_t t1, int64_t t2, int64_t t3);
+static void hop_stats(int64_t t0, int64_t t1, int64_t t2, int64_t t3) {
+    uint32_t hop_us = (uint32_t)(t3 - t0), tune_us = (uint32_t)(t1 - t0), dsp_us = (uint32_t)(t3 - t2);
+    s.w_hops++;
+    s.hops_total++;
+    s.w_hop_sum += hop_us;
+    s.w_tune_sum += tune_us;
+    s.w_cap_sum += (uint32_t)(t2 - t1);
+    s.w_dsp_sum += dsp_us;
+    if (hop_us > s.w_hop_max) s.w_hop_max = hop_us;
+    if (tune_us > s.w_tune_max) s.w_tune_max = tune_us;
+    if (dsp_us > s.w_dsp_max) s.w_dsp_max = dsp_us;
+}
 
 /* METRICS RSSI|SNR: per channel only the RSSI window power, and in SNR mode
  * the floor and SNR, as byte codes. No per-channel state. */
@@ -383,19 +394,6 @@ static void do_hop(void) {
     };
     link_frame(FRAME_METRICS, &h, sizeof(h), out, hop->nch * sizeof(frame_channel_t), 0);
     hop_stats(t0, t1, t2, t3);
-}
-
-static void hop_stats(int64_t t0, int64_t t1, int64_t t2, int64_t t3) {
-    uint32_t hop_us = (uint32_t)(t3 - t0), tune_us = (uint32_t)(t1 - t0), dsp_us = (uint32_t)(t3 - t2);
-    s.w_hops++;
-    s.hops_total++;
-    s.w_hop_sum += hop_us;
-    s.w_tune_sum += tune_us;
-    s.w_cap_sum += (uint32_t)(t2 - t1);
-    s.w_dsp_sum += dsp_us;
-    if (hop_us > s.w_hop_max) s.w_hop_max = hop_us;
-    if (tune_us > s.w_tune_max) s.w_tune_max = tune_us;
-    if (dsp_us > s.w_dsp_max) s.w_dsp_max = dsp_us;
 }
 
 static void emit_telemetry(int64_t now) {

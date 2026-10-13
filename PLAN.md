@@ -741,6 +741,20 @@ server drives it with only `SERIAL_PORTS` configured.
   Levels with `IQCORR 1` vs `0` differed by up to 1.4 dB on R1/R2 right
   after a boot and 0–0.3 dB after a `RECAL`: the first-calibration problem
   in "Next steps" 8, not this change.
+- Settle overlapped with the DSP (2026-10-13): `radio_tune` no longer takes
+  or waits a settle time; it records when it moved the LO, and
+  `radio_capture(…, settle_us, …)` waits until `now − tune end ≥ settle_us`
+  before triggering. `do_hop` captures, then tunes the next
+  hop's LO, then runs the DSP, so the settle passes during the DSP (a skipped
+  tune, same LO, sets no wait). Checked first that a tune leaves the capture
+  buffer alone while the DSP reads it: a checksum before and after the
+  pre-tune changed in 0 of ~9000 hops, ~400 of them with a full
+  recalibration (`RECALMODE EVERY`). C5, R1–R8, `GROUP`, `METRICS RSSI`:
+  `FFT 64` hop 857 → 775 µs (272 → 296 /s), `FFT 128` 227 → 239 /s,
+  `METRICS FULL` at 4 × 1024 51.1 → 51.5 /s. `SETTLE 2000` makes the capture
+  wait ~1650 µs, so up to ~350 µs of settle is free at `FFT 64`. In
+  RotorHazard mode (`rh_check.py`, 8 seats) 3.38–3.41 → 3.18–3.22 ms, a
+  smaller gain (~50 µs per hop) than in monitor mode (~80 µs); not explained.
 - Not yet tested with a VTX flying through a gate: EnterAt/ExitAt calibration
   for real passes, pass-time accuracy vs RotorHazard's RX5808 nodes, and RSSI vs
   SNR as the level.

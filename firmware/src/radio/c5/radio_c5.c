@@ -75,6 +75,7 @@ static unsigned tune_skip;
 static bool tuned_once;
 static int64_t last_full_tune;
 static uint32_t tuned_lo_khz;
+static int64_t tune_end_us; /* when the LO last moved; radio_capture settles from it */
 void radio_set_tune_skip(unsigned mask) {
     tune_skip = mask;
     tuned_once = false;
@@ -141,7 +142,7 @@ uint32_t __wrap_phy_wifi_set_tx_gain_new(uint32_t a0, uint32_t a1, uint32_t a2, 
     return __real_phy_wifi_set_tx_gain_new(a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
-static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us) {
+static esp_err_t tune_locked(uint32_t lo_khz) {
     /* Tracking recalibrated at its reference channels: our tables, cached
      * ones included, are stale (they also predate a temperature change). */
     if (c5_cal_replaced()) {
@@ -176,18 +177,18 @@ static esp_err_t tune_locked(uint32_t lo_khz, uint32_t settle_us) {
     if (full || !(tune_skip & 4)) gain_apply();
     tuned_once = true;
     tuned_lo_khz = lo_khz;
-    if (settle_us) esp_rom_delay_us(settle_us);
+    tune_end_us = esp_timer_get_time();
     return ESP_OK;
 }
 
 /* Under the PHY lock: PHY tracking (an esp_timer callback every second) takes
  * it, and its calibration interleaved with ours hung the scanner within
  * seconds (PLAN.md, PHY tracking on the C5). */
-esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
+esp_err_t radio_tune(uint32_t lo_khz) {
     if (lo_khz % 1000u || lo_khz < 100000u || lo_khz > 6000000u) return ESP_ERR_INVALID_ARG;
     _lock_t lock = phy_get_lock();
     _lock_acquire(&lock);
-    esp_err_t err = tune_locked(lo_khz, settle_us);
+    esp_err_t err = tune_locked(lo_khz);
     _lock_release(&lock);
     return err;
 }
@@ -251,10 +252,12 @@ static bool dump_capture(unsigned n, unsigned rate_code) {
     return done;
 }
 
-esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, uint32_t *elapsed_us) {
+esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
+                        uint32_t *elapsed_us) {
     if (n < 16 || n > IQ_WORDS || rate_code >= RADIO_MAX_RATES) return ESP_ERR_INVALID_ARG;
     for (unsigned j = 0; j < n; j++) IQ_BUFFER[j] = FILL_WORD;
     for (unsigned j = 0; j < IQ_GUARD_WORDS; j++) IQ_BUFFER[n + j] = GUARD_WORD ^ j;
+    while (esp_timer_get_time() - tune_end_us < (int64_t)settle_us) {}
     filter_apply();
     uint32_t owner = REG_READ(SRAM_OWNER_REG);
     int64_t start = esp_timer_get_time();
@@ -278,7 +281,9 @@ esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, 
 
 esp_err_t radio_init(void) {
     radio_set_recal(RADIO_RECAL_ONCE, recal_center_khz);
-    return radio_tune(recal_center_khz, 3000);
+    esp_err_t err = radio_tune(recal_center_khz);
+    esp_rom_delay_us(3000);
+    return err;
 }
 
 /* The dump only writes the upper half of the bank. The lower half is reserved

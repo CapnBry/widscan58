@@ -61,6 +61,7 @@ static unsigned tune_skip = 7;
 static bool tuned_once;
 static int64_t last_full_tune;
 static uint32_t tuned_lo_khz; /* LO currently programmed */
+static int64_t tune_end_us;   /* when the LO last moved; radio_capture settles from it */
 void radio_set_tune_skip(unsigned mask) {
     tune_skip = mask;
     tuned_once = false;
@@ -98,7 +99,7 @@ void radio_set_recal(radio_recal_t mode, uint32_t center_khz) {
 
 void radio_force_recal(void) { calibrated_mhz = 0; }
 
-esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
+esp_err_t radio_tune(uint32_t lo_khz) {
     unsigned mhz = lo_khz / 1000u;
     int offset_khz = (int)(lo_khz % 1000u);
     unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_center_khz / 1000u : mhz; /* CACHE: as EVERY_LO */
@@ -130,7 +131,7 @@ esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us) {
     if (full || !(tune_skip & 4)) gain_apply();
     tuned_once = true;
     tuned_lo_khz = lo_khz;
-    if (settle_us) esp_rom_delay_us(settle_us);
+    tune_end_us = esp_timer_get_time();
     return ESP_OK;
 }
 
@@ -164,9 +165,11 @@ static void filter_restore(void) {
         for (unsigned j = 0; j < 2; j++) rom_chip_i2c_writeReg(0x67, 0, 4 + j, filter_saved[j]);
 }
 
-esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, uint32_t *elapsed_us) {
+esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
+                        uint32_t *elapsed_us) {
     if (n < 16 || n > IQ_WORDS || rate_code > 2) return ESP_ERR_INVALID_ARG;
     for (unsigned j = 0; j < n; j++) IQ_BUFFER[j] = FILL_WORD;
+    while (esp_timer_get_time() - tune_end_us < (int64_t)settle_us) {}
     filter_apply();
     uint32_t owner = REG_READ(SRAM_OWNER_REG);
     int64_t start = esp_timer_get_time();
@@ -196,7 +199,9 @@ esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, 
 
 esp_err_t radio_init(void) {
     radio_set_recal(RADIO_RECAL_ONCE, recal_center_khz);
-    return radio_tune(recal_center_khz, 3000);
+    esp_err_t err = radio_tune(recal_center_khz);
+    esp_rom_delay_us(3000);
+    return err;
 }
 
 void *radio_dsp_region(size_t *bytes) {

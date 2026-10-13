@@ -37,6 +37,7 @@ static struct {
     scan_config_t cfg;
     plan_t plan;
     unsigned hop;
+    uint32_t tuned_lo_khz; /* LO the radio was last tuned to by do_hop; 0 = unknown */
     channel_state_t ch[PROFILE_MAX_CHANNELS];
     psd_iq_t iq[PROFILE_MAX_CHANNELS]; /* per plan hop (one LO each) */
     float floor_bias;
@@ -139,6 +140,7 @@ static void apply_config(void) {
     if (measure_changed) memset(s.ch, 0, sizeof(s.ch));
     memset(s.iq, 0, sizeof(s.iq)); /* the plan, gain or calibration may have changed */
     if (s.hop >= s.plan.nhops) s.hop = 0;
+    s.tuned_lo_khz = 0; /* settings below (recalibration mode) apply at the next tune */
     psd_set_fft((psd_fft_t)s.cfg.fft_type);
     psd_release_unused();
     radio_set_filter(s.cfg.filter);
@@ -242,9 +244,10 @@ static void hop_stats(int64_t t0, int64_t t1, int64_t t2, int64_t t3) {
 }
 
 /* METRICS RSSI|SNR: per channel only the RSSI window power, and in SNR mode
- * the floor and SNR, as byte codes. No per-channel state. */
+ * the floor and SNR, as byte codes. No per-channel state. cap_mid: the
+ * middle of the hop's capture. */
 static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_hop_t *hop, int64_t t0, int64_t t1,
-                      int64_t t2, int64_t tm0) {
+                      int64_t t2, int64_t tm0, int64_t cap_mid) {
     const scan_config_t *c = &s.cfg;
     const bool snr = c->metrics_mode == METRICS_SNR;
     /* Per hop: the scale in level codes, from the cheap metrics_db. */
@@ -265,7 +268,7 @@ static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_h
             if (llabs(d) <= c->rssi_hz) m.flags |= CHF_SPUR;
         }
         out[j] = (frame_level_t){.id = hop->ch[j], .flags = m.flags, .rssi = m.rssi, .snr = m.snr};
-        if (c->rh) rh_feed(hop->ch[j], (t1 + t2) / 2, snr ? m.snr : m.rssi);
+        if (c->rh) rh_feed(hop->ch[j], cap_mid, snr ? m.snr : m.rssi);
     }
     int64_t tm1 = esp_timer_get_time();
     int64_t t3 = finish_hop(psd, hop, t2, tm0, tm1);
@@ -295,15 +298,25 @@ static void do_hop(void) {
     const profile_t *p = c->profile;
     const plan_hop_t *hop = &s.plan.hop[s.hop];
     int64_t t0 = esp_timer_get_time();
-    radio_tune(hop->lo_khz, c->settle_us);
-    int64_t t1 = esp_timer_get_time();
+    /* Normally the previous hop already tuned this LO (below). */
+    if (s.tuned_lo_khz != hop->lo_khz) radio_tune(hop->lo_khz);
+    s.tuned_lo_khz = hop->lo_khz;
+    int64_t ta = esp_timer_get_time();
     const uint32_t *words;
     uint32_t cap_us = 0;
-    if (radio_capture(c->capture_samples, c->rate_code, &words, &cap_us) != ESP_OK) {
+    /* Waits out whatever is left of the settle time. */
+    if (radio_capture(c->capture_samples, c->rate_code, c->settle_us, &words, &cap_us) != ESP_OK) {
         s.capture_errors++;
         return;
     }
+    int64_t tb = esp_timer_get_time();
+    /* Tune the next hop's LO now: it settles while this hop's DSP runs. */
+    const plan_hop_t *next = &s.plan.hop[s.hop + 1 < s.plan.nhops ? s.hop + 1 : 0];
+    radio_tune(next->lo_khz);
+    s.tuned_lo_khz = next->lo_khz;
     int64_t t2 = esp_timer_get_time();
+    /* t1 such that t1 - t0 is the tune time (both tunes) and t2 - t1 the capture. */
+    const int64_t t1 = t2 - (tb - ta);
     const float rate = radio_caps()->rates_hz[c->rate_code];
     psd_result_t psd;
     esp_err_t err = psd_compute(words, c->capture_samples, c->nfft, c->segments, rate, c->conjugate,
@@ -338,7 +351,7 @@ static void do_hop(void) {
     }
     int64_t tm0 = esp_timer_get_time();
     if (c->metrics_mode != METRICS_FULL) {
-        do_levels(&in, &psd, hop, t0, t1, t2, tm0);
+        do_levels(&in, &psd, hop, t0, t1, t2, tm0, ta + (tb - ta) / 2);
         return;
     }
     metrics_floor_t fl;
@@ -428,9 +441,9 @@ static void emit_telemetry(int64_t now) {
 
 static void do_rawiq(const scan_request_t *r) {
     const scan_config_t *c = &s.cfg;
-    radio_tune(r->lo_khz, c->settle_us);
+    radio_tune(r->lo_khz);
     const uint32_t *words;
-    if (radio_capture(r->n, r->rate_code, &words, NULL) != ESP_OK) {
+    if (radio_capture(r->n, r->rate_code, c->settle_us, &words, NULL) != ESP_OK) {
         link_text("ERR capture\n");
         return;
     }
@@ -488,8 +501,8 @@ static void do_fft_eval(const scan_request_t *r) {
         if (r->type == SCAN_REQ_FFTEVAL_SYNTH) {
             fft_eval_synth(buf, n, rate, r->p2 / 10.0f, 3.217e6f, r->p1 / 100.0f, 0x9e3779b9u * (rep + 1));
         } else {
-            radio_tune(r->lo_khz, c->settle_us);
-            if (radio_capture(n, c->rate_code, &words, NULL) != ESP_OK) {
+            radio_tune(r->lo_khz);
+            if (radio_capture(n, c->rate_code, c->settle_us, &words, NULL) != ESP_OK) {
                 link_text("ERR capture\n");
                 return;
             }
@@ -535,6 +548,7 @@ static void scanner_task(void *arg) {
         if (dirty) apply_config();
         scan_request_t req;
         while (xQueueReceive(requests, &req, 0) == pdTRUE) {
+            s.tuned_lo_khz = 0; /* these tune (or recalibrate) the radio themselves */
             if (req.type == SCAN_REQ_RAWIQ) do_rawiq(&req);
             else if (req.type == SCAN_REQ_FFTEVAL_SYNTH || req.type == SCAN_REQ_FFTEVAL_LIVE) do_fft_eval(&req);
             else if (req.type == SCAN_REQ_RECAL) {

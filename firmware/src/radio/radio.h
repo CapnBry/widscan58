@@ -41,8 +41,9 @@ const radio_caps_t *radio_caps(void);
 const char *radio_phy_version(void);
 
 /* Tune the receive LO (a multiple of lo_step_khz). Applies gain and RX path
- * setup; waits settle_us. */
-esp_err_t radio_tune(uint32_t lo_khz, uint32_t settle_us);
+ * setup. Returns without waiting for the LO to settle: radio_capture does
+ * that, so other work can run meanwhile. */
+esp_err_t radio_tune(uint32_t lo_khz);
 void radio_set_recal(radio_recal_t mode, uint32_t center_khz);
 void radio_force_recal(void);
 
@@ -52,8 +53,12 @@ int radio_get_filter(void);
 void radio_set_gain(radio_gain_mode_t mode, unsigned index);
 radio_gain_mode_t radio_get_gain(unsigned *index);
 
-/* Blocking snapshot. *words stays valid until the next capture or tune. */
-esp_err_t radio_capture(unsigned n, unsigned rate_code, const uint32_t **words, uint32_t *elapsed_us);
+/* Blocking snapshot, taken once settle_us have passed since the last
+ * radio_tune that moved the LO. *words stays valid until the next capture;
+ * a tune leaves it alone (checked on the C5, recalibration included; not
+ * yet on the S3). */
+esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
+                        uint32_t *elapsed_us);
 
 /* Debug: skip parts of the per-hop tune sequence (bit 0: channel setup,
  * bit 1: PBUS/RX clock re-enable, bit 2: gain re-apply). */

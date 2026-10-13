@@ -13,4 +13,12 @@ execute_process(COMMAND git describe --tags --always --dirty
 if(NOT PROJECT_VER)
     set(PROJECT_VER "unknown")
 endif()
+# HEAD's commit time (ISO 8601), also in INFO. It changes only with HEAD, so
+# version_check.py's reconfigure on a new git describe keeps it current too.
+execute_process(COMMAND git log -1 --format=%cI
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE FW_COMMIT_DATE OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT FW_COMMIT_DATE)
+    set(FW_COMMIT_DATE "unknown")
+endif()
 project(widscan58)

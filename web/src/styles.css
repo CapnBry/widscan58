@@ -166,6 +166,11 @@ header.top .spacer { flex: 1; }
 .flash-dialog ol { margin: 0 0 12px; padding-left: 20px; color: var(--ink-2); }
 .flash-dialog li { margin-bottom: 6px; }
 .flash-dialog li strong { color: var(--ink); }
+.flash-versions { border-collapse: collapse; margin: 0 0 10px; color: var(--ink-2); }
+.flash-versions th, .flash-versions td { text-align: left; padding: 2px 14px 2px 0; font-weight: normal; }
+.flash-versions thead th { color: var(--muted); font-size: 12px; }
+.flash-versions tbody th { color: var(--ink); }
+.flash-versions td { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .flash-progress progress { width: 100%; accent-color: var(--accent); }
 .flash-status { min-height: 1.4em; margin: 4px 0 8px; color: var(--ink-2); }
 .flash-status.ok { color: var(--good); }

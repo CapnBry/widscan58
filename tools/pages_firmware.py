@@ -3,7 +3,8 @@
 
 Copies each env's bootloader, partition table and app into <out>/<env>/ and
 writes <out>/manifest.json in ESP Web Tools' manifest format, plus a sha256
-per part that the web UI checks before flashing. Offsets come from the IDF
+per part that the web UI checks before flashing, and the commit time (the
+one the firmware's INFO reports) as "date". Offsets come from the IDF
 build's flasher_args.json (the bootloader is at 0x2000 on the C5, 0x0 on the S3).
 
     tools/pages_firmware.py --version "$(git describe --tags --always --dirty)" \\
@@ -15,6 +16,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,9 +30,13 @@ PARTS = {"bootloader": "bootloader.bin", "partition-table": "partitions.bin", "a
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", required=True)
+    ap.add_argument("--date", help="commit time, ISO 8601 (default: HEAD's, as the firmware's INFO has it)")
     ap.add_argument("out", type=Path)
     ap.add_argument("envs", nargs="+", choices=sorted(CHIP_FAMILY))
     a = ap.parse_args()
+    if a.date is None:
+        a.date = subprocess.run(["git", "log", "-1", "--format=%cI"], cwd=ROOT, capture_output=True,
+                                text=True).stdout.strip() or None
 
     a.out.mkdir(parents=True, exist_ok=True)
     builds = []
@@ -51,7 +57,7 @@ def main() -> None:
         builds.append({"chipFamily": CHIP_FAMILY[env], "parts": parts})
         print(f"{env}: " + ", ".join(f"{p['path']} @ {p['offset']:#x}" for p in parts))
 
-    manifest = {"name": "Widscan58", "version": a.version, "builds": builds}
+    manifest = {"name": "Widscan58", "version": a.version, "date": a.date, "builds": builds}
     (a.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 

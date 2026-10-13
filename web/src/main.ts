@@ -1,7 +1,7 @@
 // Widscan58 web UI entry point. GPL-3.0-or-later.
 import "./styles.css";
 import { App, type View } from "./model/app";
-import { Store } from "./model/store";
+import { Store, parseInfo } from "./model/store";
 import {
   Device,
   WebSerialTransport,
@@ -244,12 +244,12 @@ function updateBanner() {
   updateFirmwareText();
 }
 
-// INFO is "widscan58 <target> <proto_ver> <fw_ver> <phy_ver>". Shown in the
-// menu for any connected device; the offer of another version only over Web
-// Serial, where the page can flash it.
+// The firmware version (INFO, parseInfo) is shown in the menu for any
+// connected device; the offer of another version only over Web Serial, where
+// the page can flash it.
 let offeredFw: string | null = null;
 function updateFirmwareText() {
-  const fw = app.device ? store.info.split(" ")[3] : undefined;
+  const fw = app.device ? parseInfo(store.info)?.version : undefined;
   const value = !app.device ? "not connected" : fw || "unknown";
   if (fwValue.textContent !== value) fwValue.textContent = value;
   const offer = fw && offeredFw && offeredFw !== fw && app.device?.transport instanceof WebSerialTransport;
@@ -358,6 +358,9 @@ const flashDialog = new FlashDialog({
     flashing = true;
     return port;
   },
+  device() {
+    return app.device?.transport instanceof WebSerialTransport ? parseInfo(store.info) : null;
+  },
   finished(ok) {
     flashing = false;
     if (!ok) return;
@@ -367,6 +370,7 @@ const flashDialog = new FlashDialog({
   },
 });
 document.body.append(flashDialog.el);
+store.subscribe(() => flashDialog.refreshDevice()); // INFO after a (re)connect
 flashBtn.onclick = () => {
   if (!WebSerialTransport.supported()) {
     store.addLog("error", "Flashing needs Web Serial (Chrome, Edge or Opera on a computer) or WebUSB (Chrome on Android).");

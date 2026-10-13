@@ -12,10 +12,12 @@ export interface ManifestPart {
   sha256: string;
 }
 
-/** ESP Web Tools' manifest format, plus a size and sha256 per part. */
+/** ESP Web Tools' manifest format, plus a size and sha256 per part and the
+ *  commit time (ISO 8601, as INFO reports it). */
 export interface Manifest {
   name: string;
   version: string;
+  date?: string | null;
   builds: { chipFamily: string; parts: ManifestPart[] }[];
 }
 

@@ -35,6 +35,11 @@ idf_component_register(SRCS ${sources}
     REQUIRES esp_app_format esp_driver_usb_serial_jtag esp_wifi esp_phy esp_timer esp_hw_support
              nvs_flash esp_rom espressif__esp-dsp)
 
+# For INFO only, so a new commit recompiles just commands.c (FW_COMMIT_DATE is
+# set in the project's CMakeLists.txt).
+set_source_files_properties(proto/commands.c PROPERTIES
+    COMPILE_DEFINITIONS "FW_COMMIT_DATE=\"${FW_COMMIT_DATE}\"")
+
 # The capture SRAM aperture must never hold static data (see sram_guard.ld).
 target_link_options(${COMPONENT_LIB} INTERFACE
     "-T${CMAKE_CURRENT_LIST_DIR}/${target_dir}/sram_guard.ld")

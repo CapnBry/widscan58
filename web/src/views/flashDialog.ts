@@ -2,17 +2,23 @@
 import { el } from "../util/canvas";
 import { flashFirmware, loadManifest, type Manifest } from "../serial/flasher";
 import type { Port } from "../serial/device";
+import type { DeviceInfo } from "../model/store";
 
 export interface FlashHost {
   /** The port to flash: the connected board (closed first) or one the user picks. */
   takePort(): Promise<Port>;
   /** Called when flashing ends; ok means the board is booting the new firmware. */
   finished(ok: boolean): void;
+  /** The connected board's INFO, or null when no board is connected over Web Serial. */
+  device(): DeviceInfo | null;
 }
 
 export class FlashDialog {
   readonly el: HTMLDialogElement;
-  private versionText = el("span", {}, "…");
+  private boardVersion = el("td", {}, "…");
+  private boardDate = el("td", {}, "");
+  private newVersion = el("td", {}, "…");
+  private newDate = el("td", {}, "");
   private bar = el("progress", { max: "1", value: "0" }) as HTMLProgressElement;
   private status = el("div", { class: "flash-status" });
   private logPre = el("pre", { class: "flash-log" });
@@ -26,7 +32,17 @@ export class FlashDialog {
       "dialog",
       { class: "flash-dialog" },
       el("h2", {}, "Flash firmware"),
-      el("p", {}, "Installs Widscan58 ", this.versionText, " on an ESP32-C5 board."),
+      el(
+        "table",
+        { class: "flash-versions" },
+        el("thead", {}, el("tr", {}, el("th", {}), el("th", {}, "Version"), el("th", {}, "Committed"))),
+        el(
+          "tbody",
+          {},
+          el("tr", {}, el("th", {}, "On the board"), this.boardVersion, this.boardDate),
+          el("tr", {}, el("th", {}, "To install"), this.newVersion, this.newDate),
+        ),
+      ),
       el(
         "ol",
         {},
@@ -54,14 +70,19 @@ export class FlashDialog {
   }
 
   open() {
-    this.manifest ??= loadManifest();
+    // A fresh manifest on every open (and again at Flash): a page left open
+    // across a deploy would otherwise offer the old build, whose files and
+    // hashes are gone.
+    if (!this.busy || !this.manifest) this.manifest = loadManifest();
+    this.refreshDevice();
     this.manifest.then(
       (m) => {
-        this.versionText.textContent = m.version;
+        this.showManifest(m);
         this.flashBtn.disabled = this.busy;
       },
       (e: Error) => {
-        this.versionText.textContent = "(unavailable)";
+        this.newVersion.textContent = "(unavailable)";
+        this.newDate.textContent = "";
         this.setStatus(`Cannot flash: ${e.message}.`, "err");
         this.flashBtn.disabled = true;
       },
@@ -72,6 +93,20 @@ export class FlashDialog {
       this.logPre.textContent = "";
     }
     this.el.showModal();
+  }
+
+  /** Shows the connected board's version; kept while flashing, when the board
+   *  is disconnected, until it reconnects with the new firmware. */
+  refreshDevice() {
+    if (!this.el.open || this.busy) return;
+    const d = this.host.device();
+    setText(this.boardVersion, d ? d.version : "not connected");
+    setText(this.boardDate, d ? (d.date ?? "unknown") : "");
+  }
+
+  private showManifest(m: Manifest) {
+    setText(this.newVersion, m.version);
+    setText(this.newDate, m.date ?? "unknown");
   }
 
   /** The firmware version this page offers, once known. */
@@ -94,7 +129,10 @@ export class FlashDialog {
   }
 
   private async flash() {
-    const manifest = await this.manifest!;
+    // Fetched now but awaited after takePort: the browser's port chooser
+    // needs this click's user activation, which a slow fetch could outlast.
+    const fresh = (this.manifest = loadManifest());
+    fresh.catch(() => {});
     let port: Port;
     try {
       port = await this.host.takePort();
@@ -109,6 +147,8 @@ export class FlashDialog {
     this.logPre.textContent = "";
     let ok = false;
     try {
+      const manifest = await fresh;
+      this.showManifest(manifest);
       await flashFirmware(port, manifest, {
         stage: (t) => {
           this.setStatus(t);
@@ -128,4 +168,8 @@ export class FlashDialog {
       this.host.finished(ok);
     }
   }
+}
+
+function setText(e: HTMLElement, text: string) {
+  if (e.textContent !== text) e.textContent = text;
 }

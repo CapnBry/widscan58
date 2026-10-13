@@ -80,6 +80,21 @@ export interface LogLine {
   text: string;
 }
 
+/** INFO is "widscan58|<target>|<proto_ver>|<fw_ver>|<commit_time>|<phy_ver>".
+ *  Older firmware separated "widscan58 <target> <proto_ver> <fw_ver> <phy_ver>"
+ *  by spaces; the flash dialog still shows its version. */
+export interface DeviceInfo {
+  target: string;
+  version: string;
+  date: string | null;
+}
+export function parseInfo(info: string): DeviceInfo | null {
+  const current = info.startsWith("widscan58|");
+  const f = info.split(current ? "|" : " ");
+  if (f[0] !== "widscan58" || !f[3]) return null;
+  return { target: f[1], version: f[3], date: (current && f[4]) || null };
+}
+
 export class Store {
   version = 0;
   profile: Profile | null = null;

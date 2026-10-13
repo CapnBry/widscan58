@@ -297,9 +297,11 @@ static void handle(char *line) {
 
     if (!strcmp(line, "INFO")) {
         /* fw_ver is PROJECT_VER (git describe, see firmware/CMakeLists.txt); the
-         * web UI compares it with the build it offers to flash. */
-        link_printf("INFO widscan58 %s %d %s %s\n", radio_caps()->target, PROTO_VERSION,
-                    esp_app_get_description()->version, radio_phy_version());
+         * web UI compares it with the build it offers to flash. Then HEAD's
+         * commit time and the PHY library's version. Fields are separated by
+         * '|', which none of them contains (the PHY version has spaces). */
+        link_printf("INFO widscan58|%s|%d|%s|%s|%s\n", radio_caps()->target, PROTO_VERSION,
+                    esp_app_get_description()->version, FW_COMMIT_DATE, radio_phy_version());
     } else if (!strcmp(line, "PROFILE?")) {
         send_profile(&c);
     } else if (!strcmp(line, "CHANNELS DEFAULT")) {

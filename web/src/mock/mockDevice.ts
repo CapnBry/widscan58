@@ -207,7 +207,7 @@ export class MockTransport implements Transport {
     const num = (i: number) => Number(parts[i]);
     switch (true) {
       case line === "INFO":
-        return this.text(`INFO widscan58 ${p.target} 1 0.1.0-sim SIMULATED\n`);
+        return this.text(`INFO widscan58|${p.target}|1|0.1.0-sim|2026-01-01T00:00:00+00:00|SIMULATED\n`);
       case line === "PROFILE?":
         return this.text(
           `PROFILE ${JSON.stringify({

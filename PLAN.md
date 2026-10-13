@@ -367,7 +367,7 @@ node protocol (`firmware/src/proto/rh.c`), which the device boots in.
 
 | Command | Purpose |
 |---|---|
-| `INFO` | `widscan58 <target> <proto_ver> <fw_ver> <phy_ver>` |
+| `INFO` | `widscan58\|<target>\|<proto_ver>\|<fw_ver>\|<commit_time>\|<phy_ver>` (separated by `\|`: the PHY version has spaces) |
 | `PROFILE?` | Dump the band profile as JSON (channel plan, windows, rate, span); one profile per target, no switching |
 | `CHANNELS <name>=<MHz> …` / `CHANNELS DEFAULT` | Replace the channel plan (up to 8, 5.8 GHz equivalent MHz); `PROFILE?` reports it |
 | `ENABLE <mask>` / `ENABLE?` | Enabled-channel bitmask |

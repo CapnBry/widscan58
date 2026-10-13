@@ -107,8 +107,12 @@ reconfigures when `CMakeLists.txt` or `sdkconfig*` change, so incremental builds
 used to keep an old hash; `firmware/version_check.py` (a pre-build script)
 forces a reconfigure when `git describe` differs from the build's
 `project_description.json`. That costs one near-full rebuild (~25 s on the C5)
-after each commit or clean/dirty change. The date at the end of `INFO` belongs
-to the PHY library (`radio_phy_version()`), not to our build.
+after each commit or clean/dirty change. `INFO`'s fields are separated by `|`
+(`widscan58|<target>|<proto>|<version>|<commit time>|<PHY version>`, the PHY
+version has spaces). After the version, `INFO` has HEAD's
+commit time in ISO 8601 (`git log -1 --format=%cI`, taken at the same time;
+only `commands.c` sees it). The date at the end of `INFO` belongs to the PHY
+library (`radio_phy_version()`), not to our build.
 
 **Web UI says "The device has been lost" right after connecting** (while the board
 stays plugged in): an earlier pyserial user of the port, such as esptool,

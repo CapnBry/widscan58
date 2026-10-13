@@ -756,7 +756,7 @@ server drives it with only `SERIAL_PORTS` configured.
   RotorHazard mode (`rh_check.py`, 8 seats) 3.38–3.41 → 3.18–3.22 ms, a
   smaller gain (~50 µs per hop) than in monitor mode (~80 µs); not explained.
 - PLL-only retune on the C5 (2026-10-13, `TUNESKIP 1`; the C5 default is now 3):
-  between full tunes (every 200 ms, and after a fresh calibration) a hop runs
+  between full tunes (every 2 s, and after a fresh calibration) a hop runs
   only the frequency-dependent parts of `phy_chip_set_chan` (`radio_c5.c`,
   `pll_retune`): `phy_rfpll_set_adc_rate` (ADC rate and RX filter mode; this
   is the 5830/5831 MHz switch above: without it R7 read ~1 dB high, with the
@@ -774,8 +774,37 @@ server drives it with only `SERIAL_PORTS` configured.
     sets the AGC's maximum gain (`phy_param+292..294`,
     `phy_agc_max_gain_set`), which differs between LOs: replaying the
     entries alone read 2–5 dB high on R1/R2 with `RECALMODE ONCE`, so it is
-    replayed too. Slots (8, ~6 KB heap) follow the calibration and expire
-    after 1 s.
+    replayed too. Slots (8, ~6 KB heap) follow the calibration.
+  - Keeping the tables fresh: at first each slot expired after 1 s and was
+    rebuilt. All of a plan's tables were built together, so they expired in
+    the same rotation: 4 rebuild tunes of ~420 µs once a second, a ~2.8 ms
+    rotation (~355 /s) in RotorHazard mode's `loop_time`, which only reports
+    the latest interval. Now the full tune records the table channel setup
+    builds, and takes the plan's LOs in order, waiting at most a rotation
+    for the next one, so each LO is refreshed once per cycle of full tunes.
+    The scanner passes the plan's LOs with `radio_set_plan` (a first version
+    inferred them from recently tuned LOs and picked the oldest table).
+    Hop log (then at 200 ms): full tunes 5899, 5677, 5751, 5825, 5899, …
+    ~202 ms apart, no rebuild tunes; the rotation with the full tune still
+    took ~2.7 ms (~370 /s), 5 times a second.
+  - Full tune interval 200 ms → 2 s. The 200 ms came with the S3 backend, a
+    guess "in case the Wi-Fi driver touches the RX path", never measured.
+    Test: 80 s in monitor mode (`METRICS SNR`, `FFT 64`, R1–R8 `GROUP`), a
+    VTX carried around on R1: 10 s normal, 60 s with no periodic full tune
+    (a temporary `TUNESKIP` bit; the 2 s table expiry still rebuilt the
+    tables), 10 s normal. No full tune in the 60 s. The empty channels
+    (R2–R8) held their RSSI and floor within ±0.2 dB in every 5 s window of
+    all three phases (R7/R8 drifted −0.3 dB over the 80 s, in all phases
+    alike), and the full tune forced at the end moved them by 0.00–0.12 dB
+    (2 s before vs after). R1 read −21 to −50 dBFS as the VTX moved, peak
+    SNR 35–46 dB in each phase. Now each LO's table is refreshed every
+    LOs × 2 s (8 s for R1–R8 `GROUP`, 16 s for 8 LOs); the expiry backstop is
+    (8 + 2) × 2 s = 20 s. Hop log: full tunes 2.0 s apart in plan order
+    (5677, 5751, 5825, 5899), no rebuild tunes. Not covered: temperature
+    changes over minutes, Wi-Fi driver activity.
+  - Timing moves with the build by up to ~100 µs per hop with no change to
+    the code involved (this last build: DSP 305 → 345 µs, 8 seats in
+    RotorHazard mode ~2.2 → ~2.4 ms): code placement and flash cache misses.
   - Tune (median, R1–R8, `GROUP`): 607 → 299 µs. Same build, R1–R8,
     `METRICS RSSI`: `FFT 64` 216 → 337 /s, `FFT 128` 182 → 261 /s; `METRICS
     FULL` (4 × 1024) 50 → 54 /s; `MODE SINGLE` at `FFT 64` 108 → 159 /s.

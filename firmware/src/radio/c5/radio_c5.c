@@ -75,9 +75,12 @@ static radio_caps_t caps = {
 /* Bit 0: PLL-only retune between full ones (pll_retune); bit 1 also skips
  * the RX path re-apply (the PLL-only tune leaves it alone; same levels).
  * Bit 2 skips the gain re-apply, but both kinds of tune reset the manual
- * gain (+27 dB with TUNESKIP 7). A full tune runs at least every 200 ms and
- * after every fresh calibration, with all of it. */
-#define FULL_TUNE_INTERVAL_US 200000
+ * gain (+27 dB with TUNESKIP 7). A full tune runs about every 2 s, taking
+ * the plan's LOs in turn (full_tune_here), and after every fresh calibration, with
+ * all of it. A minute without periodic full tunes, a VTX moving on R1, left
+ * every empty channel within 0.12 dB of the full tune that ended it
+ * (PLAN.md, PLL-only retune on the C5). */
+#define FULL_TUNE_INTERVAL_US 2000000
 static unsigned tune_skip = 3;
 static bool tuned_once;
 static int64_t last_full_tune;
@@ -88,6 +91,13 @@ void radio_set_tune_skip(unsigned mask) {
     tuned_once = false;
 }
 unsigned radio_get_tune_skip(void) { return tune_skip; }
+static uint32_t plan_lo_khz[RADIO_PLAN_MAX_LOS];
+static unsigned plan_n, plan_next; /* the plan's LOs; the next one due a full tune */
+void radio_set_plan(const uint32_t *lo_khz, unsigned n) {
+    plan_n = n < RADIO_PLAN_MAX_LOS ? n : RADIO_PLAN_MAX_LOS;
+    memcpy(plan_lo_khz, lo_khz, plan_n * sizeof(*lo_khz));
+    plan_next = 0;
+}
 static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
 static unsigned gain_code = 50;
 static int filter_code = -1;
@@ -158,13 +168,18 @@ uint32_t __wrap_phy_wifi_set_tx_gain_new(uint32_t a0, uint32_t a1, uint32_t a2, 
  * ~35 us writing them. It also sets the AGC's maximum gain, which differs
  * between LOs and moves what a manual gain index means (2-5 dB at R1/R2 with
  * RECALMODE ONCE when it was left out). A PLL-only retune replays both as
- * recorded by the last rebuild: a slot is valid for the calibration it was
- * built from, and for up to a second, in case the table follows something
- * slower (temperature; a replay matched a rebuild in ~2600 comparisons over
- * a few seconds). */
+ * recorded by the last build: the full tunes record the one channel setup
+ * makes, and take the plan's LOs in turn, so each table is rebuilt once per cycle
+ * (LOs x 2 s). A slot is valid for the calibration it was built from, and
+ * for at most a cycle of 8 LOs and some margin (20 s), in case the table
+ * follows something slower and its LO misses its turn (temperature; a
+ * replay matched a rebuild in ~2600 comparisons over a few seconds).
+ * Recording only takes 84 writes to entries 0..83 in order: the TX gain
+ * table also goes through phy_write_gain_mem, but channel setup's
+ * (phy_wifi_set_tx_gain_new) is skipped while rx_tuning. */
 #define GAIN_MEM_N 84u
 #define GAIN_SLOTS 8u /* one per LO of an 8-channel plan */
-#define GAIN_SLOT_MAX_AGE_US 1000000
+#define GAIN_SLOT_MAX_AGE_US ((GAIN_SLOTS + 2) * FULL_TUNE_INTERVAL_US)
 typedef struct {
     uint16_t mhz; /* 0 = empty */
     uint32_t gen, used;
@@ -173,7 +188,7 @@ typedef struct {
     uint8_t w2[GAIN_MEM_N];
     uint8_t agc_max[3]; /* phy_param +292..294 */
 } gain_slot_t;
-static gain_slot_t *gain_slots; /* heap, on the first PLL-only retune */
+static gain_slot_t *gain_slots; /* heap, on first use (TUNESKIP bit 0) */
 static gain_slot_t *gain_rec;   /* recording into this slot */
 static unsigned gain_rec_n;
 static bool gain_rec_ok;
@@ -181,9 +196,7 @@ static uint32_t gain_clock;
 static unsigned gain_mhz; /* what the gain memory holds: built for this LO ... */
 static uint32_t gain_gen; /* ... from this calibration */
 
-/* Prototype unknown (four register values, the last one the entry index);
- * phy_set_tx_gain_mem writes through it too, so only phy_set_rx_gain_table
- * calls made by gain_table_load are recorded. */
+/* Prototype unknown (four register values, the last one the entry index). */
 extern void __real_phy_write_gain_mem(uint32_t, uint32_t, uint32_t, uint32_t);
 void __wrap_phy_write_gain_mem(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
     __real_phy_write_gain_mem(a0, a1, a2, a3);
@@ -197,39 +210,66 @@ void __wrap_phy_write_gain_mem(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a
     gain_rec->w2[gain_rec_n++] = (uint8_t)a2;
 }
 
-static void gain_table_load(unsigned mhz) {
+/* The slot holding this LO's table for the current calibration, or NULL. */
+static gain_slot_t *gain_slot_for(unsigned mhz) {
+    for (unsigned j = 0; gain_slots && j < GAIN_SLOTS; j++)
+        if (gain_slots[j].mhz == mhz && gain_slots[j].gen == cal_gen) return &gain_slots[j];
+    return NULL;
+}
+
+/* An empty or stale slot, else the least recently used one. */
+static gain_slot_t *gain_slot_victim(void) {
     if (!gain_slots) gain_slots = calloc(GAIN_SLOTS, sizeof(gain_slot_t));
     gain_slot_t *victim = NULL;
-    int64_t now = esp_timer_get_time();
     for (unsigned j = 0; gain_slots && j < GAIN_SLOTS; j++) {
         gain_slot_t *slot = &gain_slots[j];
-        if (slot->mhz == mhz && slot->gen == cal_gen && now - slot->built_us > GAIN_SLOT_MAX_AGE_US) slot->gen = 0;
-        if (slot->mhz == mhz && slot->gen == cal_gen) {
-            for (unsigned k = 0; k < GAIN_MEM_N; k++) __real_phy_write_gain_mem(slot->w0[k], slot->w1[k], slot->w2[k], k);
-            /* The end of phy_set_rx_gain_table. */
-            memcpy(phy_param + 292, slot->agc_max, sizeof(slot->agc_max));
-            phy_agc_max_gain_set(phy_param[42] ? phy_param[294] : phy_param[293], phy_param[292]);
-            slot->used = ++gain_clock;
-            victim = NULL;
-            goto loaded;
-        }
         if (!victim || (victim->gen == cal_gen && (slot->gen != cal_gen || slot->used < victim->used))) victim = slot;
     }
-    gain_rec = victim;
+    return victim;
+}
+
+static void gain_rec_start(gain_slot_t *slot) {
+    gain_rec = slot;
     gain_rec_n = 0;
     gain_rec_ok = true;
-    phy_set_rx_gain_table(mhz, 0);
+}
+
+/* After the table build: keep the recording if it is complete. */
+static void gain_rec_end(unsigned mhz, int64_t now) {
+    gain_slot_t *slot = gain_rec;
     gain_rec = NULL;
-    if (victim) {
-        victim->mhz = gain_rec_ok && gain_rec_n == GAIN_MEM_N ? (uint16_t)mhz : 0;
-        memcpy(victim->agc_max, phy_param + 292, sizeof(victim->agc_max));
-        victim->gen = cal_gen;
-        victim->used = ++gain_clock;
-        victim->built_us = now;
+    if (!slot) return;
+    slot->mhz = gain_rec_ok && gain_rec_n == GAIN_MEM_N ? (uint16_t)mhz : 0;
+    memcpy(slot->agc_max, phy_param + 292, sizeof(slot->agc_max));
+    slot->gen = cal_gen;
+    slot->used = ++gain_clock;
+    slot->built_us = now;
+}
+
+static void gain_table_load(unsigned mhz, int64_t now) {
+    gain_slot_t *slot = gain_slot_for(mhz);
+    if (slot && now - slot->built_us <= GAIN_SLOT_MAX_AGE_US) {
+        for (unsigned k = 0; k < GAIN_MEM_N; k++) __real_phy_write_gain_mem(slot->w0[k], slot->w1[k], slot->w2[k], k);
+        /* The end of phy_set_rx_gain_table. */
+        memcpy(phy_param + 292, slot->agc_max, sizeof(slot->agc_max));
+        phy_agc_max_gain_set(phy_param[42] ? phy_param[294] : phy_param[293], phy_param[292]);
+        slot->used = ++gain_clock;
+    } else {
+        gain_rec_start(slot ? slot : gain_slot_victim());
+        phy_set_rx_gain_table(mhz, 0);
+        gain_rec_end(mhz, now);
     }
-loaded:
     gain_mhz = mhz;
     gain_gen = cal_gen;
+}
+
+/* A due full tune goes to the plan's LOs in order (radio_set_plan), so each
+ * LO's gain table is refreshed once per cycle; it waits at most a rotation
+ * for its LO. Without a plan, or if that LO does not come within another
+ * interval (a RAWIQ snapshot elsewhere), it runs on the current LO. */
+static bool full_tune_here(uint32_t lo_khz, int64_t now) {
+    if (!plan_n || now - last_full_tune > 2 * FULL_TUNE_INTERVAL_US) return true;
+    return lo_khz == plan_lo_khz[plan_next];
 }
 
 /* PLL-only retune: what phy_chip_set_chan does that depends on the frequency
@@ -244,12 +284,12 @@ loaded:
  * - the RX gain table, replayed from gain_slots where possible.
  * With the gain re-apply, a hop's tune takes ~0.3 ms instead of ~0.5-0.6 ms
  * (PLAN.md, PLL-only retune on the C5). */
-static void pll_retune(unsigned mhz, bool restored) {
+static void pll_retune(unsigned mhz, bool restored, int64_t now) {
     *(uint16_t *)(phy_param + 288) = (uint16_t)mhz;
     phy_rfpll_set_adc_rate();
     phy_set_channel_rfpll_freq_new(mhz, phy_param[49], *(int16_t *)(phy_param + 30));
     phy_set_pbus_mem(phy_param[290], mhz, phy_param[42]);
-    if (restored || gain_mhz != mhz || gain_gen != cal_gen) gain_table_load(mhz);
+    if (restored || gain_mhz != mhz || gain_gen != cal_gen) gain_table_load(mhz, now);
     phy_xtal_duty_set(mhz);
 }
 
@@ -275,16 +315,27 @@ static esp_err_t tune_locked(uint32_t lo_khz) {
         calibrated_mhz = cal_mhz;
     }
     int64_t now = esp_timer_get_time();
-    bool full = !tuned_once || recalibrated || now - last_full_tune > FULL_TUNE_INTERVAL_US;
+    bool pll_only = tune_skip & 1;
+    bool due = now - last_full_tune > FULL_TUNE_INTERVAL_US;
+    bool full = !tuned_once || recalibrated || (due && (!pll_only || full_tune_here(lo_khz, now)));
     if (!full && !restored && lo_khz == tuned_lo_khz) return ESP_OK;
-    if (full) last_full_tune = now;
+    if (full) {
+        last_full_tune = now;
+        if (plan_n && lo_khz == plan_lo_khz[plan_next]) plan_next = (plan_next + 1) % plan_n;
+    }
     rx_tuning = true;
-    if (full || !(tune_skip & 1)) {
-        phy_set_chanfreq(mhz, CHANNEL_MODE); /* rebuilds the gain table */
+    if (full || !pll_only) {
+        /* Channel setup rebuilds the gain table: record it for the PLL-only tunes. */
+        if (pll_only) {
+            gain_slot_t *slot = gain_slot_for(mhz);
+            gain_rec_start(slot ? slot : gain_slot_victim());
+        }
+        phy_set_chanfreq(mhz, CHANNEL_MODE);
+        if (pll_only) gain_rec_end(mhz, now);
         gain_mhz = mhz;
         gain_gen = cal_gen;
     } else {
-        pll_retune(mhz, restored);
+        pll_retune(mhz, restored, now);
     }
     rx_tuning = false;
     if (full || !(tune_skip & 2)) {

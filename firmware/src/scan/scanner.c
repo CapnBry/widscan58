@@ -140,6 +140,10 @@ static void apply_config(void) {
     if (measure_changed) memset(s.ch, 0, sizeof(s.ch));
     memset(s.iq, 0, sizeof(s.iq)); /* the plan, gain or calibration may have changed */
     if (s.hop >= s.plan.nhops) s.hop = 0;
+    _Static_assert(PROFILE_MAX_CHANNELS <= RADIO_PLAN_MAX_LOS, "plan LOs");
+    uint32_t los[RADIO_PLAN_MAX_LOS];
+    for (unsigned j = 0; j < s.plan.nhops; j++) los[j] = s.plan.hop[j].lo_khz;
+    radio_set_plan(los, s.plan.nhops);
     s.tuned_lo_khz = 0; /* settings below (recalibration mode) apply at the next tune */
     psd_set_fft((psd_fft_t)s.cfg.fft_type);
     psd_release_unused();

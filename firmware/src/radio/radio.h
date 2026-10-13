@@ -66,6 +66,12 @@ esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, cons
 void radio_set_tune_skip(unsigned mask);
 unsigned radio_get_tune_skip(void);
 
+/* The scan plan's LOs in hop order (at most RADIO_PLAN_MAX_LOS), whenever it
+ * changes; call from the task that tunes. The C5 gives its periodic full
+ * tunes to them in turn; the S3 ignores it. */
+#define RADIO_PLAN_MAX_LOS 8
+void radio_set_plan(const uint32_t *lo_khz, unsigned n);
+
 /* The capture aperture, for scratch use between captures (it is overwritten
  * by the next radio_capture). */
 uint32_t *radio_sample_buffer(unsigned *max_words);

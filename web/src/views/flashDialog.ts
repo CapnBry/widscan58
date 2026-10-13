@@ -74,7 +74,6 @@ export class FlashDialog {
     // across a deploy would otherwise offer the old build, whose files and
     // hashes are gone.
     if (!this.busy || !this.manifest) this.manifest = loadManifest();
-    this.refreshDevice();
     this.manifest.then(
       (m) => {
         this.showManifest(m);
@@ -93,6 +92,7 @@ export class FlashDialog {
       this.logPre.textContent = "";
     }
     this.el.showModal();
+    this.refreshDevice(); // after showModal: it skips a closed dialog
   }
 
   /** Shows the connected board's version; kept while flashing, when the board

@@ -71,11 +71,14 @@ select, input[type="number"], input[type="text"] {
 }
 input[type="range"] { accent-color: var(--accent); }
 
+/* Brand, status, then Connect and Flash device on the right. A long status is
+   cut short (ellipsis) rather than pushing the buttons down; on narrow
+   screens it moves to a row of its own below them. */
 header.top {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) 1fr auto;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 6px 10px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
@@ -145,8 +148,24 @@ a.menu-item { text-decoration: none; }
 .menu-switch input:checked { background: var(--accent); }
 .menu-switch input:checked::after { left: 15px; }
 header.top h1 { font-size: 15px; margin: 0 8px 0 0; letter-spacing: 0.02em; }
-header.top .spacer { flex: 1; }
-.conn-state { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+header.top .actions { grid-column: -2 / -1; display: flex; gap: 10px; }
+header.top .actions button { white-space: nowrap; }
+.conn-state { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); }
+.conn-state > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-state .dot { flex: none; }
+@media (max-width: 560px) {
+  header.top { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; }
+  header.top h1 { margin-right: 0; }
+  header.top .actions { gap: 8px; }
+  header.top .conn-state { grid-area: 2 / 1 / 3 / -1; }
+}
+/* Too narrow for the name and both buttons: the status goes beside the name
+   and the buttons get the second row. */
+@media (max-width: 379px) {
+  header.top { grid-template-columns: auto minmax(0, 1fr); }
+  header.top .conn-state { grid-area: 1 / 2 / 2 / 3; }
+  header.top .actions { grid-area: 2 / 1 / 3 / 3; justify-self: end; }
+}
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .dot.ok { background: var(--good); }
 .dot.sim { background: var(--warning); }
@@ -170,7 +189,17 @@ header.top .spacer { flex: 1; }
 .flash-versions th, .flash-versions td { text-align: left; padding: 2px 14px 2px 0; font-weight: normal; }
 .flash-versions thead th { color: var(--muted); font-size: 12px; }
 .flash-versions tbody th { color: var(--ink); }
-.flash-versions td { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.flash-versions td { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+/* Narrow screens: the three columns need ~400px, so stack each row's commit
+   time under its version, beside the label. */
+@media (max-width: 520px) {
+  .flash-versions { display: grid; grid-template-columns: max-content 1fr; }
+  .flash-versions thead { display: none; }
+  .flash-versions tbody, .flash-versions tr { display: contents; }
+  .flash-versions tbody th { grid-row: span 2; white-space: nowrap; }
+  .flash-versions td { grid-column: 2; }
+  .flash-versions td + td { padding-bottom: 6px; }
+}
 .flash-progress progress { width: 100%; accent-color: var(--accent); }
 .flash-status { min-height: 1.4em; margin: 4px 0 8px; color: var(--ink-2); }
 .flash-status.ok { color: var(--good); }

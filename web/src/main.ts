@@ -88,9 +88,7 @@ const header = el(
   { class: "top" },
   el("span", { class: "brand" }, el("span", { class: "menu-wrap" }, menuBtn, menu), el("h1", {}, "Widscan58")),
   el("span", { class: "conn-state" }, dot, connText),
-  el("span", { class: "spacer" }),
-  connectBtn,
-  flashBtn,
+  el("span", { class: "actions" }, connectBtn, flashBtn),
 );
 // Session sources other than a real device, shown in the protocol console.
 const sessionRow = el("div", { class: "session-row" }, simBtn, replayBtn, replayInput, recordBtn);
@@ -161,6 +159,7 @@ function startMode(device: Device): Promise<void> {
     if (app.settings.uiMode === "rh") {
       await app.send("PROTOCOL RH");
       device.enterRh();
+      await app.send("INFO"); // the firmware version (menu, flash dialog); syncDevice has it in monitor mode
       await app.rh.start(device, app.deviceSettings.channels);
     } else {
       await app.rh.stop();
@@ -213,7 +212,7 @@ darkSwitch.onchange = () => applyTheme(darkSwitch.checked ? "dark" : "light");
 // ---- Connection ---------------------------------------------------------------
 function setState(state: "off" | "ok" | "sim" | "err", text: string) {
   dot.className = `dot ${state === "off" ? "" : state}`;
-  connText.textContent = text;
+  connText.textContent = connText.title = text; // the title shows it in full when cut short
   const connected = state === "ok" || state === "sim";
   connectBtn.textContent = connected ? "Disconnect" : "Connect";
   connectBtn.classList.toggle("primary", !connected);

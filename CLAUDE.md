@@ -195,7 +195,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
 | `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, the default gain (manual 50) |
 | `CONFIG RESET` | RotorHazard mode only: erase the saved RotorHazard mode defaults and apply the built-in ones |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR` and `MODE GROUP\|SINGLE` work; the rest answer `ERR rh_mode` |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE` and `RECAL` work; the rest answer `ERR rh_mode` |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
 ## RotorHazard mode

@@ -213,7 +213,7 @@ static bool rh_allowed(const char *line) {
     static const char *const exact[] = {"PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?",
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
                                         "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE",
-                                        "CONFIG RESET"};
+                                        "CONFIG RESET", "RECAL"};
     static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;

@@ -395,7 +395,7 @@ export class MockTransport implements Transport {
   private rhAllowed(line: string): boolean {
     return (
       ["PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?", "METRICS RSSI", "METRICS SNR", "METRICS?",
-        "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE", "CONFIG RESET"].includes(line) ||
+        "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE", "CONFIG RESET", "RECAL"].includes(line) ||
       ["GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR "].some((p) => line.startsWith(p))
     );
   }

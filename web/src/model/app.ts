@@ -29,7 +29,7 @@ export class App {
     showAverage: true,
     historyMetric: "ema",
     historySeconds: 30,
-    dbMin: -100,
+    dbMin: -85,
     dbMax: -20,
     uiMode: "monitor",
   };

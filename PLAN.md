@@ -907,7 +907,8 @@ server drives it with only `SERIAL_PORTS` configured.
 index, in RotorHazard mode polled by RotorHazard's own interface code
 (`RHInterface.update()` every 100 ms, as its server), 8 seats R1–R8, `FFT 64`,
 `METRICS RSSI`, `MODE GROUP`, `LEVELFILTER MEDIAN`, `IQCORR 1`; first 0.5 s
-after each change dropped. 25 mW VTX on R1, 0.9 m from the board. Floor = median
+after each change dropped. 25 mW VTX on R1, 0.9 m from the board (XIAO
+ESP32-C5, no antenna fitted). Floor = median
 of R2, R6, R7, R8. Run 1 (room occupied) and run 2 (another 25 mW VTX, room
 empty); the numbers are run 2's, whose R1 held within ~1 dB per step (run 1's
 wandered ±10 dB with people moving). Data and scripts: `tmp/gain-sweep/`,
@@ -950,9 +951,11 @@ wandered ±10 dB with people moving). Data and scripts: `tmp/gain-sweep/`,
   corner before antenna and median-filter losses. 48 would give ~2 dB more
   margin and ~3 dB less headroom; past ~54 gain buys no margin.
 - Open: the RotorHazard developer's report (levels pinned at 254 at gain 50
-  with a VTX within ~3 m) is ~35 dB stronger than this bench (25 mW at 0.9 m:
-  code 151, −26 dBFS at 50). Their VTX power and antennas are unknown;
-  check with their setup before relying on 45's headroom.
+  with a VTX within ~3 m, antenna on) is ~35 dB stronger than this bench
+  (25 mW at 0.9 m, no antenna: code 151, −26 dBFS at 50). The missing
+  antenna likely accounts for much of that, so with an antenna fitted 45's
+  headroom is smaller than measured here. Repeat the sweep with the antenna
+  on before relying on it.
 
 **Image rejection vs IQ calibration on the C5 (2026-10-10).** esp-sdr 77ffc12 stops redoing the (transmitting) loopback IQ calibration on retune and keeps the startup IQ. Tested with an analog VTX at low power on R7 and R1, antenna on the C5, gain 66, `RECALMODE EVERY`; LO stepped so the VTX sat at ±4…±36 MHz, 8 × 9180-sample captures per point, image rejection = VTX power in ±4 MHz around its offset vs the mirrored band (floor subtracted). The VTX was only ~23–28 dB over the floor in that band, so values above ~30 dB are floor-limited.
 - Per-LO IQ (current): R7 27–34 dB, R1 24–33 dB.

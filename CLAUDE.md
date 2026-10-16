@@ -215,8 +215,8 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   `METRICS RSSI`, no display spectrum; with R1–R6 that is ~1.5 ms between
   updates of a seat (~660 /s; R1–R8 ~1.96 ms, ~510 /s; `rh_check.py`'s
   `loop_time`, docs/RotorHazard.md). The default gain is manual 45, as in
-  monitor mode (gain sweeps with a 25 mW VTX at 0.9 m: PLAN.md, "Gain
-  sweep"). `CONFIG SAVE` replaces the gain, FFT, metric, LO plan and level filter defaults (NVS blob version 3, `commands.c`; versions 1
+  monitor mode (gain sweeps with a 25 mW VTX at 0.9 m, no antenna on the
+  board: PLAN.md, "Gain sweep"). `CONFIG SAVE` replaces the gain, FFT, metric, LO plan and level filter defaults (NVS blob version 3, `commands.c`; versions 1
   and 2 load with the median filter); they are applied on every switch to this
   mode.
 - **Levels** are the `METRICS` byte codes, in 0.25 dB steps: RSSI (dBFS =

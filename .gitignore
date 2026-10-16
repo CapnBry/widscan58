@@ -2,6 +2,8 @@
 ref/
 # Full flash dump of the S3 as delivered (esp-sdr WebSDR firmware); local only
 backup/
+# Experiments
+tmp/
 
 # Firmware build output and generated config
 firmware/.pio/

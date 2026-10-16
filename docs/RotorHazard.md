@@ -14,9 +14,7 @@ port in its config.
 3. Under **Receiver**, set the RX gain, pick the level the seats report and
    how it is smoothed:
    - **RX gain**: the default is 45. Higher gains reach further but a nearby
-     VTX clips the receiver sooner. At 45 a 25 mW VTX 0.9 m from the board
-     reads about 129 (RSSI), with roughly 29 dB to spare before the receiver
-     clips; above about 54 more gain raises the noise as much as the signal.
+     VTX clips the receiver sooner (see RX gain below).
    - **RSSI**: the power in the channel's ±5 MHz window, in dBFS
      (level / 4 − 63.75, 0.25 dB steps). It moves with the gain and the
      noise: with no VTX it sits around 13–25 at gains up to about 40,
@@ -55,6 +53,27 @@ RotorHazard's web UI.
 - The server finds 8 nodes on the port. It sets each seat's frequency from the
   current profile. A seat set to off is left out of the scan, which makes the
   other seats update faster (see below).
+
+## RX gain
+
+The RX gain is an index into the radio's gain table, 0–83. Set it on the web
+UI's RotorHazard mode page under **Receiver** → **RX gain**, then click
+**Save**. It takes effect at once. RotorHazard's own UI can't change it.
+
+![Seat levels against RX gain: a 25 mW VTX on R1, 0.9 m from a XIAO ESP32-C5 with no antenna; the other seats show the noise floor](../images/rh-gain-sweep.png)
+
+*A 25 mW VTX on R1, 0.9 m from a XIAO ESP32-C5 with no antenna, polled as
+the RotorHazard server does, 5 s per gain step. R2–R8 have no VTX and show
+the noise floor.*
+
+To adjust it, set the gain using the webui and "Save" the settings. Then,
+move the device over to RotorHazard and fly a few passes (or hold a powered
+quad in the gate) and watch the seat's level graph on the RotorHazard mode page:
+
+- If passes reach 254 and stay flat at the top, lower the gain by 5–10.
+- If passes rise less than about 40 codes (10 dB) over the level with no VTX,
+  raise it.
+- After a change, set EnterAt and ExitAt again: every step moves the levels.
 
 ## Performance
 

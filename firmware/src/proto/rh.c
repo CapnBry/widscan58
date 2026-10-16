@@ -107,6 +107,18 @@ void rh_reset_levels(void) {
     portEXIT_CRITICAL(&mux);
 }
 
+void rh_set_filter(lap_filter_t f) {
+    portENTER_CRITICAL(&mux);
+    for (unsigned j = 0; j < RH_SEATS; j++) {
+        if (seat[j].lap.filter == f) continue;
+        lap_set_filter(&seat[j].lap, f);
+        seat[j].last_us = 0;
+    }
+    portEXIT_CRITICAL(&mux);
+}
+
+lap_filter_t rh_get_filter(void) { return (lap_filter_t)seat[0].lap.filter; }
+
 IRAM_ATTR void rh_feed(unsigned seat_idx, int64_t t_us, uint8_t level) {
     if (seat_idx >= RH_SEATS) return;
     if (level < 1) level = 1;

@@ -813,7 +813,13 @@ server drives it with only `SERIAL_PORTS` configured.
     levels; now the C5 default (RotorHazard mode, 8 seats: ~2.2 ms). The
     mask is reported as `tskip` in `STATUS?`/`CONFIG?`, and the UI's Scanner
     controls have a toggle per bit. `TUNESKIP 7` reads +27 dB: the PLL-only
-    tune resets the manual gain too.
+    tune resets the manual gain too. Checked 2026-10-14 (gain 50): both kinds
+    of tune clear the force bit (23) of 0x600a702c and keep the index (bits
+    24–31), so `0x32c053e2` after `force_rx_gain` reads `0x324053e2` after
+    every tune (~1000 PLL-only, 14 full). A write only when the force is gone
+    (FPVGateC5MK be70d8c, against post-hop spikes from rewriting a force
+    that still holds) would always write here; and our write comes before
+    `SETTLE`, theirs right before a capture.
   - Levels vs the full tune (`CACHE`, dummy load, gain 50): channel RSSI and
     floor within 0.1–0.3 dB at `FFT 64`, 128 and 1024, per-bin floor within
     0.1 dB at every LO, DC within its run-to-run spread, same flags. Board
@@ -874,6 +880,79 @@ server drives it with only `SERIAL_PORTS` configured.
 - Not yet tested with a VTX flying through a gate: EnterAt/ExitAt calibration
   for real passes, pass-time accuracy vs RotorHazard's RX5808 nodes, and RSSI vs
   SNR as the level.
+- Gain and output filter (2026-10-16), after a RotorHazard developer's report:
+  at the default gain 50 the levels pinned at 254 with a VTX within ~3 m
+  (antenna on), while FPVGateC5MK 1.2.1 (gain 30) peaked at 2–3 m and did not
+  clip at 0.3–1 m. Both measure the power in ~10 MHz around the channel from
+  256 samples at 80 MS/s and map dBFS to nearly the same 0.25 dB code (theirs:
+  dB in LSB², −10…53.75 onto 0…1023, ÷4 ≈ 4 × (dBFS + 64.2)), and both force
+  the same PHY gain index, so the ~20 index steps (~15–20 dB, from our floor
+  vs gain at 50–83) are the difference. At 50 the receiver's own noise already
+  lifts the floor ~5 dB over the ADC's; at 30 the floor is the ADC's.
+  - RotorHazard mode's built-in gain became manual 30 (monitor mode kept 50);
+    since the gain sweep below, 45 in both.
+    A saved gain still wins.
+  - `LEVELFILTER MEDIAN|EMA`: the 255 ms median (default) or FPVGateC5MK's
+    filter, a median of 3 and an EMA (their alpha 0.3 at ~1030 /s, τ = 2.72
+    ms), with the weight 1 − exp(−dt/τ) from each update's interval (integer
+    (2,2) Padé, within 1 % up to dt = 2τ) so τ holds at any rate. Saved with
+    `CONFIG SAVE` (NVS blob v3; v1/v2 load as `MEDIAN`), in the web UI's
+    Receiver card. The median costs little peak height at gate distances
+    (±64 ms around the closest approach: ~0.4 dB at 3 m, 15 m/s), so the
+    filter is a preference, not the fix; the gain is.
+  - Not yet checked with a VTX: passes with each filter. (The gain → dB
+    step: see the gain sweep below. The built-in gain is now 45.)
+
+**Gain sweep (2026-10-16).** `GAIN MANUAL 0..83` (gain_max 83), 5 s per
+index, in RotorHazard mode polled by RotorHazard's own interface code
+(`RHInterface.update()` every 100 ms, as its server), 8 seats R1–R8, `FFT 64`,
+`METRICS RSSI`, `MODE GROUP`, `LEVELFILTER MEDIAN`, `IQCORR 1`; first 0.5 s
+after each change dropped. 25 mW VTX on R1, 0.9 m from the board. Floor = median
+of R2, R6, R7, R8. Run 1 (room occupied) and run 2 (another 25 mW VTX, room
+empty); the numbers are run 2's, whose R1 held within ~1 dB per step (run 1's
+wandered ±10 dB with people moving). Data and scripts: `tmp/gain-sweep/`,
+`tmp/gain-sweep-2/` (not tracked).
+- Gain per index, from R1's step-to-step change: 0.83 dB/index over 18–44,
+  1.02 over 45–72, 0.98 over 25–72. Above ~25 the index is ~1 dB.
+- Floor: ADC-limited, −60…−58 dBFS (codes ~13–24), from 10 to ~44, as a
+  sawtooth: +0.3–0.6 dB per index, then a drop at 10 (−4.1 dB), 17 (−1.5),
+  25 (−3.9), 30 (−1.0) and 38 (−1.5); at 6, 15 and 36 only some LO pairs
+  drop. Identical in both runs, so it belongs to the gain table, not the
+  signal. 0–9 is worse than 10–14 (floor 4 dB higher for the same signal).
+  Above ~45 the receiver's noise dominates: +0.92 dB per index.
+- The VTX is within 1.4 dB of the floor up to 13; 14: 2.5 dB, 17: 3.9 dB.
+- Dead signal steps: 24 (+0.0 dB) and 30 (−0.25). Then 25 gives +1.5 dB
+  with the floor −3.75 (margin +5.3 dB in one index), and 38 gives +1.5 with
+  the floor −1.1. Reading: total gain keeps rising ~1 dB per index while
+  gain moves between stages, and the floor falls where the later (noisier)
+  stage gives some up. Not a bitfield in the index: the drops are not at
+  multiples of 8 (8, 16, 24, 32, 40 are ordinary steps), are 7–15 apart, and
+  move between LOs (the table is built per LO, `phy_set_rx_gain_table`).
+  Not yet confirmed: dumping `gain_slots` (w0/w1/w2 per index) and diffing
+  neighbouring entries would show which fields change at 10/17/25/30/38.
+- R1 margin over the floor: 30: 12.9 dB, 38: 20.6, 45: 25.6, 50: 27.9; flat
+  at 30.4–30.9 dB from 54 to 75 (floor and signal rise together), then
+  falling (23.75 at 83).
+- Clipping: R1's steps shrink from 76 (+0.4, +0.4, +0.25 dB) and it pins at
+  254 from 78. R2, in the same 80 MHz capture, reads below the quiet seats
+  from 74 (R1 at about −2 dBFS) and 6 dB below at 83, so the clip shows on
+  the LO's partner channel a few dB before R1's code reaches 254. Run 1: the
+  same from 76.
+- Empty seats at high gain: R5, R6, R8 sit 1–2 dB above R2, R7, steadily
+  (per-channel floor, not traffic). Wi-Fi ch 149 never showed: max − median
+  ≤ ~1 dB per 5 s on every seat (the 255 ms median also removes bursts).
+- Race captures at gain 30 (`tmp/rh-levels/`) peaked at codes 52–76; the
+  bench at 30 read 68, so 0.9 m is about a real pass's level.
+- Default gain 45 (both modes; the web UI's default too, was 50; monitor
+  firmware was 50, RotorHazard mode 30). Races run 25 mW, and the timer
+  stands at a gate corner: 1.52 m opening, passes at ~0.3–2.15 m, +9.5 to
+  −7.6 dB vs 0.9 m. At 45: ~19 dB headroom at 0.3 m, ~18 dB margin at the far
+  corner before antenna and median-filter losses. 48 would give ~2 dB more
+  margin and ~3 dB less headroom; past ~54 gain buys no margin.
+- Open: the RotorHazard developer's report (levels pinned at 254 at gain 50
+  with a VTX within ~3 m) is ~35 dB stronger than this bench (25 mW at 0.9 m:
+  code 151, −26 dBFS at 50). Their VTX power and antennas are unknown;
+  check with their setup before relying on 45's headroom.
 
 **Image rejection vs IQ calibration on the C5 (2026-10-10).** esp-sdr 77ffc12 stops redoing the (transmitting) loopback IQ calibration on retune and keeps the startup IQ. Tested with an analog VTX at low power on R7 and R1, antenna on the C5, gain 66, `RECALMODE EVERY`; LO stepped so the VTX sat at ±4…±36 MHz, 8 × 9180-sample captures per point, image rejection = VTX power in ±4 MHz around its offset vs the mirrored band (floor subtracted). The VTX was only ~23–28 dB over the floor in that band, so values above ~30 dB are floor-limited.
 - Per-LO IQ (current): R7 27–34 dB, R1 24–33 dB.

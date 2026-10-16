@@ -17,7 +17,15 @@
  * time of the window's middle update. Nothing is reported until the window
  * first spans LAP_WINDOW_MS. The median comes from a histogram of the level
  * codes; update times are kept for every LAP_TS_EVERY-th update and
- * interpolated in between. */
+ * interpolated in between.
+ *
+ * LAP_FILTER_EMA instead: a median of the last 3 updates (removes single
+ * spikes), then an exponential average with a time constant of
+ * LAP_EMA_TAU_US whatever the update rate: its weight comes from each
+ * update's interval. That is FPVGateC5MK's filter (median of 3, then alpha
+ * 0.3 at ~1030 updates/s), much lighter than the median window. Levels are
+ * reported from the first update, with the time of the median's middle
+ * update less the average's delay. */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,6 +35,7 @@
 #define LAP_WINDOW_MS 255  /* median window */
 #define LAP_MAX_SAMPLES 255 /* window cap: one byte per histogram bin */
 #define LAP_TS_EVERY 8     /* updates per stored timestamp */
+#define LAP_EMA_TAU_US 2750 /* LAP_FILTER_EMA time constant: alpha 0.3 at 1030 updates/s = 2750 */
 /* Enough timestamps for the oldest update's preceding one to survive. */
 #define LAP_TS_SLOTS ((LAP_MAX_SAMPLES + 1) / LAP_TS_EVERY + 2)
 
@@ -36,6 +45,8 @@ typedef struct {
     uint16_t duration_ms;  /* first to last update at this level */
 } lap_extremum_t;
 
+typedef enum { LAP_FILTER_MEDIAN, LAP_FILTER_EMA } lap_filter_t;
+
 typedef struct {
     lap_extremum_t e[LAP_HISTORY];
     uint8_t head, n;
@@ -44,9 +55,11 @@ typedef struct {
 typedef struct {
     /* Settings */
     uint8_t enter_at, exit_at;
+    uint8_t filter;        /* lap_filter_t */
     /* Median window: updates first .. seq - 1 (update k is ring[k & 255]),
      * a histogram of their levels, and the median: the lower middle level,
-     * with `below` updates under it. */
+     * with `below` updates under it. LAP_FILTER_EMA uses only the ring and
+     * seq, last_ms and ema_q8. */
     uint8_t ring[256];
     uint8_t bins[256];
     uint32_t ts[LAP_TS_SLOTS]; /* time of update k, for k % LAP_TS_EVERY == 0 */
@@ -54,6 +67,7 @@ typedef struct {
     uint32_t last_ms;      /* time of update seq - 1 */
     uint8_t med, below;
     bool filled;           /* the window has spanned LAP_WINDOW_MS */
+    int32_t ema_q8;        /* LAP_FILTER_EMA: the average, level x 256 */
     /* State */
     bool valid;            /* at least one filtered level since the reset */
     uint8_t level;         /* latest filtered level */
@@ -77,8 +91,10 @@ typedef struct {
     uint16_t loop_us;
 } lap_seat_t;
 
-/* Power-on state: thresholds as given, lap count 0. */
+/* Power-on state: thresholds as given, LAP_FILTER_MEDIAN, lap count 0. */
 void lap_init(lap_seat_t *s, uint8_t enter_at, uint8_t exit_at);
+/* Change the filter; on a change, as lap_reset. */
+void lap_set_filter(lap_seat_t *s, lap_filter_t f);
 /* After a frequency change: forget levels, peaks and any crossing; keep
  * the thresholds, the lap count and the last pass (the server tracks laps
  * by the count changing). */

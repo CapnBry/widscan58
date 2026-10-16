@@ -83,7 +83,7 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->iq_corr = true;
     c->settle_us = 100;
     c->gain_mode = RADIO_GAIN_MANUAL;
-    c->gain = 50;
+    c->gain = 45;
     c->metrics_mode = METRICS_FULL;
     c->rssi_hz = p->rssi_hz;
     c->search_hz = p->search_hz;

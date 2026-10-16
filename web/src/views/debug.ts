@@ -170,7 +170,7 @@ export class Console implements View {
 
   /** sessionRow: connection-source buttons (simulate, replay, record) owned by main. */
   constructor(private app: App, sessionRow: HTMLElement) {
-    const input = el("input", { type: "text", placeholder: "Command, e.g. TIMING?  GAIN MANUAL 50  SPURS?" }) as HTMLInputElement;
+    const input = el("input", { type: "text", placeholder: "Command, e.g. TIMING?  GAIN MANUAL 45  SPURS?" }) as HTMLInputElement;
     const send = el("button", { class: "primary" }, "Send");
     const go = async () => {
       const line = input.value.trim();

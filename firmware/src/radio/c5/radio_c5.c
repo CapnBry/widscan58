@@ -107,7 +107,7 @@ void radio_set_plan(const uint32_t *lo_khz, unsigned n) {
     plan_next = 0;
 }
 static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
-static unsigned gain_code = 50;
+static unsigned gain_code = 45;
 static int filter_code = -1;
 static radio_recal_t recal_mode = RADIO_RECAL_ONCE;
 static uint32_t recal_center_khz = 5787000;

@@ -78,10 +78,10 @@ s = await snap();
 check("MODE SINGLE -> 4 hops", s.status?.hops === 4 && s.status?.mode === "SINGLE", JSON.stringify(s.status));
 await send("MODE GROUP");
 await send("ENABLE 255");
-await send("GAIN MANUAL 50");
+await send("GAIN MANUAL 40");
 await sleep(1500);
 s = await snap();
-check("restore + GAIN MANUAL 50", s.status?.enabled === 255 && s.status?.gain === 50, JSON.stringify(s.status));
+check("restore + GAIN MANUAL 40", s.status?.enabled === 255 && s.status?.gain === 40, JSON.stringify(s.status));
 
 // Reduced metrics: FRAME_LEVELS; what the mode does not measure is left blank.
 for (const mode of ["SNR", "RSSI"]) {
@@ -150,6 +150,9 @@ const rhCfg = () => page.evaluate(() => ({ ...window.widscan58.app.rh.config, me
 const saved0 = await rhCfg();
 await rhCmd("FFT 256");
 await page.evaluate(() => window.widscan58.app.rh.setMetric("SNR"));
+const [emaBtn] = await page.$$("xpath/.//button[normalize-space()='EMA']");
+await emaBtn.click();
+await sleep(500);
 const [saveBtn] = await page.$$("xpath/.//button[@title='Save these settings as default']");
 await saveBtn.click();
 await sleep(500);
@@ -163,8 +166,9 @@ await sleep(3000);
 const reapplied = await rhCfg();
 check(
   "PROTOCOL RH applies the saved settings",
-  reapplied.nfft === 256 && reapplied.capture_samples === 1024 && reapplied.metrics === "SNR" && reapplied.metric === "SNR",
-  JSON.stringify({ nfft: reapplied.nfft, capn: reapplied.capture_samples, metrics: reapplied.metrics, page: reapplied.metric }),
+  reapplied.nfft === 256 && reapplied.capture_samples === 1024 && reapplied.metrics === "SNR" && reapplied.metric === "SNR" &&
+    reapplied.level_filter === "EMA",
+  JSON.stringify({ nfft: reapplied.nfft, capn: reapplied.capture_samples, metrics: reapplied.metrics, page: reapplied.metric, filter: reapplied.level_filter }),
 );
 const [resetBtn] = await page.$$("xpath/.//button[normalize-space()='Reset']");
 await resetBtn.click();
@@ -172,13 +176,15 @@ await sleep(500);
 const reset = await rhCfg();
 check(
   "Reset applies the built-in defaults",
-  reset.nfft === 64 && reset.capture_samples === 256 && reset.metrics === "RSSI" && reset.metric === "RSSI" && reset.mode === "GROUP",
-  JSON.stringify({ nfft: reset.nfft, capn: reset.capture_samples, metrics: reset.metrics, page: reset.metric, mode: reset.mode }),
+  reset.nfft === 64 && reset.capture_samples === 256 && reset.metrics === "RSSI" && reset.metric === "RSSI" && reset.mode === "GROUP" &&
+    reset.level_filter === "MEDIAN" && reset.gain_mode === "MANUAL" && reset.gain === 45,
+  JSON.stringify({ nfft: reset.nfft, capn: reset.capture_samples, metrics: reset.metrics, page: reset.metric, mode: reset.mode, filter: reset.level_filter, gain: reset.gain }),
 );
 for (const c of [
   `FFT ${saved0.nfft}`,
   `MODE ${saved0.mode}`,
   saved0.gain_mode === "MANUAL" ? `GAIN MANUAL ${saved0.gain}` : "GAIN HARDWARE",
+  `LEVELFILTER ${saved0.level_filter}`,
 ])
   await rhCmd(c);
 await page.evaluate((m) => window.widscan58.app.rh.setMetric(m), saved0.metrics);

@@ -9,13 +9,15 @@
  * streaming.
  *
  * RotorHazard's UI can't set our receiver settings, so CONFIG SAVE keeps
- * RotorHazard mode's gain, FFT size, level metric and LO plan in NVS; every
+ * RotorHazard mode's gain, FFT size, level metric, LO plan and level filter
+ * (LEVELFILTER) in NVS; every
  * switch to RotorHazard mode (and boot) applies them. CONFIG RESET erases
  * them and applies the built-in defaults.
  * A switch to monitor mode applies METRICS FULL. */
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include "esp_app_desc.h"
@@ -66,6 +68,8 @@ static const char *metrics_mode_name(unsigned m) {
     return m == METRICS_RSSI ? "RSSI" : m == METRICS_SNR ? "SNR" : "FULL";
 }
 
+static const char *level_filter_name(lap_filter_t f) { return f == LAP_FILTER_EMA ? "EMA" : "MEDIAN"; }
+
 static void send_profile(const scan_config_t *c) {
     const profile_t *p = c->profile;
     reply_add("PROFILE {\"name\":\"%s\",\"description\":\"%s\",\"target\":\"%s\","
@@ -94,9 +98,13 @@ static void rh_set_fft(scan_config_t *c, unsigned nfft) {
     c->segments = RH_SEGMENTS;
 }
 
-/* RotorHazard mode defaults: per-channel levels only, small FFT, no spectrum. */
+/* RotorHazard mode defaults: per-channel levels only, small FFT, no spectrum,
+ * manual gain 45 (set here so a monitor-mode gain never carries over; PLAN.md,
+ * gain sweep) and lap.c's 255 ms median filter. */
 static void rh_defaults(scan_config_t *c) {
     c->rh = true;
+    c->gain_mode = RADIO_GAIN_MANUAL;
+    c->gain = 45;
     c->metrics_mode = METRICS_RSSI;
     rh_set_fft(c, 64);
     c->spec_every = 0;
@@ -105,18 +113,19 @@ static void rh_defaults(scan_config_t *c) {
 }
 
 /* RotorHazard mode settings saved by CONFIG SAVE (NVS blob, layout by version).
- * The capture length follows the FFT size (rh_set_fft); version 1 also
- * stored it, and is read without it. */
-#define RH_SAVED_VERSION 2
+ * The capture length follows the FFT size (rh_set_fft). Versions 1 and 2
+ * start with the same 8 bytes as this one; 1 then stored the capture
+ * length. Both are read with the median filter (they predate LEVELFILTER). */
+#define RH_SAVED_VERSION 3
 typedef struct {
     uint8_t version;
     uint8_t gain_mode, gain, metrics_mode, mode;
     uint16_t nfft;
+    uint8_t filter; /* lap_filter_t */
 } rh_saved_t;
-typedef struct {
-    rh_saved_t v2;
-    uint16_t capture_samples;
-} rh_saved_v1_t;
+#define RH_SAVED_V2_LEN 8
+#define RH_SAVED_V1_LEN 10
+_Static_assert(offsetof(rh_saved_t, filter) == RH_SAVED_V2_LEN, "versions 1 and 2 are a prefix");
 static rh_saved_t rh_saved; /* applied on every switch to RotorHazard mode */
 static rh_saved_t rh_builtin; /* the defaults without a save (boot) */
 #define NVS_NAMESPACE "widscan58"
@@ -124,7 +133,8 @@ static rh_saved_t rh_builtin; /* the defaults without a save (boot) */
 
 static void rh_saved_from(rh_saved_t *s, const scan_config_t *c) {
     *s = (rh_saved_t){.version = RH_SAVED_VERSION, .gain_mode = (uint8_t)c->gain_mode, .gain = c->gain,
-                      .metrics_mode = c->metrics_mode, .mode = (uint8_t)c->mode, .nfft = c->nfft};
+                      .metrics_mode = c->metrics_mode, .mode = (uint8_t)c->mode, .nfft = c->nfft,
+                      .filter = (uint8_t)rh_get_filter()};
 }
 
 static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
@@ -133,6 +143,7 @@ static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
     c->metrics_mode = s->metrics_mode;
     c->mode = (plan_mode_t)s->mode;
     rh_set_fft(c, s->nfft);
+    rh_set_filter((lap_filter_t)s->filter);
 }
 
 /* The same limits as the commands that set these. */
@@ -141,21 +152,25 @@ static bool rh_saved_valid(const rh_saved_t *s) {
            (s->gain_mode == RADIO_GAIN_HARDWARE || (s->gain_mode == RADIO_GAIN_MANUAL && s->gain <= radio_caps()->gain_max)) &&
            (s->metrics_mode == METRICS_RSSI || s->metrics_mode == METRICS_SNR) &&
            (s->mode == PLAN_GROUP || s->mode == PLAN_SINGLE) && s->nfft >= 64 && s->nfft <= PSD_MAX_FFT &&
-           !(s->nfft & (s->nfft - 1));
+           !(s->nfft & (s->nfft - 1)) && (s->filter == LAP_FILTER_MEDIAN || s->filter == LAP_FILTER_EMA);
 }
 
 /* rh_saved from NVS; left alone (the defaults) when there is none. */
 static void rh_saved_load(void) {
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
-    rh_saved_v1_t b;
+    uint8_t b[16] = {0};
     size_t len = sizeof(b);
-    rh_saved_t *s = &b.v2;
-    if (nvs_get_blob(h, NVS_KEY_RH, &b, &len) == ESP_OK &&
-        ((len == sizeof(rh_saved_t) && s->version == RH_SAVED_VERSION) || (len == sizeof(b) && s->version == 1)) &&
-        rh_saved_valid(s)) {
-        rh_saved = *s;
-        rh_saved.version = RH_SAVED_VERSION;
+    rh_saved_t s = {0};
+    if (nvs_get_blob(h, NVS_KEY_RH, b, &len) == ESP_OK) {
+        bool ok = (b[0] == RH_SAVED_VERSION && len == sizeof(s)) || (b[0] == 2 && len == RH_SAVED_V2_LEN) ||
+                  (b[0] == 1 && len == RH_SAVED_V1_LEN);
+        memcpy(&s, b, b[0] == RH_SAVED_VERSION ? sizeof(s) : RH_SAVED_V2_LEN);
+        if (b[0] != RH_SAVED_VERSION) s.filter = LAP_FILTER_MEDIAN;
+        if (ok && rh_saved_valid(&s)) {
+            rh_saved = s;
+            rh_saved.version = RH_SAVED_VERSION;
+        }
     }
     nvs_close(h);
 }
@@ -213,7 +228,8 @@ static bool rh_allowed(const char *line) {
     static const char *const exact[] = {"PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?",
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
                                         "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE",
-                                        "CONFIG RESET", "RECAL"};
+                                        "CONFIG RESET", "RECAL", "LEVELFILTER MEDIAN", "LEVELFILTER EMA",
+                                        "LEVELFILTER?"};
     static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;
@@ -232,14 +248,15 @@ static void send_status(const char *keyword) {
               "\"conjugate\":%d,\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"tskip\":%u,\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
-              "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"plan\":[",
+              "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"plan\":[",
               keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.iq_corr, c.settle_us, radio_get_tune_skip(),
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, (unsigned)radio_caps()->max_samples,
               c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY",
               metrics_mode_name(c.metrics_mode), c.rssi_hz, c.search_hz, c.dc_guard,
               (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
-              c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type));
+              c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type),
+              level_filter_name(rh_get_filter()));
     for (unsigned j = 0; j < plan.nhops; j++) {
         const plan_hop_t *h = &plan.hop[j];
         reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[", j ? "," : "", h->lo_khz);
@@ -332,6 +349,13 @@ static void handle(char *line) {
         rh_saved = rh_builtin;
         set_proto(PROTO_RH); /* apply them now */
         link_text("OK\n");
+    } else if (!strcmp(line, "LEVELFILTER MEDIAN") || !strcmp(line, "LEVELFILTER EMA")) {
+        /* RotorHazard mode only: every switch to it applies the saved filter. */
+        if (proto != PROTO_RH) { link_text("ERR rh_only\n"); return; }
+        rh_set_filter(line[12] == 'E' ? LAP_FILTER_EMA : LAP_FILTER_MEDIAN);
+        link_text("OK\n");
+    } else if (!strcmp(line, "LEVELFILTER?")) {
+        link_printf("LEVELFILTER %s\n", level_filter_name(rh_get_filter()));
     } else if (!strcmp(line, "PROTOCOL?")) {
         link_printf("PROTOCOL %s\n", proto == PROTO_RH ? "RH" : "MONITOR");
     } else if (!strcmp(line, "PROTOCOL RH") || !strcmp(line, "PROTOCOL MONITOR")) {

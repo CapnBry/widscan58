@@ -384,6 +384,45 @@ static void test_lap_reset_and_force(void) {
     TEST_ASSERT_EQUAL(200, s.pass_peak);
 }
 
+/* LAP_FILTER_EMA: levels from the first update; one-update spikes removed;
+ * the average's weight follows the update interval (time constant
+ * LAP_EMA_TAU_US); a pass is detected and timed near its plateau's middle. */
+static void test_lap_ema(void) {
+    lap_seat_t s;
+    lap_init(&s, 190, 180);
+    lap_set_filter(&s, LAP_FILTER_EMA);
+    lap_feed(&s, 1000, 160, 0);
+    TEST_ASSERT_TRUE(s.valid);
+    TEST_ASSERT_EQUAL(160, s.level);
+    for (uint32_t t = 1001; t < 1100; t++) lap_feed(&s, t, t == 1050 ? 230 : 160, 1000);
+    TEST_ASSERT_EQUAL(160, s.node_peak);
+    /* Step 100 -> 200: the median passes it on the second update, then one
+     * update moves the average by 1 - exp(-dt / tau) of the step. */
+    static const struct { uint32_t dt_us; uint8_t expect; } step[] = {{1000, 131}, {3000, 167}, {20000, 200}};
+    for (unsigned a = 0; a < sizeof(step) / sizeof(step[0]); a++) {
+        lap_init(&s, 250, 240);
+        lap_set_filter(&s, LAP_FILTER_EMA);
+        uint32_t t = 1000, dt = step[a].dt_us / 1000;
+        for (int k = 0; k < 20; k++, t += dt) lap_feed(&s, t, 100, step[a].dt_us);
+        lap_feed(&s, t, 200, step[a].dt_us);
+        TEST_ASSERT_EQUAL(100, s.level);
+        lap_feed(&s, t + dt, 200, step[a].dt_us);
+        TEST_ASSERT_INT_WITHIN(1, step[a].expect, s.level);
+    }
+    lap_init(&s, 190, 180);
+    lap_set_filter(&s, LAP_FILTER_EMA);
+    feed_pass(&s, 1000, -1);
+    TEST_ASSERT_EQUAL(1, s.lap);
+    TEST_ASSERT_EQUAL(220, s.pass_peak);
+    TEST_ASSERT_INT_WITHIN(10, PASS_PLATEAU_MID(1000), s.pass_ms);
+    /* Switching back resets the levels, keeps the laps, and waits for the window again. */
+    lap_set_filter(&s, LAP_FILTER_MEDIAN);
+    TEST_ASSERT_FALSE(s.valid);
+    TEST_ASSERT_EQUAL(1, s.lap);
+    lap_feed(&s, 5000, 160, 5000);
+    TEST_ASSERT_FALSE(s.valid);
+}
+
 /* Channel list from 5.8 GHz MHz values, as the CHANNELS command builds it. */
 static unsigned chans(const profile_t *p, const uint32_t *mhz, unsigned n, profile_channel_t *ch) {
     for (unsigned j = 0; j < n; j++) {
@@ -493,6 +532,7 @@ int main(void) {
     RUN_TEST(test_lap_window);
     RUN_TEST(test_lap_history);
     RUN_TEST(test_lap_reset_and_force);
+    RUN_TEST(test_lap_ema);
     RUN_TEST(test_plan_default_raceband);
     RUN_TEST(test_plan_groups);
     RUN_TEST(test_profile_equiv);

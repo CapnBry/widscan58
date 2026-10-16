@@ -11,10 +11,10 @@ const fmtLevel = (v: number | null, m: RhMetric) =>
   v === null ? "—" : `${v} (${levelDb(v, m).toFixed(1)} ${m === "RSSI" ? "dBFS" : "dB"})`;
 const unit = (m: RhMetric) => (m === "RSSI" ? "dBFS" : "dB SNR");
 
-function segButtons<T extends string>(options: [T, string][], onPick: (v: T) => void) {
+function segButtons<T extends string>(options: [T, string, string?][], onPick: (v: T) => void) {
   const wrap = el("span", { class: "seg" });
-  const buttons = options.map(([v, label]) => {
-    const b = el("button", {}, label);
+  const buttons = options.map(([v, label, title]) => {
+    const b = el("button", title ? { title } : {}, label);
     b.onclick = () => onPick(v);
     wrap.append(b);
     return [v, b] as const;
@@ -339,6 +339,7 @@ export class RhSettings implements View {
   private gainVal = el("span", { class: "val" });
   private mode;
   private metric;
+  private filter;
 
   constructor(private app: App) {
     const rh = app.rh;
@@ -349,12 +350,18 @@ export class RhSettings implements View {
     this.gain.onchange = () => void rh.command(`GAIN MANUAL ${this.gain.value}`);
     this.metric = segButtons<RhMetric>([["RSSI", "RSSI"], ["SNR", "SNR"]], (m) => void rh.setMetric(m));
     this.mode = segButtons([["GROUP", "Grouped"], ["SINGLE", "Per channel"]], (v) => void rh.command(`MODE ${v}`));
+    // The 255 ms running median (as RotorHazard's nodes), or a median of 3 and a ~2.7 ms average.
+    this.filter = segButtons(
+      [["MEDIAN", "Median", "255ms Median"], ["EMA", "EMA", "Exponential Moving Average"]],
+      (v) => void rh.command(`LEVELFILTER ${v}`),
+    );
     const ctl = (label: string, ...children: Node[]) =>
       this.body.append(el("div", { class: "ctl" }, el("label", {}, label), el("div", { class: "row" }, ...children)));
     ctl("RX gain (PHY table index)", this.gain, this.gainVal);
-    ctl("Output value", this.metric.el);
-    ctl("FFT size", this.fft);
     ctl("LO plan", this.mode.el);
+    ctl("FFT size", this.fft);
+    ctl("Output value", this.metric.el);
+    ctl("Output filter", this.filter.el);
     // RotorHazard's UI can't change these: the device applies its saved ones on every switch to this mode.
     const save = el("button", { title: "Save these settings as default" }, "Save");
     save.onclick = () => void rh.saveDefaults();
@@ -367,7 +374,7 @@ export class RhSettings implements View {
   render() {
     const rh = this.app.rh;
     this.metric.sync(rh.metric);
-    const c = rh.config as { nfft?: number; gain?: number; gain_max?: number; mode?: string } | null;
+    const c = rh.config as { nfft?: number; gain?: number; gain_max?: number; mode?: string; level_filter?: string } | null;
     if (c) {
       // Show whatever the device reports, also values outside the lists.
       const v = c.nfft;
@@ -382,6 +389,7 @@ export class RhSettings implements View {
         this.gainVal.textContent = String(c.gain);
       }
       this.mode.sync(String(c.mode));
+      this.filter.sync(c.level_filter ?? "MEDIAN"); // firmware before LEVELFILTER has only the median
     }
     const st = this.app.device?.rh?.stats;
     this.stats.textContent = st ? `Link: ${st.reads} reads, ${st.writes} writes, ${st.errors} failed reads` : "";

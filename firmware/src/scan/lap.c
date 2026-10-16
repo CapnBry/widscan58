@@ -48,6 +48,12 @@ void lap_reset(lap_seat_t *s) {
     s->loop_us = 0;
 }
 
+void lap_set_filter(lap_seat_t *s, lap_filter_t f) {
+    if (s->filter == f) return;
+    s->filter = (uint8_t)f;
+    lap_reset(s);
+}
+
 static void end_crossing(lap_seat_t *s) {
     s->crossing = false;
     s->lap++;
@@ -63,7 +69,7 @@ static void close_extremum(lap_seat_t *s, lap_queue_t *q) {
     queue_push(q, &e);
 }
 
-static void filtered(lap_seat_t *s, uint32_t t, uint8_t v) {
+static IRAM_ATTR void filtered(lap_seat_t *s, uint32_t t, uint8_t v) {
     s->level = v;
     s->level_ms = t;
     if (v > s->node_peak) s->node_peak = v;
@@ -136,9 +142,44 @@ static void drop_oldest(lap_seat_t *s) {
     s->first++;
 }
 
+/* The average's weight for an update dt_us after the previous one, in
+ * 1/1024: 1 - exp(-x), x = dt / LAP_EMA_TAU_US, as the (2,2) Pade
+ * approximant x / (1 + x/2 + x^2/12) in integer math (no FPU on the C5):
+ * within 1 % up to x = 2, ~5 % low up to 4, and 1 beyond (exactly 0.98). */
+#define EMA_UNIT_US 16
+#define EMA_TAU_UNITS ((LAP_EMA_TAU_US + EMA_UNIT_US / 2) / EMA_UNIT_US)
+static IRAM_ATTR int32_t ema_alpha_q10(uint32_t dt_us) {
+    uint32_t d = (dt_us + EMA_UNIT_US / 2) / EMA_UNIT_US, t = EMA_TAU_UNITS;
+    if (d >= 4 * t) return 1024;
+    return (int32_t)(((12 * t * d) << 10) / (12 * t * t + 6 * t * d + d * d));
+}
+
+static IRAM_ATTR uint8_t median3(uint8_t a, uint8_t b, uint8_t c) {
+    uint8_t lo = a < b ? a : b, hi = a < b ? b : a;
+    return c < lo ? lo : c > hi ? hi : c;
+}
+
+static IRAM_ATTR void feed_ema(lap_seat_t *s, uint32_t t_ms, uint8_t level, uint32_t loop_us) {
+    uint32_t k = s->seq++, prev_ms = s->last_ms;
+    s->ring[k & 255] = level;
+    s->last_ms = t_ms;
+    if (k < 2) { /* not 3 updates yet: no median, no delay */
+        s->ema_q8 = level << 8;
+        filtered(s, t_ms, level);
+        return;
+    }
+    int32_t m = median3(level, s->ring[(k - 1) & 255], s->ring[(k - 2) & 255]) << 8;
+    s->ema_q8 += (ema_alpha_q10(loop_us) * (m - s->ema_q8) + 512) >> 10;
+    filtered(s, prev_ms - (LAP_EMA_TAU_US + 500) / 1000, (uint8_t)((s->ema_q8 + 128) >> 8));
+}
+
 IRAM_ATTR void lap_feed(lap_seat_t *s, uint32_t t_ms, uint8_t level, uint32_t loop_us) {
     s->loop_us = loop_us > 65535 ? 65535 : (uint16_t)loop_us;
     s->feed_ms = t_ms;
+    if (s->filter == LAP_FILTER_EMA) {
+        feed_ema(s, t_ms, level, loop_us);
+        return;
+    }
     if (s->seq - s->first == LAP_MAX_SAMPLES) { /* full: the window is shorter than LAP_WINDOW_MS */
         drop_oldest(s);
         s->filled = true;

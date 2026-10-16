@@ -11,13 +11,20 @@ port in its config.
    ESP32-C5 board and click **Flash device**.
 2. Click **Connect device**, open the menu (☰, top left) and pick
    **RotorHazard mode**. The firmware also boots in this mode.
-3. Under **Receiver**, set the RX gain and pick the level the seats report:
+3. Under **Receiver**, set the RX gain, pick the level the seats report and
+   how it is smoothed:
+   - **RX gain**: the default is 45. Higher gains reach further but a nearby
+     VTX clips the receiver sooner. At 45 a 25 mW VTX 0.9 m from the board
+     reads about 129 (RSSI), with roughly 29 dB to spare before the receiver
+     clips; above about 54 more gain raises the noise as much as the signal.
    - **RSSI**: the power in the channel's ±5 MHz window, in dBFS
      (level / 4 − 63.75, 0.25 dB steps). It moves with the gain and the
      noise: with no VTX it sits around 13–25 at gains up to about 40,
-     around 27–41 at the default gain of 50, and around 65 at gain 60.
+     around 21–35 at the default 45, 27–41 at 50, and around 65 at 60.
    - **SNR**: that power over the channel's noise floor, in dB (level / 4). It
      sits near 0 with no VTX on the channel, whatever the gain.
+   - **Output filter**: **Median**, over 255 ms (the default, as RotorHazard's
+     own nodes), or **EMA**, a much lighter filter (see Smoothing).
 4. Click **Save** so the board keeps these settings. RotorHazard's own UI can't
    set them, and the board applies the saved ones every time it enters
    RotorHazard mode.
@@ -85,9 +92,10 @@ the seat, the interval between updates:
 
 ## Smoothing
 
-Each seat's level goes through a running median over the last 255 ms before
-pass detection sees it. This copies what RotorHazard's own nodes do, so
-levels hold about as still as an RX5808 node's.
+By default each seat's level goes through a running median over the last
+255 ms before pass detection sees it. This copies what RotorHazard's own nodes
+do, so levels hold about as still as an RX5808 node's. The **EMA** output
+filter is the alternative (below).
 
 **RotorHazard nodes** (Arduino and S32_BPill firmware alike) read each RX5808's
 RSSI pin with one ADC read about every millisecond, about 1000 reads per
@@ -112,10 +120,20 @@ window's middle read, about 128 ms back.
 | Level steps | ADC counts, 0–255 | 0.25 dB (RSSI or SNR codes, 1–254) |
 | Filter delay | ~128 ms, reported with the middle read's time | the same |
 
+**EMA** (`LEVELFILTER EMA`) is the filter of the FPVGate C5MK
+firmware: a median of the last 3 updates, which removes single-update spikes,
+then an exponential average with a time constant of 2.72 ms (FPVGate C5MK's
+weight of 0.3 per update at its ~1030 updates/s). The board works out the
+weight from each update's interval, so the time constant stays the same at
+any update rate, FFT size or LO plan. Levels follow the signal within a few
+milliseconds and are reported from the first update, with the time of the
+median's middle update less the average's ~3 ms delay. They are noisier than
+the median's, so leave more room between EnterAt and ExitAt.
+
 ## Notes
 
-- **Pass detection runs on the board** at the full update rate: the 255 ms
-  median (see Smoothing), a crossing from EnterAt until the level drops below ExitAt, and the
+- **Pass detection runs on the board** at the full update rate: the output
+  filter (see Smoothing), a crossing from EnterAt until the level drops below ExitAt, and the
   pass at the middle of the crossing's highest plateau. RotorHazard polls the
   board about every 100 ms, but the pass time comes from the board's own update
   rate, not from that poll.

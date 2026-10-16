@@ -1,8 +1,9 @@
 // Gate-crossing detection for the simulator's RotorHazard seats: the same
 // behaviour as firmware/src/scan/lap.c (255 ms running median from a
 // histogram of the level codes, crossing from EnterAt to below ExitAt, pass at
-// the middle of the peak plateau, peak/nadir history with hysteresis).
-// GPL-3.0-or-later.
+// the middle of the peak plateau, peak/nadir history with hysteresis), and
+// its "EMA" filter (median of 3, then an exponential average with a fixed
+// time constant whatever the update rate). GPL-3.0-or-later.
 
 const HISTORY = 8;
 const HYSTERESIS = 4; // level codes: 1 dB
@@ -10,6 +11,9 @@ const WINDOW_MS = 255; // median window
 const MAX_SAMPLES = 255; // window cap: one byte per histogram bin
 const TS_EVERY = 8; // updates per stored timestamp
 const TS_SLOTS = (MAX_SAMPLES + 1) / TS_EVERY + 2;
+const EMA_TAU_US = 2720; // alpha 0.3 at 1030 updates/s
+
+export type LapFilter = "MEDIAN" | "EMA";
 
 export interface Extremum {
   level: number;
@@ -20,6 +24,8 @@ export interface Extremum {
 export class LapSeat {
   enterAt: number;
   exitAt: number;
+  filter: LapFilter = "MEDIAN";
+  private ema = 0;
   // Median window: updates first .. seq - 1 (update k is ring[k & 255]), a
   // histogram of their levels, and the lower middle level with `below` under it.
   private ring = new Uint8Array(256);
@@ -74,6 +80,12 @@ export class LapSeat {
     this.loopUs = 0;
   }
 
+  setFilter(f: LapFilter) {
+    if (f === this.filter) return;
+    this.filter = f;
+    this.reset();
+  }
+
   /** Time of update k in the window: stored every TS_EVERY updates, interpolated between. */
   private timeOf(k: number): number {
     const k0 = k - (k % TS_EVERY);
@@ -98,6 +110,7 @@ export class LapSeat {
 
   feed(tMs: number, level: number, loopUs: number) {
     this.loopUs = Math.min(65535, loopUs);
+    if (this.filter === "EMA") return this.feedEma(tMs, level, loopUs);
     if (this.seq - this.first === MAX_SAMPLES) {
       this.dropOldest();
       this.filled = true;
@@ -118,6 +131,21 @@ export class LapSeat {
     while (this.below + this.bins[this.med] <= r) this.below += this.bins[this.med++];
     if (!this.filled) return;
     this.filtered(this.timeOf(this.first + r), this.med);
+  }
+
+  // The firmware works in integers (Q8 average, a Padé weight); this is the exact form.
+  private feedEma(tMs: number, level: number, loopUs: number) {
+    const k = this.seq++;
+    const prevMs = this.lastMs;
+    this.ring[k & 255] = level;
+    this.lastMs = tMs;
+    if (k < 2) {
+      this.ema = level;
+      return this.filtered(tMs, level);
+    }
+    const med = [level, this.ring[(k - 1) & 255], this.ring[(k - 2) & 255]].sort((x, y) => x - y)[1];
+    this.ema += (1 - Math.exp(-loopUs / EMA_TAU_US)) * (med - this.ema);
+    this.filtered(prevMs - Math.round(EMA_TAU_US / 1000), Math.round(this.ema));
   }
 
   endCrossing() {

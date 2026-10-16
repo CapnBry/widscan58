@@ -5,7 +5,7 @@ import type { Transport } from "../serial/device";
 import { encodeFrame } from "../serial/parser";
 import { CHF, FRAME_LEVELS, FRAME_METRICS, FRAME_RAWIQ, FRAME_SPECTRUM, FRAME_TELEMETRY, type MetricsMode } from "../proto/frames";
 import { channelMetrics, db, floorEstimate, percentileBias, planBuild, type Hop, type ProfileDef } from "./dsp";
-import { LapSeat } from "./lap";
+import { LapSeat, type LapFilter } from "./lap";
 import { RH, RH_API_MARKER, checksum } from "../proto/rh";
 
 // The firmware's band profiles (firmware/src/scan/profile.c), plus what only
@@ -110,7 +110,7 @@ export class MockTransport implements Transport {
   private group = true;
   private running = true;
   private gainManual = true;
-  private gain = 50;
+  private gain = 45;
   private specEvery = 4;
   private specBins = 256;
   private specSpanHz = 0;
@@ -145,8 +145,11 @@ export class MockTransport implements Transport {
   private rhText: string | null = null;
   private rhMetric: "RSSI" | "SNR" = "RSSI";
   private rhNfft = 64; // the capture is 4 × this in RotorHazard mode
+  private rhFilter: LapFilter = "MEDIAN";
   // CONFIG SAVE: applied on every PROTOCOL RH, as the firmware (not kept across page loads).
-  private static readonly RH_BUILTIN = { gainManual: true, gain: 50, group: true, metric: "RSSI" as "RSSI" | "SNR", nfft: 64 };
+  private static readonly RH_BUILTIN = {
+    gainManual: true, gain: 45, group: true, metric: "RSSI" as "RSSI" | "SNR", nfft: 64, filter: "MEDIAN" as LapFilter,
+  };
   private rhSaved = { ...MockTransport.RH_BUILTIN };
   private readonly tskipDefault: number; // the firmware's TUNESKIP default per target
   private tskip: number;
@@ -237,7 +240,9 @@ export class MockTransport implements Transport {
         return ok();
       case line === "CONFIG SAVE":
         if (this.proto !== "RH") return this.text("ERR rh_only\n");
-        this.rhSaved = { gainManual: this.gainManual, gain: this.gain, group: this.group, metric: this.rhMetric, nfft: this.rhNfft };
+        this.rhSaved = {
+          gainManual: this.gainManual, gain: this.gain, group: this.group, metric: this.rhMetric, nfft: this.rhNfft, filter: this.rhFilter,
+        };
         return ok();
       case line === "CONFIG RESET":
         if (this.proto !== "RH") return this.text("ERR rh_only\n");
@@ -245,6 +250,12 @@ export class MockTransport implements Transport {
         this.applyRhSaved();
         this.state.clear();
         return ok();
+      case line === "LEVELFILTER MEDIAN" || line === "LEVELFILTER EMA":
+        if (this.proto !== "RH") return this.text("ERR rh_only\n");
+        this.setRhFilter(parts[1] as LapFilter);
+        return ok();
+      case line === "LEVELFILTER?":
+        return this.text(`LEVELFILTER ${this.rhFilter}\n`);
       case this.proto === "RH" && parts[0] === "FFT":
         this.rhNfft = num(1);
         return ok();
@@ -287,6 +298,7 @@ export class MockTransport implements Transport {
             spec_bins: this.specBins,
             spec_span_hz: this.specSpanHz,
             spec_detector: this.specDetector,
+            level_filter: this.rhFilter,
             plan: this.plan.map((h) => ({ lo_khz: h.loKhz, ch: h.ch, offset_hz: h.offsetHz })),
           })}\n`,
         );
@@ -388,14 +400,21 @@ export class MockTransport implements Transport {
   private applyRhSaved() {
     ({ gainManual: this.gainManual, gain: this.gain, group: this.group, metric: this.rhMetric, nfft: this.rhNfft } =
       this.rhSaved);
+    this.setRhFilter(this.rhSaved.filter);
     this.plan = planBuild(this.profile, this.channels, this.enabled, this.group);
     this.hop = 0;
+  }
+
+  private setRhFilter(f: LapFilter) {
+    this.rhFilter = f;
+    for (const s of this.rhSeats) s.lap.setFilter(f);
   }
 
   private rhAllowed(line: string): boolean {
     return (
       ["PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?", "METRICS RSSI", "METRICS SNR", "METRICS?",
-        "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE", "CONFIG RESET", "RECAL"].includes(line) ||
+        "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE", "CONFIG RESET", "RECAL",
+        "LEVELFILTER MEDIAN", "LEVELFILTER EMA", "LEVELFILTER?"].includes(line) ||
       ["GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR "].some((p) => line.startsWith(p))
     );
   }

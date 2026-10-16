@@ -50,7 +50,7 @@ export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
   channels: ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"],
   mode: "GROUP",
   gainMode: "MANUAL",
-  gain: 50,
+  gain: 45,
 };
 
 const KEY = "widscan58.device";

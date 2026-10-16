@@ -11,6 +11,7 @@
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include "lap.h"
 #include "scanner.h"
 
 #define RH_SEATS PROFILE_MAX_CHANNELS
@@ -29,5 +30,8 @@ void rh_poll(int64_t now_us);
 /* Forget every seat's levels, peaks and crossing (lap_reset), e.g. when
  * the level metric changes. */
 void rh_reset_levels(void);
+/* Every seat's level filter (lap.h); a change resets the seats' levels. */
+void rh_set_filter(lap_filter_t f);
+lap_filter_t rh_get_filter(void);
 /* One level update for a seat (scanner task). */
 void rh_feed(unsigned seat, int64_t t_us, uint8_t level);

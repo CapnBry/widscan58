@@ -193,9 +193,10 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. `SETTLE` overlaps the DSP: the next capture waits for what is left of it. `TUNESKIP` bit 0 retunes only the PLL between full tunes (S3 default 7, C5 default 3; `TUNESKIP 0` runs the C5's full channel setup every hop), bit 1 skips the RX path re-apply, bit 2 the gain re-apply (wrong on the C5: +27 dB). Reported as `tskip` in `STATUS?`/`CONFIG?`, and set from the UI's Scanner controls |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
-| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR` and `MODE` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, the default gain (manual 50) |
+| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
 | `CONFIG RESET` | RotorHazard mode only: erase the saved RotorHazard mode defaults and apply the built-in ones |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE` and `RECAL` work; the rest answer `ERR rh_mode` |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …` and `RECAL` work; the rest answer `ERR rh_mode` |
+| `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | RotorHazard mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
 ## RotorHazard mode
@@ -213,14 +214,16 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   `ERR rh_mode`). The defaults in this mode: `FFT 64` (256 samples),
   `METRICS RSSI`, no display spectrum; with R1–R6 that is ~1.5 ms between
   updates of a seat (~660 /s; R1–R8 ~1.96 ms, ~510 /s; `rh_check.py`'s
-  `loop_time`, docs/RotorHazard.md). `CONFIG SAVE` replaces the gain, FFT, metric and LO
-  plan defaults (NVS, `commands.c`); they are applied on every switch to this
+  `loop_time`, docs/RotorHazard.md). The default gain is manual 45, as in
+  monitor mode (gain sweeps with a 25 mW VTX at 0.9 m: PLAN.md, "Gain
+  sweep"). `CONFIG SAVE` replaces the gain, FFT, metric, LO plan and level filter defaults (NVS blob version 3, `commands.c`; versions 1
+  and 2 load with the median filter); they are applied on every switch to this
   mode.
 - **Levels** are the `METRICS` byte codes, in 0.25 dB steps: RSSI (dBFS =
   code / 4 − 63.75) or SNR (dB = code / 4), clamped to 1–254. The RSSI range
   starts just below the ADC noise in the ±5 MHz window (about −59 to −62
-  dBFS, codes ~13–21, at any gain up to ~40; ~27–41 at the default 50, ~65
-  at 60). `METRICS
+  dBFS, codes ~13–21, at any gain up to ~40; ~21–35 at the default 45,
+  ~27–41 at 50, ~65 at 60). `METRICS
   RSSI|SNR` picks one and resets the seats' levels. EnterAt/ExitAt are in the
   same codes (defaults before the server writes its own: 125 / 105, −32.5 /
   −37.5 dBFS). The `LEVELS` frame's per-bin floor stays a 0.5 dB spectrum
@@ -235,14 +238,18 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   plateau. Peaks
   and nadirs (4-code, 1 dB hysteresis, 8 queued each) feed the server's RSSI graph.
   A frequency change keeps the lap count (the server counts passes by its
-  change).
+  change). `LEVELFILTER EMA` replaces the median with a median of 3 and an
+  exponential average (time constant `LAP_EMA_TAU_US`, 2.72 ms; the weight
+  1 − exp(−dt/τ) per update from its interval, as an integer Padé
+  approximant), reported from the first update with the middle update's time
+  less ~3 ms of average delay.
 - **Check:** `tools/rh_check.py` runs RotorHazard's own interface code against
   the board (no VTX: thresholds inside the filtered noise make noise
   crossings; at manual gain 60 the seats sit at codes ~64–71 and `--enter 67
   --exit 67` gave 239 passes in 30 s).
 - **Testing in RotorHazard mode:** `PROTOCOL RH` applies the user's saved
-  defaults, so after switching, *set* `MODE`, `FFT`, `GAIN` and
-  `METRICS` to what the test needs, but never `CONFIG SAVE` them (or `CONFIG RESET`). Leave them
+  defaults, so after switching, *set* `MODE`, `FFT`, `GAIN`,
+  `METRICS` and `LEVELFILTER` to what the test needs, but never `CONFIG SAVE` them (or `CONFIG RESET`). Leave them
   as the test set them afterwards; there is no need to restore anything.
   RotorHazard's port open (DTR and RTS cleared, as `rh_check.py` does through
   its code) resets the C5, which boots with the saved defaults: settings
@@ -272,7 +279,9 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   are), a level graph with passes, the detection events with lap times, and
   the receiver settings this mode allows.
   The page takes the metric and receiver settings from the device (`CONFIG?`)
-  and never sets them on connect; Receiver → Save sends `CONFIG SAVE`, Reset `CONFIG RESET`.
+  and never sets them on connect; Receiver (gain, LO plan, FFT size, output
+  value, output filter) → Save sends `CONFIG SAVE`, Reset `CONFIG RESET`. The
+  output filter shows Median for firmware without `level_filter` in `CONFIG?`.
   Seats take the channels of the shared channel plan in frequency order (Edit
   channels). Disconnect before a RotorHazard server opens the port.
 - **Connect device**: Web Serial. Chrome, Edge, Firefox and Android Chrome all

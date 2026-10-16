@@ -58,3 +58,38 @@ describe("simulator LapSeat (255 ms median)", () => {
     }
   });
 });
+
+describe("simulator LapSeat (median of 3 + EMA)", () => {
+  const ema = (enter: number, exit: number) => {
+    const s = new LapSeat(enter, exit);
+    s.setFilter("EMA");
+    return s;
+  };
+
+  it("reports from the first update and removes one-update spikes", () => {
+    const s = ema(190, 180);
+    s.feed(1000, 160, 0);
+    expect([s.valid, s.level]).toEqual([true, 160]);
+    for (let t = 1001; t < 1100; t++) s.feed(t, t === 1050 ? 230 : 160, 1000);
+    expect(s.nodePeak).toBe(160);
+  });
+
+  it("weights each update by its interval (same time constant at any rate)", () => {
+    for (const [dtUs, expected] of [[1000, 131], [3000, 167], [20000, 200]]) {
+      const s = ema(250, 240);
+      let t = 1000;
+      for (let k = 0; k < 20; k++, t += dtUs / 1000) s.feed(t, 100, dtUs);
+      s.feed(t, 200, dtUs);
+      expect(s.level).toBe(100);
+      s.feed(t + dtUs / 1000, 200, dtUs);
+      expect(Math.abs(s.level - expected)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("times a pass near the middle of its plateau", () => {
+    const s = ema(190, 180);
+    feedPass(s, 1000);
+    expect([s.lap, s.passPeak]).toEqual([1, 220]);
+    expect(Math.abs(s.passMs - plateauMid(1000))).toBeLessThanOrEqual(10);
+  });
+});

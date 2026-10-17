@@ -29,3 +29,9 @@ CONFIG_LOG_DEFAULT_LEVEL_NONE=y
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
 CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
+# The Wi-Fi driver only brings up the PHY (WIFI_MODE_NULL): no station,
+# SoftAP or IP traffic. These drop unused supplicant code (~145 KB of flash);
+# re-enable them before adding any Wi-Fi feature.
+# CONFIG_ESP_WIFI_SOFTAP_SUPPORT is not set
+# CONFIG_ESP_WIFI_ENABLE_WPA3_SAE is not set
+# CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set

@@ -81,6 +81,17 @@ mode, so a RotorHazard server can take over a port a monitor left streaming.
 In RotorHazard mode, input bytes `A`–`P` (unused by RotorHazard) start one of our
 command lines; only a few are allowed there (`rh_allowed`).
 
+**Slim build:** `firmware/CMakeLists.txt` sets `COMPONENTS` to our component
+(`src`) and PlatformIO's `__pio_env`, so only the ESP-IDF components that
+`src/CMakeLists.txt` `REQUIRES` (and their dependencies) are built: 47 of 108
+on the C5, a clean build ~18 s. A new IDF API needs its component added to
+`REQUIRES`. Without Bluetooth and 802.15.4 in the build, Wi-Fi coexistence is
+off. `sdkconfig.defaults` also drops SoftAP, WPA3-SAE and OWE (~145 KB of
+flash): the Wi-Fi driver only runs in `WIFI_MODE_NULL` to bring up the PHY.
+lwIP stays: IDF 5.5 can't build Wi-Fi without it (`esp_err_to_name.c`).
+Turning off Wi-Fi enterprise support adds files: wpa_supplicant then builds
+its own TLS instead of using mbedTLS.
+
 Use the PlatformIO Core that pioarduino 55.03.312-1 expects (6.2.x). The
 platform pins ESP-IDF 5.5.5. Before changing the platform version, run
 `tools/check_phy_abi.sh esp32s3 25fe69f946311abdaf9ad56591f25fedbc20ac98 <new-idf-tag>`,
@@ -106,8 +117,9 @@ lower half (`radio_c5.c`, `RADIO_RAM`). PlatformIO does not regenerate its
 reconfigures when `CMakeLists.txt` or `sdkconfig*` change, so incremental builds
 used to keep an old hash; `firmware/version_check.py` (a pre-build script)
 forces a reconfigure when `git describe` differs from the build's
-`project_description.json`. That costs one near-full rebuild (~25 s on the C5)
-after each commit or clean/dirty change. `INFO`'s fields are separated by `|`
+`project_description.json`. That costs a CMake reconfigure (~7 s on the C5;
+only `esp_app_format` and `commands.c` recompile) after each commit or
+clean/dirty change. `INFO`'s fields are separated by `|`
 (`widscan58|<target>|<proto>|<version>|<commit time>|<PHY version>`, the PHY
 version has spaces). After the version, `INFO` has HEAD's
 commit time in ISO 8601 (`git log -1 --format=%cI`, taken at the same time;

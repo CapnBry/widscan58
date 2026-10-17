@@ -21,4 +21,9 @@ execute_process(COMMAND git log -1 --format=%cI
 if(NOT FW_COMMIT_DATE)
     set(FW_COMMIT_DATE "unknown")
 endif()
+# Build only our component (PlatformIO calls src/ "src") and what it requires,
+# not every component in ESP-IDF. __pio_env is PlatformIO's dummy component,
+# which its builder needs. A new IDF dependency goes in src/CMakeLists.txt's
+# REQUIRES.
+set(COMPONENTS src __pio_env)
 project(widscan58)

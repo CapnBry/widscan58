@@ -19,6 +19,14 @@
 
 #define FLOOR_PERCENTILE 0.2f
 #define TELEMETRY_US 250000
+/* At most this many rotations (every enabled channel once) per second: more
+ * buys lap timing nothing, and the time left over idles the CPU. The cap
+ * leaves headroom over 1000 /s for momentary drops in the hop rate. */
+#define MAX_ROTATION_HZ 1050 /* the default; THROTTLE sets it, 0 = no cap */
+/* Waits at least this long block on a timer (the idle task halts the CPU);
+ * shorter ones spin. A blocked wait wakes ~WAKE_US early and spins the rest. */
+#define THROTTLE_SLEEP_MIN_US 100
+#define THROTTLE_WAKE_US 30
 
 static SemaphoreHandle_t lock;
 static QueueHandle_t requests;
@@ -57,6 +65,13 @@ typedef struct {
     uint64_t w_hop_sum, w_tune_sum, w_cap_sum, w_dsp_sum;
     uint32_t w_hop_max, w_tune_max, w_dsp_max;
     bool psd_error_reported;
+    /* Rotation rate cap: when the current rotation was due to start. */
+    int64_t rotation_start;
+    esp_timer_handle_t throttle_timer;
+    TaskHandle_t task;
+    /* Radio power-downs in the throttle's waits (phy_idle) */
+    uint32_t idle_n, idle_skipped, idle_up_max, idle_up_est;
+    uint64_t idle_down_sum, idle_up_sum;
 } scan_state_t;
 static scan_state_t *sp; /* heap: static SRAM goes to hot code in IRAM on the C5 */
 
@@ -106,6 +121,7 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
      * FFT than float, within ~0.1-0.3 dB per bin. Caveat: a strong signal in the
      * same capture makes weak bins read ~1-1.4 dB low (R4 has no such limit). */
     c->fft_type = PSD_FFT_S16R;
+    c->max_rotation_hz = MAX_ROTATION_HZ;
 }
 
 void scanner_get_config(scan_config_t *c) {
@@ -567,10 +583,64 @@ static void do_fft_eval(const scan_request_t *r) {
     link_text("FFTEVAL END\n");
 }
 
+static void throttle_wake(void *arg) {
+    (void)arg;
+    xTaskNotifyGive(sp->task);
+}
+
+/* Block until about due (it may return a little early); returns whether it blocked. */
+static bool sleep_until(int64_t due) {
+    int64_t wait = due - esp_timer_get_time();
+    bool slept = wait >= THROTTLE_SLEEP_MIN_US &&
+                 esp_timer_start_once(sp->throttle_timer, (uint64_t)(wait - THROTTLE_WAKE_US)) == ESP_OK;
+    if (slept) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    return slept;
+}
+
+void scanner_idle_stats(scan_idle_stats_t *s) {
+    uint32_t n = sp->idle_n ? sp->idle_n : 1;
+    *s = (scan_idle_stats_t){.n = sp->idle_n, .skipped = sp->idle_skipped,
+                             .down_us_avg = (uint32_t)(sp->idle_down_sum / n), .up_us_avg = (uint32_t)(sp->idle_up_sum / n),
+                             .up_us_max = sp->idle_up_max, .up_est_us = sp->idle_up_est};
+    sp->idle_n = sp->idle_skipped = sp->idle_up_max = 0;
+    sp->idle_down_sum = sp->idle_up_sum = 0;
+}
+
+/* Wait until due; returns whether the task blocked (and so let others run).
+ * With phy_idle, the radio is off for the wait, and back up and settled by
+ * due when the power-up takes as long as it did lately (idle_up_est). */
+static bool throttle_until(int64_t due) {
+    const scan_config_t *c = &sp->cfg;
+    int64_t t0 = esp_timer_get_time(), wait = due - t0;
+    if (wait <= 0) return false;
+    bool slept;
+    int64_t wake_cost = sp->idle_up_est + c->settle_us;
+    if (c->phy_idle && wait >= (int64_t)c->phy_idle_min_us && wait > wake_cost) {
+        radio_idle_enter(c->phy_idle);
+        int64_t t1 = esp_timer_get_time();
+        slept = sleep_until(due - wake_cost);
+        int64_t t2 = esp_timer_get_time();
+        radio_idle_exit(c->phy_idle);
+        uint32_t up = (uint32_t)(esp_timer_get_time() - t2);
+        sp->idle_n++;
+        sp->idle_down_sum += (uint32_t)(t1 - t0);
+        sp->idle_up_sum += up;
+        if (up > sp->idle_up_max) sp->idle_up_max = up;
+        /* An average: a rare slow one (a recalibration) only starts one capture late. */
+        sp->idle_up_est = (uint32_t)((int32_t)sp->idle_up_est + ((int32_t)up - (int32_t)sp->idle_up_est) / 8);
+    } else {
+        if (c->phy_idle) sp->idle_skipped++;
+        slept = sleep_until(due);
+    }
+    while (esp_timer_get_time() < due) {}
+    return slept;
+}
+
 static void scanner_task(void *arg) {
     (void)arg;
     apply_config();
     sp->window_start = esp_timer_get_time();
+    sp->rotation_start = sp->window_start;
     int64_t last_yield = sp->window_start;
     for (;;) {
         if (dirty) apply_config();
@@ -596,6 +666,16 @@ static void scanner_task(void *arg) {
             sp->hop = 0;
             sp->rotations++;
             sp->w_rotations++;
+            /* Keep to the schedule after a wait, so a late wake-up doesn't
+             * lower the rate; a slow rotation starts the next one afresh. */
+            uint32_t hz = sp->cfg.max_rotation_hz;
+            int64_t due = sp->rotation_start + (hz ? 1000000 / hz : 0), end = esp_timer_get_time();
+            if (hz && end < due) {
+                if (throttle_until(due)) last_yield = due;
+                sp->rotation_start = due;
+            } else {
+                sp->rotation_start = end;
+            }
         }
         /* Let lower-priority work on this core run occasionally. */
         if (now - last_yield > 20000) {
@@ -620,5 +700,8 @@ esp_err_t scanner_init(void) {
     esp_err_t err = psd_init();
     if (err != ESP_OK) return err;
     /* Core 0: the PHY and Wi-Fi driver live there. */
-    return xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, NULL, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+    const esp_timer_create_args_t ta = {.callback = throttle_wake, .name = "scan_throttle"};
+    err = esp_timer_create(&ta, &sp->throttle_timer);
+    if (err != ESP_OK) return err;
+    return xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, &sp->task, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }

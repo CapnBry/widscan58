@@ -219,6 +219,9 @@ uint32_t *radio_sample_buffer(unsigned *max_words) {
     return IQ_BUFFER;
 }
 
+void radio_idle_enter(unsigned depth) { (void)depth; }
+void radio_idle_exit(unsigned depth) { (void)depth; }
+
 void radio_reboot_to_bootloader(void) {
     REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
     esp_restart();

@@ -222,15 +222,19 @@ static void set_proto(proto_t p) {
 }
 
 /* Our commands in RotorHazard mode: switching, identity and the settings
- * that shape the seat levels. All start with 'A'..'P', bytes RotorHazard
- * does not use, so the command task can tell them from its commands. */
+ * that shape the seat levels. All start with 'A'..'P' or 'T' (rh_text_start),
+ * bytes RotorHazard does not use, so the command task can tell them from its
+ * commands. */
+/* RotorHazard's commands are 0x00..0x40 (reads), 0x51, 0x71..0x7E (writes). */
+static bool rh_text_start(uint8_t b) { return (b >= 'A' && b <= 'P') || b == 'T'; }
+
 static bool rh_allowed(const char *line) {
     static const char *const exact[] = {"PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?",
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
                                         "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE",
                                         "CONFIG RESET", "RECAL", "LEVELFILTER MEDIAN", "LEVELFILTER EMA",
-                                        "LEVELFILTER?"};
-    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR "};
+                                        "LEVELFILTER?", "PHYIDLE?"};
+    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR ", "PHYIDLE ", "THROTTLE "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;
     for (unsigned j = 0; j < sizeof(prefix) / sizeof(prefix[0]); j++)
@@ -248,7 +252,8 @@ static void send_status(const char *keyword) {
               "\"conjugate\":%d,\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"tskip\":%u,\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
-              "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"plan\":[",
+              "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"throttle_hz\":%" PRIu32 ","
+              "\"phy_idle\":%u,\"phy_idle_min_us\":%" PRIu32 ",\"plan\":[",
               keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.iq_corr, c.settle_us, radio_get_tune_skip(),
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, (unsigned)radio_caps()->max_samples,
@@ -256,7 +261,7 @@ static void send_status(const char *keyword) {
               metrics_mode_name(c.metrics_mode), c.rssi_hz, c.search_hz, c.dc_guard,
               (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type),
-              level_filter_name(rh_get_filter()));
+              level_filter_name(rh_get_filter()), c.max_rotation_hz, c.phy_idle, c.phy_idle_min_us);
     for (unsigned j = 0; j < plan.nhops; j++) {
         const plan_hop_t *h = &plan.hop[j];
         reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[", j ? "," : "", h->lo_khz);
@@ -502,6 +507,23 @@ static void handle(char *line) {
         /* Debug: esp-sdr keeps Wi-Fi promiscuous RX on; measure its CPU cost. */
         esp_wifi_set_promiscuous(a);
         link_text("OK\n");
+    } else if (sscanf(line, "THROTTLE %" SCNu32 " %c", &a, &extra) == 1 && (a == 0 || (a >= 10 && a <= 100000))) {
+        c.max_rotation_hz = a;
+        scanner_set_config(&c);
+        link_text("OK\n");
+    } else if ((sscanf(line, "PHYIDLE %" SCNu32 " %" SCNu32 " %c", &a, &b, &extra) == 2 ||
+                (sscanf(line, "PHYIDLE %" SCNu32 " %c", &a, &extra) == 1 && !(b = 0))) && a <= 4) {
+        /* Debug: radio power-down in the rotation throttle's waits (radio_idle_enter). */
+        c.phy_idle = (uint8_t)a;
+        c.phy_idle_min_us = b;
+        scanner_set_config(&c);
+        link_text("OK\n");
+    } else if (!strcmp(line, "PHYIDLE?")) {
+        scan_idle_stats_t s;
+        scanner_idle_stats(&s);
+        link_printf("PHYIDLE depth %u min %" PRIu32 " n %" PRIu32 " skipped %" PRIu32 " down %" PRIu32 " up %" PRIu32
+                    " up_max %" PRIu32 " up_est %" PRIu32 "\n", c.phy_idle, c.phy_idle_min_us, s.n, s.skipped,
+                    s.down_us_avg, s.up_us_avg, s.up_us_max, s.up_est_us);
     } else if (sscanf(line, "TUNESKIP %" SCNu32 " %c", &a, &extra) == 1 && a <= 7) {
         radio_set_tune_skip(a);
         link_text("OK\n");
@@ -592,7 +614,7 @@ static void commands_task(void *arg) {
                 }
                 if (n == 1 && b == RH_REVISION_CODE && !used && now - last_rx >= PROBE_IDLE_US) probe = true;
                 else line_byte(b);
-            } else if (text || (rh_idle() && b >= 'A' && b <= 'P')) {
+            } else if (text || (rh_idle() && rh_text_start(b))) {
                 if (!text) {
                     text = true;
                     text_start = now;

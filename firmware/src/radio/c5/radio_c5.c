@@ -371,6 +371,56 @@ IRAM_ATTR esp_err_t radio_tune(uint32_t lo_khz) {
     return err;
 }
 
+extern void phy_pbus_xpd_rx_off(void);
+
+static void rx_path_on(void) {
+    phy_stop_tx_tone(1);
+    phy_pbus_workmode();
+    phy_pbus_xpd_tx_off();
+    phy_pbus_xpd_rx_on(1);
+    phy_set_rxclk_en(1);
+    gain_apply(); /* turning the RX path on resets the manual gain */
+    tune_end_us = esp_timer_get_time();
+}
+
+/* Measured at 1 LO, FFT 64 (PLAN.md, radio power-down): depth 1 saves
+ * nothing; RF off (phy_close_rf, as esp_phy_disable) saves ~60 mA while off.
+ * Back up: phy_wakeup_init (~130 us), then depth 2/3 restore the LO's
+ * calibration and run the full channel setup (~600 us in all), depth 4 the
+ * calibration and a PLL-only retune (~380 us). */
+void radio_idle_enter(unsigned depth) {
+    if (!depth) return;
+    _lock_t lock = phy_get_lock();
+    _lock_acquire(&lock);
+    if (depth == 1) {
+        phy_pbus_xpd_rx_off();
+    } else {
+        phy_close_rf();
+        if (depth >= 3) esp_phy_common_clock_disable();
+    }
+    _lock_release(&lock);
+}
+
+void radio_idle_exit(unsigned depth) {
+    if (!depth) return;
+    _lock_t lock = phy_get_lock();
+    _lock_acquire(&lock);
+    if (depth == 1) {
+        rx_path_on();
+    } else {
+        if (depth >= 3) esp_phy_common_clock_enable();
+        phy_wakeup_init();
+        /* The PHY registers are back at their defaults: restore the LO's
+         * calibration (calibrated_mhz), then the full channel setup or, at
+         * depth 4, the PLL-only retune and the RX path. */
+        calibrated_mhz = 0;
+        if (depth < 4) tuned_once = false;
+        if (tuned_lo_khz) tune_locked(tuned_lo_khz);
+        if (depth == 4) rx_path_on();
+    }
+    _lock_release(&lock);
+}
+
 void radio_set_filter(int code) { filter_code = code > 63 ? 63 : code; }
 int radio_get_filter(void) { return filter_code; }
 

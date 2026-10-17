@@ -44,6 +44,11 @@ typedef struct {
     uint32_t spec_span_hz;   /* one-sided */
     uint8_t spec_detector;   /* 0 mean, 1 max */
     uint8_t fft_type;        /* psd_fft_t */
+    uint32_t max_rotation_hz; /* rotation rate cap (scanner.c, MAX_ROTATION_HZ); 0 = none */
+    /* Debug: radio power-down while the rotation throttle waits (radio_idle_enter),
+     * when the wait is at least phy_idle_min_us. */
+    uint8_t phy_idle;
+    uint32_t phy_idle_min_us;
 } scan_config_t;
 
 void scanner_defaults(const profile_t *p, scan_config_t *c);
@@ -65,3 +70,8 @@ bool scanner_request(const scan_request_t *r);
 /* Breakdown of the most recent hop's processing time, for debugging. */
 typedef struct { uint32_t prep_us, fft_us, power_us, psd_us, metrics_us, spectrum_us; } scan_timing_t;
 void scanner_timing(scan_timing_t *t);
+
+/* Radio power-downs (phy_idle) since the last read: count, waits too short for
+ * one, and the time to power down and to power back up (retune included). */
+typedef struct { uint32_t n, skipped, down_us_avg, up_us_avg, up_us_max, up_est_us; } scan_idle_stats_t;
+void scanner_idle_stats(scan_idle_stats_t *s);

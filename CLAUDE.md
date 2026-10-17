@@ -78,7 +78,7 @@ there is no `READY` line any more. Our hosts switch with `PROTOCOL MONITOR`
 `pio device monitor` or a terminal, type it). In monitor mode a lone RotorHazard
 probe byte (0x22) after 100 ms of input silence switches back to RotorHazard
 mode, so a RotorHazard server can take over a port a monitor left streaming.
-In RotorHazard mode, input bytes `A`–`P` (unused by RotorHazard) start one of our
+In RotorHazard mode, input bytes `A`–`P` and `T` (unused by RotorHazard) start one of our
 command lines; only a few are allowed there (`rh_allowed`).
 
 **Slim build:** `firmware/CMakeLists.txt` sets `COMPONENTS` to our component
@@ -162,7 +162,19 @@ The tune includes the per-LO calibration cache restore (`RECALMODE CACHE`, the
 C5 default); DSP is most of the hop (PLAN.md, Status). Each hop tunes the next
 hop's LO right after its capture, so the settle time (`SETTLE`, 100 µs) runs
 during the DSP; the capture only waits for what is left of it (none below
-~350 µs at `FFT 64`). The default row, the `METRICS SNR|RSSI` rows and the
+~350 µs at `FFT 64`). Rotations (each enabled channel once) are capped at
+1050 /s (`THROTTLE`; `MAX_ROTATION_HZ`, `scanner.c`): a rotation that ends early waits
+for its 952 µs slot, blocking on a timer (the CPU idles) when at least 100 µs
+are left, so a single LO at `FFT 64` (~0.28 ms hops) reads 1050 /s. The hop
+times in the frames and telemetry leave the wait out. `main.c` clears
+`PCR_CPU_WAIT_MODE_FORCE_ON` so the CPU clock stops in WFI (IDF leaves it set
+on the C5). USB current at 5.23 V, RotorHazard mode, one seat (2026-10-17, with the cap at 1100 /s):
+99.4 mA unthrottled (~3500 /s), 93.5 mA throttled, 93.3 mA throttled with
+the clock gating, 90.4 mA with the scan stopped. The rest is the radio and
+board, not the CPU: powering the RF down in the wait (`PHYIDLE 4`) gives
+80.5 mA at 1100 /s (PLAN.md, "Rotation throttle and radio power-down").
+Measure current with the meter's energy counter, not its 4 Hz samples, which
+alias with the throttle's on/off cycle. The default row, the `METRICS SNR|RSSI` rows and the
 `FFT 64` row are from 2026-10-13, with the PLL-only retune (`TUNESKIP 3`)
 and the scan loop in IRAM (below); the others are older, with a full channel
 setup every hop (tune ~0.5–0.7 ms) and the scan loop in flash. The DSP includes the
@@ -203,11 +215,13 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `RATE <code>` | Sample rate. S3: 0/1/2 = 80/40/16 MS/s. C5: 0–5 = 80/40/20/10/8/4 MS/s |
 | `IQCORR 0\|1` | Digital IQ imbalance correction before the FFT (default 1). Removes the mirror image of strong signals, e.g. R1 showing on R2 in pair mode. |
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. `SETTLE` overlaps the DSP: the next capture waits for what is left of it. `TUNESKIP` bit 0 retunes only the PLL between full tunes (S3 default 7, C5 default 3; `TUNESKIP 0` runs the C5's full channel setup every hop), bit 1 skips the RX path re-apply, bit 2 the gain re-apply (wrong on the C5: +27 dB). Reported as `tskip` in `STATUS?`/`CONFIG?`, and set from the UI's Scanner controls |
+| `THROTTLE <hz>` | Rotation rate cap, 10–100000 or 0 (none); default 1050. Reported as `throttle_hz` in `STATUS?`/`CONFIG?`; each mode keeps its own, not saved by `CONFIG SAVE` |
+| `PHYIDLE <depth> [min_us]`, `PHYIDLE?` | Debug, C5 (default 0, nothing): power the radio down while the throttle waits, for waits of at least `min_us` that fit the wake-up. 1 RX path (saves nothing), 2 RF with the full channel setup on wake (~0.6 ms), 3 also the modem clocks, 4 as 3 with a PLL-only retune (~0.38 ms; −12 mA at 1100 /s with one LO). The first power-down raises the gain ~1–2.4 dB until a reboot (PLAN.md). `PHYIDLE?` reports and resets the counts and times. Reported as `phy_idle`/`phy_idle_min_us` in `STATUS?`/`CONFIG?` |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
 | `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
 | `CONFIG RESET` | RotorHazard mode only: erase the saved RotorHazard mode defaults and apply the built-in ones |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …` and `RECAL` work; the rest answer `ERR rh_mode` |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `RECAL`, `THROTTLE` and `PHYIDLE…` work; the rest answer `ERR rh_mode` |
 | `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | RotorHazard mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 

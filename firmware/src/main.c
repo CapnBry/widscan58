@@ -10,6 +10,7 @@
 #include "nvs_flash.h"
 #if CONFIG_IDF_TARGET_ESP32C5
 #include "hal/uart_ll.h"
+#include "soc/pcr_reg.h"
 #endif
 #include "commands.h"
 #include "link.h"
@@ -55,6 +56,11 @@ void app_main(void) {
      * (IDFGH-17050, esp-idf#18089); ours is off, so undo it here. */
     uart_ll_enable_bus_clock(UART_NUM_0, true);
     uart_ll_sclk_enable(&UART0);
+    /* Gate the CPU clock in WFI (the idle task's wait, e.g. the scanner's
+     * rotation throttle). Its reset default keeps the clock running, and IDF
+     * only clears it on older chips (rtc_init, cpu_waiti_clk_gate). Costs only
+     * a JTAG debugger's memory access while the CPU waits. */
+    REG_CLR_BIT(PCR_CPU_WAITI_CONF_REG, PCR_CPU_WAIT_MODE_FORCE_ON);
 #endif
     esp_log_level_set("*", ESP_LOG_NONE);
     esp_err_t e = nvs_flash_init();

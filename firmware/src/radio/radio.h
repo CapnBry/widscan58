@@ -72,6 +72,13 @@ unsigned radio_get_tune_skip(void);
 #define RADIO_PLAN_MAX_LOS 8
 void radio_set_plan(const uint32_t *lo_khz, unsigned n);
 
+/* Debug: power the radio down while the scanner waits (depth 1: the RX path,
+ * 2: the RF, as esp_phy_disable does, 3: also the modem clocks, 4: as 3 with a
+ * lighter wake-up), and back up, retuned to the last LO, which then settles as
+ * after radio_tune. Depth 0 and targets without it do nothing. */
+void radio_idle_enter(unsigned depth);
+void radio_idle_exit(unsigned depth);
+
 /* The capture aperture, for scratch use between captures (it is overwritten
  * by the next radio_capture). */
 uint32_t *radio_sample_buffer(unsigned *max_words);

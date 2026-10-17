@@ -21,6 +21,7 @@ import { Telemetry, Console } from "./views/debug";
 import { Controls } from "./views/controls";
 import { RawIqView } from "./views/rawiq";
 import { FlashDialog } from "./views/flashDialog";
+import { GpioDialog } from "./views/gpioDialog";
 import { ScreenWake } from "./util/wakeLock";
 import { registerServiceWorker } from "./util/pwa";
 import { lapCallout, speak } from "./util/speech";
@@ -68,14 +69,16 @@ const simBtn = el("button", {}, "Simulate");
 const replayInput = el("input", { type: "file", accept: ".widscan58", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
 const recordBtn = el("button", { title: "Record the raw device stream to a .widscan58 file" }, "● Record");
-// Menu: the page / device protocol (monitor or RotorHazard), the theme, and
-// about: the project link and the connected device's firmware version.
+// Menu: the page / device protocol (monitor or RotorHazard), GPIO Configure,
+// the theme, and about: the project link and the connected device's firmware
+// version.
 const menuBtn = el("button", { class: "menu-btn", title: "Menu", "aria-haspopup": "true", "aria-expanded": "false" }, "☰");
 const modeItems = {
   monitor: el("button", { class: "menu-item", role: "menuitemradio" }, "Monitor mode"),
   rh: el("button", { class: "menu-item", role: "menuitemradio" }, "RotorHazard mode"),
 };
 const rhNote = el("div", { class: "menu-note" });
+const gpioItem = el("button", { class: "menu-item", role: "menuitem", title: "Pins the device sets at startup" }, "GPIO Configure");
 const darkSwitch = el("input", { type: "checkbox", role: "switch" }) as HTMLInputElement;
 darkSwitch.checked = themeName !== "light";
 const fwValue = el("span", { class: "menu-value" }, "not connected");
@@ -88,6 +91,7 @@ const menu = el(
   modeItems.rh,
   rhNote,
   el("div", { class: "menu-sep" }),
+  gpioItem,
   el("label", { class: "menu-item menu-switch" }, el("span", {}, "Dark mode"), darkSwitch),
   el("div", { class: "menu-sep" }),
   el("div", { class: "menu-label" }, "About"),
@@ -204,6 +208,12 @@ function setMode(mode: "monitor" | "rh") {
 }
 modeItems.monitor.onclick = () => setMode("monitor");
 modeItems.rh.onclick = () => setMode("rh");
+const gpioDialog = new GpioDialog(app);
+document.body.append(gpioDialog.el);
+gpioItem.onclick = () => {
+  closeMenu();
+  gpioDialog.open();
+};
 
 function closeMenu() {
   menu.hidden = true;

@@ -153,11 +153,18 @@ export class MockTransport implements Transport {
   private rhSaved = { ...MockTransport.RH_BUILTIN };
   private readonly tskipDefault: number; // the firmware's TUNESKIP default per target
   private tskip: number;
+  // GPIO?: one character per pin, '-' not used, 'L', 'H', 'x' flash or USB
+  // (as the firmware). The saved ones are kept across REBOOT, not page loads.
+  private gpioActive: string[];
+  private gpioSaved: string[];
 
   constructor(target: SimTarget = "c5") {
     this.profile = target === "s3" ? race24 : c5race;
     this.channels = this.profile.channels;
     this.tskipDefault = this.tskip = target === "s3" ? 7 : 3;
+    const reserved = target === "s3" ? [19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] : [13, 14, 16, 17, 18, 20, 21, 22];
+    this.gpioSaved = Array.from({ length: target === "s3" ? 49 : 29 }, (_, n) => (reserved.includes(n) ? "x" : "-"));
+    this.gpioActive = [...this.gpioSaved];
   }
 
   async open(onBytes: (c: Uint8Array) => void): Promise<void> {
@@ -382,10 +389,25 @@ export class MockTransport implements Transport {
           this.enabled = (1 << this.channels.length) - 1;
           this.metricsMode = "FULL";
           this.tskip = this.tskipDefault;
+          this.gpioActive = [...this.gpioSaved];
           this.reset();
           this.applyRhSaved();
         }, 300);
         return ok();
+      case line === "GPIO?":
+        return this.text(
+          `GPIO ${JSON.stringify({ count: this.gpioActive.length, active: this.gpioActive.join(""), saved: this.gpioSaved.join("") })}\n`,
+        );
+      case line === "GPIO SAVE":
+        this.gpioSaved = [...this.gpioActive];
+        return ok();
+      case parts[0] === "GPIO" && parts.length === 3 && /^\d+$/.test(parts[1]): {
+        const s = { NONE: "-", LOW: "L", HIGH: "H" }[parts[2]];
+        if (!s) return this.text("ERR gpio_state\n");
+        if (this.gpioActive[num(1)] === undefined || this.gpioActive[num(1)] === "x") return this.text("ERR gpio_pin\n");
+        this.gpioActive[num(1)] = s;
+        return ok();
+      }
       case parts[0] === "SYNC":
         return this.text(`SYNC ${parts[1]}\n`);
       default:
@@ -414,8 +436,8 @@ export class MockTransport implements Transport {
     return (
       ["PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?", "METRICS RSSI", "METRICS SNR", "METRICS?",
         "GAIN?", "GAIN HARDWARE", "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE", "CONFIG RESET", "RECAL",
-        "LEVELFILTER MEDIAN", "LEVELFILTER EMA", "LEVELFILTER?"].includes(line) ||
-      ["GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR "].some((p) => line.startsWith(p))
+        "LEVELFILTER MEDIAN", "LEVELFILTER EMA", "LEVELFILTER?", "GPIO?"].includes(line) ||
+      ["GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR ", "GPIO "].some((p) => line.startsWith(p))
     );
   }
 

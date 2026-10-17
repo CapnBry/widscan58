@@ -29,6 +29,7 @@
 #include "nvs.h"
 #include "commands.h"
 #include "frames.h"
+#include "gpio_out.h"
 #include "link.h"
 #include "metrics.h"
 #include "radio.h"
@@ -233,8 +234,8 @@ static bool rh_allowed(const char *line) {
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
                                         "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE",
                                         "CONFIG RESET", "RECAL", "LEVELFILTER MEDIAN", "LEVELFILTER EMA",
-                                        "LEVELFILTER?", "PHYIDLE?"};
-    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR ", "PHYIDLE ", "THROTTLE "};
+                                        "LEVELFILTER?", "PHYIDLE?", "GPIO?"};
+    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR ", "PHYIDLE ", "THROTTLE ", "GPIO "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;
     for (unsigned j = 0; j < sizeof(prefix) / sizeof(prefix[0]); j++)
@@ -271,6 +272,21 @@ static void send_status(const char *keyword) {
         reply_add("]}");
     }
     reply_add("]}\n");
+    reply_send();
+}
+
+/* GPIO?: per GPIO number, '-' unused, 'L' low, 'H' high, 'x' not available
+ * (flash, USB); "active" is what is set now, "saved" what boot applies. */
+static void send_gpio(void) {
+    char s[2][65];
+    unsigned n = gpio_out_count();
+    if (n > 64) n = 64;
+    for (unsigned k = 0; k < 2; k++) {
+        for (unsigned j = 0; j < n; j++)
+            s[k][j] = !gpio_out_allowed(j) ? 'x' : "-LH"[gpio_out_get(j, k)];
+        s[k][n] = 0;
+    }
+    reply_add("GPIO {\"count\":%u,\"active\":\"%s\",\"saved\":\"%s\"}\n", n, s[0], s[1]);
     reply_send();
 }
 
@@ -544,6 +560,19 @@ static void handle(char *line) {
     } else if (sscanf(line, "SPURS GUARD %" SCNu32 " %c", &a, &extra) == 1 && a <= 1000000) {
         c.spur_guard_hz = a;
         scanner_set_config(&c);
+        link_text("OK\n");
+    } else if (!strcmp(line, "GPIO?")) {
+        send_gpio();
+    } else if (!strcmp(line, "GPIO SAVE")) {
+        esp_err_t e = gpio_out_save();
+        if (e != ESP_OK) { link_printf("ERR save %s\n", esp_err_to_name(e)); return; }
+        link_text("OK\n");
+    } else if (sscanf(line, "GPIO %" SCNu32 " %31s %c", &a, arg, &extra) == 2) {
+        /* GPIO <n> NONE|LOW|HIGH: at once; GPIO SAVE keeps it for boot. */
+        gpio_out_t s = !strcmp(arg, "LOW") ? GPIO_OUT_LOW : !strcmp(arg, "HIGH") ? GPIO_OUT_HIGH : GPIO_OUT_NONE;
+        if (s == GPIO_OUT_NONE && strcmp(arg, "NONE")) { link_text("ERR gpio_state\n"); return; }
+        if (!gpio_out_allowed(a)) { link_text("ERR gpio_pin\n"); return; }
+        gpio_out_set(a, s);
         link_text("OK\n");
     } else if (!strcmp(line, "BOOTLOADER")) {
         link_text("OK BOOTLOADER\n");

@@ -221,8 +221,9 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
 | `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
 | `CONFIG RESET` | RotorHazard mode only: erase the saved RotorHazard mode defaults and apply the built-in ones |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `RECAL`, `THROTTLE` and `PHYIDLE…` work; the rest answer `ERR rh_mode` |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
 | `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | RotorHazard mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
+| `GPIO <n> NONE\|LOW\|HIGH`, `GPIO SAVE`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `GPIO SAVE` makes the settings in effect the boot ones (NVS, base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; `src/gpio_out.c`), applied right after `nvs_flash_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `x` not available (USB, and the flash pins IDF reserves). Works in both modes |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
 ## RotorHazard mode
@@ -291,9 +292,15 @@ npm install
 npm run dev                         # http://localhost:5173 (Web Serial: Chrome/Edge, Firefox, Android Chrome)
 ```
 
-- **Menu** (☰, top left): Monitor mode / RotorHazard mode, and the dark-mode
-  switch. The choice is remembered and applied on every connect (`PROTOCOL?`,
-  then `PROTOCOL MONITOR|RH`; firmware without `PROTOCOL` is monitor only).
+- **Menu** (☰, top left): Monitor mode / RotorHazard mode, GPIO Configure,
+  and the dark-mode switch. The choice is remembered and applied on every
+  connect (`PROTOCOL?`, then `PROTOCOL MONITOR|RH`; firmware without
+  `PROTOCOL` is monitor only). GPIO Configure (`views/gpioDialog.ts`,
+  `model/gpio.ts`) shows each GPIO's setting (not its live level) as Not
+  used / Low / High; a click sends `GPIO <n> …` (in effect at once) and
+  reads `GPIO?` back. Pins whose setting differs from the saved one show
+  "saved: …", with a note that they need Save (`GPIO SAVE`) to survive a
+  restart; Revert puts the saved ones back.
   An About section below them links to the GitHub project and shows the
   connected device's firmware version (from `INFO`; over Web Serial also a
   newer version the page can flash).

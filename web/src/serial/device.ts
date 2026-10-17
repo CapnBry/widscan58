@@ -205,6 +205,7 @@ function replyMatcher(cmd: string): (item: StreamItem) => boolean {
     "PROTOCOL?": "PROTOCOL ",
     "CONFIG?": "CONFIG ",
     "METRICS?": "METRICS ",
+    "GPIO?": "GPIO ",
     SYNC: "SYNC ",
   };
   const prefix = query[word];

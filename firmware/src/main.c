@@ -13,6 +13,7 @@
 #include "soc/pcr_reg.h"
 #endif
 #include "commands.h"
+#include "gpio_out.h"
 #include "link.h"
 #include "radio.h"
 #include "rh.h"
@@ -69,6 +70,7 @@ void app_main(void) {
         e = nvs_flash_init();
     }
     ESP_ERROR_CHECK(e);
+    gpio_out_init(); /* the saved board outputs (e.g. an antenna switch), before the radio */
     link_init();
     BOOT_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();

@@ -1,4 +1,4 @@
-// Telemetry, hop timing, protocol log, command console, frame inspector.
+// Telemetry, hop timing, protocol log, command console.
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
 import { axes, drawGrid, el, prepare, theme } from "../util/canvas";
@@ -162,9 +162,7 @@ export class Telemetry implements View {
 export class Console implements View {
   el: HTMLElement;
   private log = el("div", { class: "log" });
-  private inspector = el("div", { class: "inspector" });
   private shown = 0;
-  private lastInspect = 0;
   private history: string[] = [];
   private hpos = 0;
 
@@ -210,8 +208,6 @@ export class Console implements View {
       this.log,
       el("div", { class: "console-row" }, input, send),
       sessionRow,
-      el("h2", { style: "margin-top:10px" }, "Last METRICS frame"),
-      this.inspector,
     );
   }
 
@@ -236,16 +232,6 @@ export class Console implements View {
       );
       this.shown = store.log.length;
       if (atBottom) this.log.scrollTop = this.log.scrollHeight;
-    }
-    const now = performance.now();
-    if (store.lastMetrics && now - this.lastInspect > 500) {
-      this.lastInspect = now;
-      const m = store.lastMetrics;
-      const named = {
-        ...m,
-        channels: m.channels.map((c) => ({ name: this.app.channelName(c.id), ...c })),
-      };
-      this.inspector.textContent = JSON.stringify(named, null, 1);
     }
   }
 }

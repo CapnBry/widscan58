@@ -451,8 +451,7 @@ sessions replay through the same parser.
    - per-event detail (before/after per channel, classification);
    - CSV export.
 8. **Debug panel:** hop timing histogram, rotation rate, CPU, heap, drops,
-   saturation and gain per LO, recal age, METRICS inspector, protocol log, command
-   console.
+   saturation and gain per LO, recal age, protocol log, command console.
 9. **Raw I/Q tool:** time trace, constellation, high-resolution FFT.
 10. **Session tools:** record/replay (IndexedDB + file), CSV export, screenshot.
 
@@ -997,6 +996,8 @@ wandered ±10 dB with people moving). Data and scripts: `tmp/gain-sweep/`,
 - Current (mA), no power-down / depth: 1100 /s: 93.1, depth 1 93.8, depth 4 80.5 (vs 92.4 the same session); 950 /s: ~91 / depth 2 82.3; 900 /s: 90.9 / depth 2 77.5; 800 /s: 90.6 / depth 2 70.2, depth 4 65.3; 487 /s: 88.2 / depth 2 52.2, depth 3 51.0. Unthrottled (~3100–3500 /s): 99.4. Scan stopped: 90.4.
 - So the RF is ~60 mA of the ~90; the CPU and modem clocks are a few. Saving ≈ 60 mA × (period − c) / period, with c ≈ 830 µs at depth 2 and ≈ 730 µs at depth 4 (hop, power-down, wake-up and settle at full current). The wait has to cover down + up + settle: ≥ ~710–800 µs at depth 2 (rotations ≤ ~950 /s with this hop), ≥ ~500 µs at depth 4, which fits the 1100 /s cap (~630 µs left): −12 mA there.
 - **Open: a gain step.** After the first power-down (depth 2 or 4) the floor reads ~1–2.4 dB higher and stays so with `PHYIDLE 0` until a reboot: −59.1 → −56.7 dBFS (RSSI, LO 5650); in `RAWIQ` at LO 5700 the board spurs rose with the floor (10.0–10.7 vs 10.4 dB over it), so it is gain, not noise. After a power-down it read −56.6…−56.7 on every boot, the boot value −57.1…−59.1. Something `phy_wakeup_init` sets differs from the boot state and neither tune restores it. Not checked with a VTX, nor with more than one LO; PHY tracking (1 Hz) may run while the RF is off.
+
+**GPIO outputs at boot (2026-10-17).** For boards with an antenna switch on a GPIO (the Waveshare ESP32-C5-Zero: GPIO26, internal or external antenna). `src/gpio_out.c`: each GPIO is unused (left alone), low or high; `GPIO <n> NONE|LOW|HIGH` drives it at once, `GPIO SAVE` stores the settings, and `app_main` applies them right after `nvs_flash_init`, before the radio starts. Stored in base 3 by GPIO number, 40 GPIOs per `u64` (3^40 < 2^64): one NVS entry (`gpio0`) on the C5, two on the S3; a word with no pin in use is erased. Not available: USB (C5 13/14, S3 19/20) and whatever IDF reserved at startup (`esp_gpio_is_reserved`: flash, C5 16–18/20–22). Static RAM: 32 bytes (masks, not per-pin bytes). Back to unused at run time is `gpio_reset_pin` (pull-up on, input and output off). Tested on the C5: set, save, `REBOOT`, the saved pins come back; in both modes. Web UI: menu → GPIO Configure.
 
 Next steps, in order:
 1. ~~**Capture latency**~~ (done 2026-10-08: 1.79 → 0.13 ms per capture, see "Capture latency on the C5" above).

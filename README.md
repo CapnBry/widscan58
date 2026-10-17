@@ -8,7 +8,8 @@ and shows what is on each FPV video channel: signal strength, noise floor, SNR,
 video bandwidth / peak, and a live spectrum of the whole band.
 Use it at the field to find a clear channel or check pilot VTX frequencies from the web browser interface.
 
-The device can also act as an 8 channel RX5808 array for RotorHazard race timing.
+The device can also act as an 8 channel RX5808 array for RotorHazard race timing,
+or a simple standalone lap timer running in the web browser.
 
 ## ▶ [Open the live web UI](https://capnbry.github.io/widscan58/)
 
@@ -41,6 +42,7 @@ second.*
 - **[RotorHazard](https://github.com/RotorHazard/RotorHazard) timer node:**
   automatically switches to an 8-seat receiver for lap timing. See
   [our docs](docs/RotorHazard.md) for setup and configuration.
+- **Standalone lap timer** with short lap rejection, fastest N, and voice time callouts.
 - **Deep diagnostics** for the curious: hop timing, raw I/Q snapshots with a
   constellation view, scanner settings and a command console.
 - **Channel editor:** pick your channels on a frequency chart that looks like

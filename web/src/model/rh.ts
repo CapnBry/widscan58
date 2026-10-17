@@ -74,6 +74,7 @@ export class RhModel {
   private loop: Promise<void> | null = null;
   private stopFlag = false;
   private deviceMs = -1;
+  private since = 0; // store.now() at start: older extremums were queued before we polled
   /** A seat completed a lap (a counted pass with a lap time). */
   onLap: (seat: RhSeat, lapS: number) => void = () => {};
 
@@ -118,6 +119,7 @@ export class RhModel {
     this.error = null;
     this.stopFlag = false;
     this.deviceMs = -1;
+    this.since = this.store.now();
     for (const s of this.seats) {
       s.lapId = null;
       s.laps.break(); // passes while disconnected are missed
@@ -315,8 +317,13 @@ export class RhModel {
     s.nodePeak = validLevel(ps.nodePeak) ? ps.nodePeak : null;
     s.nodeNadir = validLevel(ex.nodeNadir) ? ex.nodeNadir : null;
     s.loopUs = ps.loopUs;
-    if (ex.extremum) {
-      s.peaks.push({ t: now - ex.extremum.msAgo / 1000 + ex.extremum.durationMs / 2000, v: ex.extremum.level, peak: ex.extremum.peak });
+    // The device keeps its last 8 peaks and nadirs while nobody polls: the
+    // first reads after a start drain those, from before the level history
+    // (and an msAgo past 65.5 s wraps). Only the ones since the start count.
+    const ext = ex.extremum;
+    const extT = ext ? now - ext.msAgo / 1000 + ext.durationMs / 2000 : 0;
+    if (ext && extT >= this.since) {
+      s.peaks.push({ t: extT, v: ext.level, peak: ext.peak });
       while (s.peaks.length && now - s.peaks[0].t > HISTORY_SECONDS) s.peaks.shift();
     }
     if (ex.crossing !== s.crossing) {

@@ -1,0 +1,17 @@
+<!-- Widscan58 app icon: the favicon on a light rounded square. GPL-3.0-or-later.
+     PNGs: rsvg-convert -w N -h N icon.svg -o icon-N.png (192, 512; 180 for apple-touch-icon). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">
+<rect width="300" height="300" rx="56" fill="#f9f9f7"/>
+<g transform="translate(30,30) scale(0.8)">
+<defs><clipPath id="arm"><rect x="0" y="0" width="236" height="30" rx="5"/></clipPath>
+<clipPath id="band"><rect x="21" y="106" width="231" height="38"/></clipPath></defs>
+<g transform="translate(16,103) rotate(-16) translate(0,-30)">
+ <rect width="236" height="30" rx="5" fill="#000"/>
+ <g clip-path="url(#arm)" fill="#fff"><polygon points="14,6 38,6 54,24 30,24"/><polygon points="70,6 94,6 110,24 86,24"/><polygon points="126,6 150,6 166,24 142,24"/><polygon points="182,6 206,6 222,24 198,24"/></g>
+</g>
+<path d="M21,106 H252 V256 Q252,272 236,272 H37 Q21,272 21,256 Z" fill="#000"/>
+<g clip-path="url(#band)" fill="#fff"><polygon points="44,112 66,112 52,140 30,140"/><polygon points="98,112 120,112 106,140 84,140"/><polygon points="152,112 174,112 160,140 138,140"/><polygon points="206,112 228,112 214,140 192,140"/><polygon points="260,112 282,112 268,140 246,140"/></g>
+<rect x="21" y="140" width="231" height="5" fill="#000"/>
+<path d="M43,241 H75.5 C109.7,241 112.1,179 136.5,179 C160.9,179 163.3,241 197.5,241 H230" fill="none" stroke="#ffc800" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>

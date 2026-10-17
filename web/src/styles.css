@@ -219,9 +219,9 @@ header.top .actions button { white-space: nowrap; }
 .plan-dialog { width: min(680px, calc(100vw - 32px)); }
 .options-dialog { width: min(400px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
 .options-dialog h3 { font-size: 11px; margin: 12px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
-.options-dialog .option { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; cursor: pointer; }
-.options-dialog .option input { margin-top: 2px; }
-.options-dialog .option small { display: block; font-size: 11px; color: var(--muted); }
+.options-dialog .option, .flash-dialog .option { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; cursor: pointer; }
+.options-dialog .option input, .flash-dialog .option input { margin-top: 2px; }
+.options-dialog .option small, .flash-dialog .option small { display: block; font-size: 11px; color: var(--muted); }
 .options-dialog .option.disabled { cursor: default; color: var(--muted); }
 .options-dialog .options-error { font-size: 11px; color: var(--critical); padding: 0 0 4px 21px; }
 .options-dialog .voice-controls { padding-left: 21px; }

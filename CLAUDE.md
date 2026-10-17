@@ -313,6 +313,23 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   output filter shows Median for firmware without `level_filter` in `CONFIG?`.
   Seats take the channels of the shared channel plan in frequency order (Edit
   channels). Disconnect before a RotorHazard server opens the port.
+- **Installable / offline** (PWA): `public/manifest.webmanifest`, icons from
+  `public/icon.svg` and `icon-maskable.svg` (PNGs made with `rsvg-convert`,
+  committed), `sw.js` and `src/util/pwa.ts`. The build (`vite.config.ts`,
+  `pwaPlugin`) writes `dist/sw.js` with the page's files (`FILES`: public files
+  and the entry's static imports), the rest (`FLASH_FILES`: the firmware and
+  the flasher's code, esptool-js and its chip stubs) and a cache name from a
+  hash of all of them, so a firmware-only deploy updates the app too.
+  `FLASH_FILES` are fetched when flashing (~1 MB) and kept for offline use
+  until the next deploy. In the installed app (`isInstalledApp()`: display-mode
+  standalone etc.), the flash dialog has "Make firmware available offline": it
+  downloads them now and with every update (cache `…-fw`; the setting is the
+  `widscan58-prefs` cache, which the worker can read). Offline without the
+  firmware, the dialog says so and disables Flash; a download that fails while
+  flashing (`OfflineError`) says so too. A deploy installs silently and takes
+  effect on the next load; there is no install or update prompt, keep it
+  that way. Only `npm run build` output registers it (not the dev server), so
+  test with `npx vite preview`.
 - **Connect device**: Web Serial. Chrome, Edge, Firefox and Android Chrome all
   work, flashing included. Chrome remembers the grant, so later visits and
   board resets reconnect automatically.

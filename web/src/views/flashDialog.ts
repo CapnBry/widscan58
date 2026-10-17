@@ -1,6 +1,7 @@
 // "Flash device" dialog: a short walkthrough and the flash progress. GPL-3.0-or-later.
 import { el } from "../util/canvas";
-import { flashFirmware, loadManifest, type Manifest } from "../serial/flasher";
+import { OfflineError, flashFirmware, loadManifest, type Manifest } from "../serial/flasher";
+import { isInstalledApp, offlineStatus, setOfflineFirmware, type OfflineStatus } from "../util/pwa";
 import type { Port } from "../serial/device";
 import type { DeviceInfo } from "../model/store";
 
@@ -24,8 +25,19 @@ export class FlashDialog {
   private logPre = el("pre", { class: "flash-log" });
   private flashBtn = el("button", { class: "primary", autofocus: "" }, "Flash");
   private closeBtn = el("button", {}, "Close");
+  // "Make firmware available offline": installed app only (util/pwa.ts).
+  private offlineBox = el("input", { type: "checkbox" }) as HTMLInputElement;
+  private offlineHint = el("small", {});
+  private offlineRow = el(
+    "label",
+    { class: "option", hidden: "" },
+    this.offlineBox,
+    el("span", {}, "Make firmware available offline", this.offlineHint),
+  );
   private manifest: Promise<Manifest> | null = null;
   private busy = false;
+  /** Offline, and the firmware is not on this device. */
+  private noFirmware = false;
 
   constructor(private host: FlashHost) {
     this.el = el(
@@ -57,12 +69,19 @@ export class FlashDialog {
         ),
         el("li", {}, "Click Flash and pick the board (“USB JTAG/serial debug unit”) in the browser’s list."),
       ),
+      this.offlineRow,
       el("div", { class: "flash-progress" }, this.bar, this.status),
       el("details", {}, el("summary", {}, "Details"), this.logPre),
       el("div", { class: "flash-buttons" }, this.closeBtn, this.flashBtn),
     );
     this.flashBtn.onclick = () => void this.flash();
     this.closeBtn.onclick = () => this.el.close();
+    this.offlineBox.onchange = () => void this.toggleOffline();
+    const recheck = () => {
+      if (this.el.open && !this.busy) void this.refreshOffline();
+    };
+    window.addEventListener("online", recheck);
+    window.addEventListener("offline", recheck);
     // Esc must not hide a flash in progress.
     this.el.addEventListener("cancel", (e) => {
       if (this.busy) e.preventDefault();
@@ -77,12 +96,12 @@ export class FlashDialog {
     this.manifest.then(
       (m) => {
         this.showManifest(m);
-        this.flashBtn.disabled = this.busy;
+        this.flashBtn.disabled = this.busy || this.noFirmware;
       },
       (e: Error) => {
         this.newVersion.textContent = "(unavailable)";
         this.newDate.textContent = "";
-        this.setStatus(`Cannot flash: ${e.message}.`, "err");
+        this.setStatus(e instanceof OfflineError ? this.offlineText() : `Cannot flash: ${e.message}.`, "err");
         this.flashBtn.disabled = true;
       },
     );
@@ -93,6 +112,57 @@ export class FlashDialog {
     }
     this.el.showModal();
     this.refreshDevice(); // after showModal: it skips a closed dialog
+    if (!this.busy) void this.refreshOffline();
+  }
+
+  private offlineText(): string {
+    return (
+      "No internet connection, and the firmware is not on this device. Connect to the internet to flash." +
+      (this.offlineRow.hidden ? "" : " To flash without internet, turn on Make firmware available offline while connected.")
+    );
+  }
+
+  /** The offline option, and whether flashing can work without a network. */
+  private async refreshOffline() {
+    const st = await offlineStatus().catch(() => null);
+    this.offlineRow.hidden = !st || !isInstalledApp();
+    if (st) this.showOffline(st);
+    const was = this.noFirmware;
+    this.noFirmware = !navigator.onLine && !!st && !st.firmware;
+    if (this.noFirmware) {
+      this.setStatus(this.offlineText(), "err");
+      this.flashBtn.disabled = true;
+    } else if (was) {
+      this.setStatus("");
+      this.flashBtn.disabled = false;
+    }
+  }
+
+  private showOffline(st: OfflineStatus) {
+    this.offlineBox.checked = st.wanted;
+    setText(
+      this.offlineHint,
+      !st.wanted
+        ? "Downloads the firmware (about 1 MB) now and with every app update, so you can flash without internet."
+        : st.saved
+          ? `Saved on this device (${st.version ?? "unknown version"}); every app update brings the new firmware.`
+          : "Not downloaded yet; it is tried again with the next app update.",
+    );
+  }
+
+  private async toggleOffline() {
+    const on = this.offlineBox.checked;
+    this.offlineBox.disabled = true;
+    if (on) setText(this.offlineHint, "Downloading the firmware…");
+    try {
+      const st = await setOfflineFirmware(on);
+      if (st) this.showOffline(st);
+    } catch (e) {
+      setText(this.offlineHint, `Download failed (${(e as Error).message}); it is tried again with the next app update.`);
+    } finally {
+      this.offlineBox.disabled = false;
+      void this.refreshOffline();
+    }
   }
 
   /** Shows the connected board's version; kept while flashing, when the board
@@ -160,8 +230,18 @@ export class FlashDialog {
       ok = true;
       this.setStatus(`Done: ${manifest.version} is installed and the board is restarting. The scanner reconnects on its own.`, "ok");
     } catch (e) {
-      this.log(`!! ${(e as Error).message}`);
-      this.setStatus(`Flashing failed: ${(e as Error).message}. Do step 3, then click Flash again.`, "err");
+      const msg = (e as Error).message;
+      this.log(`!! ${msg}`);
+      // esptool-js loads its chip code when it connects, which fails offline too.
+      if (e instanceof OfflineError || (e instanceof TypeError && /fetch|import/i.test(msg))) {
+        this.setStatus(
+          "Flashing failed: the firmware could not be downloaded (no internet connection?). " +
+            "Connect to the internet and click Flash again; press RESET on the board to start the firmware it has.",
+          "err",
+        );
+      } else {
+        this.setStatus(`Flashing failed: ${msg}. Do step 3, then click Flash again.`, "err");
+      }
     } finally {
       this.busy = false;
       this.flashBtn.disabled = this.closeBtn.disabled = false;

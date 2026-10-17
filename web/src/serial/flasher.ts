@@ -66,8 +66,19 @@ const CHIPS: Record<string, Watchdogs> = {
 
 export const SUPPORTED_CHIPS = Object.keys(CHIPS);
 
+/** A download failed for want of a network (fetch() and import() reject with
+ *  a TypeError then; an HTTP error is a Response). */
+export class OfflineError extends Error {
+  constructor() {
+    super("the firmware could not be downloaded: no internet connection");
+  }
+}
+const offline = (): never => {
+  throw new OfflineError();
+};
+
 export async function loadManifest(): Promise<Manifest> {
-  const r = await fetch(FIRMWARE_DIR + "manifest.json", { cache: "no-cache" });
+  const r = await fetch(FIRMWARE_DIR + "manifest.json", { cache: "no-cache" }).catch(offline);
   // The dev server answers a missing file with index.html, hence the JSON check.
   const m = r.ok ? ((await r.json().catch(() => null)) as Manifest | null) : null;
   if (!m?.builds) throw new Error("no firmware is published with this page");
@@ -75,7 +86,7 @@ export async function loadManifest(): Promise<Manifest> {
 }
 
 async function fetchPart(p: ManifestPart): Promise<Uint8Array> {
-  const r = await fetch(FIRMWARE_DIR + p.path, { cache: "no-cache" });
+  const r = await fetch(FIRMWARE_DIR + p.path, { cache: "no-cache" }).catch(offline);
   if (!r.ok) throw new Error(`${p.path}: HTTP ${r.status}`);
   const data = new Uint8Array(await r.arrayBuffer());
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
@@ -94,7 +105,7 @@ export interface FlashEvents {
  *  already be in download mode (BOOT + RESET); otherwise it is reset into it
  *  over USB Serial/JTAG. Ends with a watchdog reset into the new firmware. */
 export async function flashFirmware(port: Port, manifest: Manifest, ev: FlashEvents): Promise<void> {
-  const { ESPLoader, Transport } = await import("esptool-js");
+  const { ESPLoader, Transport } = await import("esptool-js").catch(offline);
   // esptool-js writes "Connecting..." and its dots without a newline.
   let pending = "";
   const terminal = {

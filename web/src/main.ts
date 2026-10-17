@@ -22,6 +22,7 @@ import { Controls } from "./views/controls";
 import { RawIqView } from "./views/rawiq";
 import { FlashDialog } from "./views/flashDialog";
 import { ScreenWake } from "./util/wakeLock";
+import { registerServiceWorker } from "./util/pwa";
 import { lapCallout, speak } from "./util/speech";
 import { voiceSettings } from "./views/rhEventsDialog";
 import { RhEvents, RhGraph, RhSeats, RhSettings } from "./views/rh";
@@ -31,8 +32,13 @@ const app = new App(store);
 const recorder = new Recorder();
 
 // ---- Theme ------------------------------------------------------------------
+// The installed app's title bar follows the theme (--page).
+function setThemeColor(t: string) {
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", t === "light" ? "#f9f9f7" : "#0d0d0d");
+}
 function applyTheme(t: string) {
   document.documentElement.dataset.theme = t;
+  setThemeColor(t);
   darkSwitch.checked = t !== "light";
   invalidateTheme();
   try {
@@ -49,6 +55,9 @@ try {
   /* storage unavailable */
 }
 document.documentElement.dataset.theme = themeName;
+setThemeColor(themeName);
+
+registerServiceWorker(); // installable, works offline
 
 // ---- Header -----------------------------------------------------------------
 const dot = el("span", { class: "dot" });

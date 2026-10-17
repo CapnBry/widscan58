@@ -11,6 +11,8 @@ Use it at the field to find a clear channel or check pilot VTX frequencies from 
 The device can also act as an 8 channel RX5808 array for RotorHazard race timing,
 or a simple standalone lap timer running in the web browser.
 
+widscan58 is a words smash-em-up of WiFi, Video, Scan and 5.8GHz
+
 ## ▶ [Open the live web UI](https://capnbry.github.io/widscan58/)
 
 **https://capnbry.github.io/widscan58/** (Chrome, Edge or Firefox on desktop,

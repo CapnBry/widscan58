@@ -290,7 +290,11 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   processing (`RhModel.lapRules`, saved with the thresholds; a change
   recomputes from the passes since Clear): minimum lap on/off and 0–999 s,
   fastest consecutive laps on/off and 2–99 laps (off: no tile row, no
-  records).
+  records). Voice callouts (`util/speech.ts`, the browser's speech
+  synthesis, a Google voice when there is one; saved in `UiSettings`): each
+  lap as channel and seconds to 0.1 ("R4 13.7"), with volume, rate, pitch
+  and a Test button; hidden while off, an error line without speech
+  synthesis.
   The page takes the metric and receiver settings from the device (`CONFIG?`)
   and never sets them on connect; Receiver (gain, LO plan, FFT size, output
   value, output filter) → Save sends `CONFIG SAVE`, Reset `CONFIG RESET`. The

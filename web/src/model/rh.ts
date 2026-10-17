@@ -74,6 +74,8 @@ export class RhModel {
   private loop: Promise<void> | null = null;
   private stopFlag = false;
   private deviceMs = -1;
+  /** A seat completed a lap (a counted pass with a lap time). */
+  onLap: (seat: RhSeat, lapS: number) => void = () => {};
 
   constructor(private store: Store) {
     try {
@@ -328,6 +330,7 @@ export class RhModel {
       else {
         s.passPeak = validLevel(ps.passPeak) ? ps.passPeak : null;
         this.addEvent({ t, seat: s.index, kind: "pass", peak: ps.passPeak, lapS: r.lapS });
+        if (r.lapS !== undefined) this.onLap(s, r.lapS);
         if (r.fastest) this.addEvent({ t, seat: s.index, kind: "fastest", fastest: r.fastest, previous: r.previous });
       }
     }

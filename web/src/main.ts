@@ -22,6 +22,8 @@ import { Controls } from "./views/controls";
 import { RawIqView } from "./views/rawiq";
 import { FlashDialog } from "./views/flashDialog";
 import { ScreenWake } from "./util/wakeLock";
+import { lapCallout, speak } from "./util/speech";
+import { voiceSettings } from "./views/rhEventsDialog";
 import { RhEvents, RhGraph, RhSeats, RhSettings } from "./views/rh";
 
 const store = new Store();
@@ -215,6 +217,10 @@ darkSwitch.onchange = () => applyTheme(darkSwitch.checked ? "dark" : "light");
 const screenWake = new ScreenWake((msg) => store.addLog("error", msg));
 const syncWake = () => screenWake.set(app.settings.keepScreenOn && !!app.device);
 store.subscribe(syncWake); // the option changing (app.changed touches the store)
+// Voice callouts (detection events options): each lap's channel and time.
+app.rh.onLap = (seat, lapS) => {
+  if (app.settings.voiceOn && seat.channel) speak(lapCallout(seat.channel, lapS), voiceSettings(app.settings));
+};
 
 function setState(state: "off" | "ok" | "sim" | "err", text: string) {
   dot.className = `dot ${state === "off" ? "" : state}`;

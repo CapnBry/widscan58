@@ -152,7 +152,7 @@ export class RhSeats implements View {
       ["laps", `${s.laps.passes}`],
       ["last lap", s.laps.lastLapS === null ? "—" : `${s.laps.lastLapS.toFixed(3)} s`],
       ...(lr.fastestOn
-        ? [[`fastest ${lr.count}`, f ? `${f.totalS.toFixed(3)} s (${(f.totalS / f.laps.length).toFixed(3)})` : "—", f ? lapList(f) : undefined] as [string, string, string?]]
+        ? [[`fastest ${lr.count}`, f ? `${f.totalS.toFixed(3)} s` : "—", f ? lapList(f) : undefined] as [string, string, string?]]
         : []),
       ["pass peak", s.passPeak === null ? "—" : `${s.passPeak}`],
       ["peak / nadir", s.nodePeak === null ? "—" : `${s.nodePeak} / ${s.nodeNadir ?? "—"}`],
@@ -414,5 +414,5 @@ const GEAR_SVG =
   "</svg>";
 
 function lapList(f: FastestRun): string {
-  return f.laps.map((l) => `${l.toFixed(3)} s`).join(" · ");
+  return `${f.laps.map((l) => `${l.toFixed(3)} s`).join(" · ")} (avg ${(f.totalS / f.laps.length).toFixed(3)})`;
 }

@@ -217,12 +217,17 @@ header.top .actions button { white-space: nowrap; }
 }
 .flash-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .plan-dialog { width: min(680px, calc(100vw - 32px)); }
-.options-dialog { width: min(400px, calc(100vw - 32px)); }
+.options-dialog { width: min(400px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
 .options-dialog h3 { font-size: 11px; margin: 12px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 .options-dialog .option { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; cursor: pointer; }
 .options-dialog .option input { margin-top: 2px; }
 .options-dialog .option small { display: block; font-size: 11px; color: var(--muted); }
 .options-dialog .option.disabled { cursor: default; color: var(--muted); }
+.options-dialog .options-error { font-size: 11px; color: var(--critical); padding: 0 0 4px 21px; }
+.options-dialog .voice-controls { padding-left: 21px; }
+.options-dialog .slider { display: grid; grid-template-columns: 52px 1fr 36px; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; color: var(--ink-2); }
+.options-dialog .slider-value { text-align: right; font-variant-numeric: tabular-nums; }
+.options-dialog .voice-test { padding-top: 6px; }
 .options-dialog .rule { display: flex; align-items: flex-start; gap: 8px; }
 .options-dialog .rule .option { flex: 1; }
 .options-dialog .rule-value { padding-top: 4px; white-space: nowrap; color: var(--ink-2); font-size: 12px; }

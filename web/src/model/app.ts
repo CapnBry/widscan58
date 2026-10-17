@@ -21,6 +21,10 @@ export interface UiSettings {
   rhShowCrossings: boolean; // detection events: list enters and exits
   rhShowFastest: boolean; // detection events: list new fastest runs
   keepScreenOn: boolean; // screen wake lock while a device is connected
+  voiceOn: boolean; // RotorHazard mode: speak each lap
+  voiceVolume: number; // 0-100
+  voiceRate: number; // 0.1-2
+  voicePitch: number; // 0-2
 }
 
 export class App {
@@ -38,6 +42,10 @@ export class App {
     rhShowCrossings: false,
     rhShowFastest: true,
     keepScreenOn: false,
+    voiceOn: false,
+    voiceVolume: 100,
+    voiceRate: 1,
+    voicePitch: 1,
   };
   /** Channel plan, hop mode and gain, restored on every connect. */
   deviceSettings: DeviceSettings = loadDeviceSettings();

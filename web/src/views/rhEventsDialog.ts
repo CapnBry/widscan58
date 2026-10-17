@@ -1,13 +1,16 @@
 // Detection events options (the gear by Clear): what the event list shows,
-// keeping the screen on while a device is connected, and the lap rules
-// (RhModel.lapRules). Changes apply at once. GPL-3.0-or-later.
+// keeping the screen on while a device is connected, the lap rules
+// (RhModel.lapRules) and voice callouts of lap times. Changes apply at once.
+// GPL-3.0-or-later.
 import type { App, UiSettings } from "../model/app";
 import type { LapRules } from "../model/laps";
 import { LAP_COUNT_MAX, LAP_COUNT_MIN, MIN_LAP_MAX_S } from "../model/rh";
 import { el } from "../util/canvas";
+import { lapCallout, speak, speechSupported } from "../util/speech";
 import { ScreenWake } from "../util/wakeLock";
 
-type Flag = "rhShowCrossings" | "rhShowFastest" | "keepScreenOn";
+type Flag = "rhShowCrossings" | "rhShowFastest" | "keepScreenOn" | "voiceOn";
+type Slider = "voiceVolume" | "voiceRate" | "voicePitch";
 type RuleFlag = "minLapOn" | "fastestOn";
 type RuleValue = "minLapS" | "count";
 
@@ -16,11 +19,22 @@ export class RhEventsDialog {
   private boxes = new Map<Flag, HTMLInputElement>();
   private rules: { flag: RuleFlag; value: RuleValue; box: HTMLInputElement; input: HTMLInputElement }[] = [];
   private showFastest!: HTMLLabelElement;
+  private sliders: { key: Slider; input: HTMLInputElement; out: HTMLElement; fmt: (v: number) => string }[] = [];
+  private voiceControls = el("div", { class: "voice-controls" });
 
   constructor(private app: App) {
     const closeBtn = el("button", { class: "primary", autofocus: "" }, "Close");
     closeBtn.onclick = () => this.el.close();
     const wake = ScreenWake.supported();
+    const voice = speechSupported();
+    const testBtn = el("button", { title: "Speak a callout for the selected seat" }, "Test");
+    testBtn.onclick = () => this.testCallout();
+    this.voiceControls.append(
+      this.slider("voiceVolume", "Volume", 0, 100, 1, (v) => `${v}`),
+      this.slider("voiceRate", "Rate", 0.1, 2, 0.1, (v) => `${v.toFixed(1)}×`),
+      this.slider("voicePitch", "Pitch", 0, 2, 0.1, (v) => `${v.toFixed(1)}×`),
+      el("div", { class: "voice-test" }, testBtn),
+    );
     this.el = el(
       "dialog",
       { class: "options-dialog" },
@@ -37,14 +51,48 @@ export class RhEventsDialog {
       el("h3", {}, "Lap processing"),
       this.rule("minLapOn", "minLapS", "Minimum lap time", "s", 0, MIN_LAP_MAX_S, "Ignore passes sooner than this after the last one."),
       this.rule("fastestOn", "count", "Fastest consecutive laps", "laps", LAP_COUNT_MIN, LAP_COUNT_MAX, "Each seat's fastest run of this many laps."),
+      el("h3", {}, "Voice callouts"),
+      this.option("voiceOn", "Announce laps", "Each lap's channel and time, e.g. “R4 13.7”.", !voice),
+      voice ? this.voiceControls : el("div", { class: "options-error" }, "Speech is not available in this browser."),
       el("div", { class: "flash-buttons" }, closeBtn),
     );
+    this.boxes.get("voiceOn")!.addEventListener("change", () => this.syncVoice());
   }
 
   open() {
     for (const [k, box] of this.boxes) box.checked = this.app.settings[k];
     this.syncRules();
+    this.syncVoice();
     this.el.showModal();
+  }
+
+  private syncVoice() {
+    this.voiceControls.hidden = !this.app.settings.voiceOn;
+    for (const { key, input, out, fmt } of this.sliders) {
+      input.value = String(this.app.settings[key]);
+      out.textContent = fmt(this.app.settings[key]);
+    }
+  }
+
+  private slider(key: Slider, label: string, lo: number, hi: number, step: number, fmt: (v: number) => string) {
+    const input = el("input", { type: "range", min: String(lo), max: String(hi), step: String(step), "aria-label": label }) as HTMLInputElement;
+    const out = el("span", { class: "slider-value" });
+    input.oninput = () => {
+      const v = Number(input.value);
+      this.app.settings[key] = v;
+      out.textContent = fmt(v);
+      this.app.changed();
+    };
+    this.sliders.push({ key, input, out, fmt });
+    return el("label", { class: "slider" }, el("span", {}, label), input, out);
+  }
+
+  /** The selected seat's channel (or the first one on) and a made-up lap. */
+  private testCallout() {
+    const seats = this.app.rh.seats;
+    const s = seats.find((x) => x.index === this.app.settings.selected && x.channel) ?? seats.find((x) => x.channel);
+    const lapS = 10 + Math.random() * 20;
+    speak(lapCallout(s?.channel ?? "R1", lapS), voiceSettings(this.app.settings));
   }
 
   private syncRules() {
@@ -106,4 +154,8 @@ export class RhEventsDialog {
       el("span", { class: "rule-value" }, input, ` ${unit}`),
     );
   }
+}
+
+export function voiceSettings(s: UiSettings) {
+  return { volume: s.voiceVolume, rate: s.voiceRate, pitch: s.voicePitch };
 }

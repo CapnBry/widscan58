@@ -2,10 +2,12 @@
 // detection events, and the receiver settings this mode allows.
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
+import type { FastestRun } from "../model/laps";
 import { RH_SEATS, type RhSeat } from "../model/rh";
 import { levelDb, type RhMetric } from "../proto/rh";
 import { axes, channelColor, drawGrid, el, prepare, theme } from "../util/canvas";
 import { ChannelPlanDialog } from "./channelPlanDialog";
+import { RhEventsDialog } from "./rhEventsDialog";
 
 const fmtLevel = (v: number | null, m: RhMetric) =>
   v === null ? "—" : `${v} (${levelDb(v, m).toFixed(1)} ${m === "RSSI" ? "dBFS" : "dB"})`;
@@ -144,13 +146,18 @@ export class RhSeats implements View {
     t.fill.style.background = s.crossing ? theme().good : channelColor(s.index);
     t.enterMark.style.left = pos(s.enter);
     t.exitMark.style.left = pos(s.exit);
-    const rows: [string, string][] = [
-      ["laps", `${s.laps}`],
-      ["last lap", s.lastLapS === null ? "—" : `${s.lastLapS.toFixed(3)} s`],
+    const f = s.laps.fastest;
+    const lr = this.app.rh.lapRules;
+    const rows: [string, string, string?][] = [
+      ["laps", `${s.laps.passes}`],
+      ["last lap", s.laps.lastLapS === null ? "—" : `${s.laps.lastLapS.toFixed(3)} s`],
+      ...(lr.fastestOn
+        ? [[`fastest ${lr.count}`, f ? `${f.totalS.toFixed(3)} s (${(f.totalS / f.laps.length).toFixed(3)})` : "—", f ? lapList(f) : undefined] as [string, string, string?]]
+        : []),
       ["pass peak", s.passPeak === null ? "—" : `${s.passPeak}`],
       ["peak / nadir", s.nodePeak === null ? "—" : `${s.nodePeak} / ${s.nodeNadir ?? "—"}`],
     ];
-    t.kv.replaceChildren(...rows.flatMap(([k, v]) => [el("span", {}, k), el("span", {}, v)]));
+    t.kv.replaceChildren(...rows.flatMap(([k, v, title]) => [el("span", {}, k), el("span", title ? { title } : {}, v)]));
     t.root.title = `EnterAt ${fmtLevel(s.enter, m)}, ExitAt ${fmtLevel(s.exit, m)}`;
     // Leave the inputs alone while they are being edited.
     if (document.activeElement !== t.enter) t.enter.value = String(s.enter);
@@ -278,47 +285,50 @@ export class RhGraph implements View {
 export class RhEvents implements View {
   el: HTMLElement;
   private list = el("div", { class: "rh-events" });
-  private showCrossings: HTMLInputElement;
-  private shown = -1;
+  private shown = "";
 
   constructor(private app: App) {
     const clear = el("button", { title: "Clear the events and lap counts" }, "Clear");
     clear.onclick = () => app.rh.clearEvents();
-    this.showCrossings = el("input", { type: "checkbox" }) as HTMLInputElement;
-    this.showCrossings.onchange = () => {
-      this.shown = -1;
-      app.store.touch();
-    };
+    const dialog = new RhEventsDialog(app);
+    document.body.append(dialog.el);
+    const gear = el("button", { class: "icon", title: "Options", "aria-label": "Options" });
+    gear.innerHTML = GEAR_SVG;
+    gear.onclick = () => dialog.open();
     this.el = el(
       "section",
       { class: "card span-4" },
-      el("h2", {}, "Detection events", el("span", { class: "tools" }, el("label", {}, this.showCrossings, " enter/exit"), clear)),
+      el("h2", {}, "Detection events", el("span", { class: "tools" }, clear, gear)),
       this.list,
     );
   }
 
   render() {
     const rh = this.app.rh;
-    const key = rh.events.length * 2 + (this.showCrossings.checked ? 1 : 0);
+    const { rhShowCrossings, rhShowFastest } = this.app.settings;
+    const key = `${rh.events.length} ${rhShowCrossings} ${rhShowFastest}`;
     if (key === this.shown) return;
     this.shown = key;
     const t0 = performance.timeOrigin + this.app.store.t0;
     const rows: HTMLElement[] = [];
     for (let j = rh.events.length - 1; j >= 0 && rows.length < 200; j--) {
       const e = rh.events[j];
-      if (e.kind !== "pass" && !this.showCrossings.checked) continue;
+      if ((e.kind === "enter" || e.kind === "exit") && !rhShowCrossings) continue;
+      if (e.kind === "fastest" && !rhShowFastest) continue;
       const seat = rh.seats[e.seat];
       const time = new Date(t0 + e.t * 1000).toLocaleTimeString([], { hour12: false }) + `.${String(Math.floor((e.t * 1000) % 1000)).padStart(3, "0")}`;
       const what =
         e.kind === "pass"
-          ? `pass${e.lapS !== undefined ? ` · lap ${e.lapS.toFixed(3)} s` : ""}${e.peak ? ` · peak ${e.peak}` : ""}`
-          : e.kind === "enter"
+          ? `pass${e.ignoredS !== undefined ? ` · ignored (${e.ignoredS.toFixed(3)} s)` : e.lapS !== undefined ? ` · lap ${e.lapS.toFixed(3)} s` : ""}${e.peak ? ` · peak ${e.peak}` : ""}`
+          : e.kind === "fastest" && e.fastest
+            ? `fastest ${e.fastest.laps.length} · ${e.fastest.totalS.toFixed(3)} s${e.previous ? ` (was ${e.previous.totalS.toFixed(3)} s)` : ""}`
+            : e.kind === "enter"
             ? `enter · ${e.level ?? ""}`
             : `exit · ${e.level ?? ""}`;
       rows.push(
         el(
           "div",
-          { class: `rh-event ${e.kind}` },
+          { class: `rh-event ${e.kind}${e.ignoredS !== undefined ? " ignored" : ""}`, ...(e.fastest ? { title: lapList(e.fastest) } : {}) },
           el("span", { class: "muted" }, time),
           el("span", {}, el("i", { class: "key", style: `background:${channelColor(e.seat)}` }), `${e.seat + 1} ${seat.channel ?? ""}`),
           el("span", {}, what),
@@ -394,4 +404,15 @@ export class RhSettings implements View {
     const st = this.app.device?.rh?.stats;
     this.stats.textContent = st ? `Link: ${st.reads} reads, ${st.writes} writes, ${st.errors} failed reads` : "";
   }
+}
+
+// A gear (cog with 8 teeth), in the text colour.
+const GEAR_SVG =
+  '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<circle cx="12" cy="12" r="3"/>' +
+  '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>' +
+  "</svg>";
+
+function lapList(f: FastestRun): string {
+  return f.laps.map((l) => `${l.toFixed(3)} s`).join(" · ");
 }

@@ -18,6 +18,9 @@ export interface UiSettings {
   dbMin: number;
   dbMax: number;
   uiMode: "monitor" | "rh"; // which protocol and page the UI asks the device for
+  rhShowCrossings: boolean; // detection events: list enters and exits
+  rhShowFastest: boolean; // detection events: list new fastest runs
+  keepScreenOn: boolean; // screen wake lock while a device is connected
 }
 
 export class App {
@@ -32,6 +35,9 @@ export class App {
     dbMin: -85,
     dbMax: -20,
     uiMode: "monitor",
+    rhShowCrossings: false,
+    rhShowFastest: true,
+    keepScreenOn: false,
   };
   /** Channel plan, hop mode and gain, restored on every connect. */
   deviceSettings: DeviceSettings = loadDeviceSettings();

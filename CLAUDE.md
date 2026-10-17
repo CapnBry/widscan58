@@ -277,7 +277,20 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   EnterAt/ExitAt (editable, "now" = average of the last second, kept in
   localStorage and written on connect; a metric change leaves them as they
   are), a level graph with passes, the detection events with lap times, and
-  the receiver settings this mode allows.
+  the receiver settings this mode allows. Laps (`web/src/model/laps.ts`): a
+  pass under the minimum lap (8 s) after the last counted one is listed as
+  ignored, and each seat keeps its fastest 3 consecutive laps (tile, and an
+  event row for each new record). Clear, a seat's channel change, a device
+  restart and a reconnect break a run (no lap across them); only Clear drops
+  the fastest. The gear by Clear opens the events options
+  (`views/rhEventsDialog.ts`). Display (saved in `UiSettings`): list
+  enter/exit events, list new fastest runs (the tiles show them either way),
+  and Keep screen on (a screen wake lock while any device is connected,
+  `util/wakeLock.ts`; greyed out without `navigator.wakeLock`). Lap
+  processing (`RhModel.lapRules`, saved with the thresholds; a change
+  recomputes from the passes since Clear): minimum lap on/off and 0–999 s,
+  fastest consecutive laps on/off and 2–99 laps (off: no tile row, no
+  records).
   The page takes the metric and receiver settings from the device (`CONFIG?`)
   and never sets them on connect; Receiver (gain, LO plan, FFT size, output
   value, output filter) → Save sends `CONFIG SAVE`, Reset `CONFIG RESET`. The

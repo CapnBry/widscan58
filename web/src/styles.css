@@ -171,7 +171,7 @@ header.top .actions button { white-space: nowrap; }
 .dot.sim { background: var(--warning); }
 .dot.err { background: var(--critical); }
 
-.flash-dialog, .plan-dialog {
+.flash-dialog, .plan-dialog, .options-dialog {
   width: min(560px, calc(100vw - 32px));
   background: var(--surface);
   color: var(--ink);
@@ -179,8 +179,8 @@ header.top .actions button { white-space: nowrap; }
   border-radius: 10px;
   padding: 16px 18px;
 }
-.flash-dialog::backdrop, .plan-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
-.flash-dialog h2, .plan-dialog h2 { font-size: 15px; margin: 0 0 8px; }
+.flash-dialog::backdrop, .plan-dialog::backdrop, .options-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.flash-dialog h2, .plan-dialog h2, .options-dialog h2 { font-size: 15px; margin: 0 0 8px; }
 .flash-dialog p, .plan-dialog p { margin: 0 0 8px; color: var(--ink-2); }
 .flash-dialog ol { margin: 0 0 12px; padding-left: 20px; color: var(--ink-2); }
 .flash-dialog li { margin-bottom: 6px; }
@@ -217,6 +217,17 @@ header.top .actions button { white-space: nowrap; }
 }
 .flash-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .plan-dialog { width: min(680px, calc(100vw - 32px)); }
+.options-dialog { width: min(400px, calc(100vw - 32px)); }
+.options-dialog h3 { font-size: 11px; margin: 12px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.options-dialog .option { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; cursor: pointer; }
+.options-dialog .option input { margin-top: 2px; }
+.options-dialog .option small { display: block; font-size: 11px; color: var(--muted); }
+.options-dialog .option.disabled { cursor: default; color: var(--muted); }
+.options-dialog .rule { display: flex; align-items: flex-start; gap: 8px; }
+.options-dialog .rule .option { flex: 1; }
+.options-dialog .rule-value { padding-top: 4px; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
+.options-dialog .rule-value input { padding: 2px 4px; text-align: right; font-variant-numeric: tabular-nums; }
+button.icon { display: inline-flex; align-items: center; justify-content: center; padding-left: 6px; padding-right: 6px; }
 /* Grid view (narrow screens): fade an edge while there is more to scroll to. */
 .plan-scroll-wrap { position: relative; }
 .plan-scroll-wrap::before, .plan-scroll-wrap::after {
@@ -408,6 +419,8 @@ main.shared { padding-top: 0; }
 .rh-event .key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 .rh-event.enter, .rh-event.exit { color: var(--muted); }
 .rh-event.pass span:last-child { color: var(--ink); }
+.rh-event.pass.ignored span:last-child { color: var(--muted); }
+.rh-event.fastest span:last-child { color: var(--good); font-weight: 600; }
 
 /* Charts */
 .chart { position: relative; width: 100%; }

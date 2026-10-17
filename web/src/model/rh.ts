@@ -3,13 +3,15 @@
 // queued peak/nadir), and turns that into levels, crossings and passes for
 // the views. Seat frequencies come from the shared channel plan; thresholds
 // are kept in localStorage and written on every start, as the server writes
-// its profile's (a metric change leaves them as they are). The receiver settings and the level metric
+// its profile's (a metric change leaves them as they are), and so are the lap
+// rules (fastest run length, minimum lap; laps.ts). The receiver settings and the level metric
 // are the device's own (its saved defaults, CONFIG SAVE). GPL-3.0-or-later.
 import type { Device } from "../serial/device";
 import type { RhLink } from "../serial/rhLink";
 import { Series, type Store } from "./store";
 import { RH, RH_API_MARKER, RH_FREQ_OFF, parseExtremums, parsePassStats, u16, validLevel, type RhMetric } from "../proto/rh";
 import { channelMhz } from "./channelPlan";
+import { DEFAULT_LAP_RULES, LapTracker, type FastestRun, type LapRules } from "./laps";
 
 export const RH_SEATS = 8;
 const POLL_MS = 100; // RotorHazard's RH_UPDATE_INTERVAL
@@ -27,9 +29,7 @@ export interface RhSeat {
   passPeak: number | null;
   crossing: boolean;
   lapId: number | null; // the device's count; null until first read
-  laps: number; // passes seen since the last clear
-  lastPass: number | null; // store.now() seconds
-  lastLapS: number | null; // previous pass to the last one
+  laps: LapTracker; // counted passes, lap times and the fastest run since the last clear
   loopUs: number;
   history: Series; // polled levels (store.now(), code)
   peaks: { t: number; v: number; peak: boolean }[]; // queued extremums from the device
@@ -38,10 +38,13 @@ export interface RhSeat {
 export interface RhEvent {
   t: number; // store.now() seconds
   seat: number;
-  kind: "enter" | "exit" | "pass";
+  kind: "enter" | "exit" | "pass" | "fastest";
   level?: number;
   peak?: number;
   lapS?: number;
+  ignoredS?: number; // pass: ignored, this soon after the previous counted pass
+  fastest?: FastestRun; // fastest: the new record
+  previous?: FastestRun | null; // fastest: the record it beat
 }
 
 interface Thresholds {
@@ -65,6 +68,7 @@ export class RhModel {
   running = false;
   error: string | null = null;
   cycleMs = 0;
+  lapRules: LapRules = { ...DEFAULT_LAP_RULES };
   private thresholds: Thresholds = { enter: Array(RH_SEATS).fill(DEFAULT_ENTER), exit: Array(RH_SEATS).fill(DEFAULT_EXIT) };
   private link: RhLink | null = null;
   private loop: Promise<void> | null = null;
@@ -76,13 +80,14 @@ export class RhModel {
       for (const k of OLD_KEYS) localStorage.removeItem(k);
       const saved = JSON.parse(localStorage.getItem(KEY) ?? "null");
       if (Array.isArray(saved?.thresholds?.enter) && Array.isArray(saved?.thresholds?.exit)) this.thresholds = saved.thresholds;
+      if (saved?.lapRules) this.lapRules = validLapRules({ ...this.lapRules, ...saved.lapRules });
     } catch {
       /* storage unavailable or corrupt */
     }
     for (let j = 0; j < RH_SEATS; j++)
       this.seats.push({
         index: j, channel: null, mhz: 0, enter: 0, exit: 0, level: null, nodePeak: null, nodeNadir: null,
-        passPeak: null, crossing: false, lapId: null, laps: 0, lastPass: null, lastLapS: null, loopUs: 0,
+        passPeak: null, crossing: false, lapId: null, laps: new LapTracker(), loopUs: 0,
         history: new Series(HISTORY_SECONDS * 15), peaks: [],
       });
     this.loadThresholds();
@@ -90,7 +95,7 @@ export class RhModel {
 
   private save() {
     try {
-      localStorage.setItem(KEY, JSON.stringify({ thresholds: this.thresholds }));
+      localStorage.setItem(KEY, JSON.stringify({ thresholds: this.thresholds, lapRules: this.lapRules }));
     } catch {
       /* storage unavailable */
     }
@@ -113,6 +118,7 @@ export class RhModel {
     this.deviceMs = -1;
     for (const s of this.seats) {
       s.lapId = null;
+      s.laps.break(); // passes while disconnected are missed
       s.history.clear();
       s.peaks = [];
       s.level = s.nodePeak = s.nodeNadir = s.passPeak = null;
@@ -191,6 +197,7 @@ export class RhModel {
     for (const s of this.seats) {
       const name = channels[s.index] ?? null;
       const mhz = name ? channelMhz(name) ?? 0 : 0;
+      if ((mhz ? name : null) !== s.channel) s.laps.break(); // another pilot
       s.channel = mhz ? name : null;
       s.mhz = mhz;
       await link.write(RH.WRITE_CURNODE_INDEX, [s.index]);
@@ -238,10 +245,15 @@ export class RhModel {
 
   clearEvents() {
     this.events = [];
-    for (const s of this.seats) {
-      s.laps = 0;
-      s.lastPass = s.lastLapS = null;
-    }
+    for (const s of this.seats) s.laps.clear();
+    this.store.touch();
+  }
+
+  /** Change the lap rules; the seats' laps since the last clear are recomputed (no new events). */
+  setLapRules(patch: Partial<LapRules>) {
+    this.lapRules = validLapRules({ ...this.lapRules, ...patch });
+    this.save();
+    for (const s of this.seats) s.laps.recompute(this.lapRules);
     this.store.touch();
   }
 
@@ -276,7 +288,10 @@ export class RhModel {
       this.store.addLog("info", "RotorHazard: device restarted; setting the seats up again");
       await this.refreshConfig(); // its saved settings, maybe another metric
       await this.writeSeats(this.seats.map((s) => s.channel ?? ""));
-      for (const s of this.seats) s.lapId = null;
+      for (const s of this.seats) {
+        s.lapId = null;
+        s.laps.break(); // passes while it restarted are missed
+      }
     }
     this.deviceMs = ms;
     for (const s of this.seats) {
@@ -308,13 +323,31 @@ export class RhModel {
     }
     if (s.lapId !== null && ps.lapId !== s.lapId) {
       const t = now - ps.msSinceLap / 1000;
-      const lapS = s.lastPass !== null ? t - s.lastPass : undefined;
-      s.lastLapS = lapS ?? null;
-      s.lastPass = t;
-      s.passPeak = validLevel(ps.passPeak) ? ps.passPeak : null;
-      s.laps++;
-      this.addEvent({ t, seat: s.index, kind: "pass", peak: ps.passPeak, lapS });
+      const r = s.laps.pass(t, this.lapRules);
+      if (r.ignored) this.addEvent({ t, seat: s.index, kind: "pass", peak: ps.passPeak, ignoredS: r.sinceS });
+      else {
+        s.passPeak = validLevel(ps.passPeak) ? ps.passPeak : null;
+        this.addEvent({ t, seat: s.index, kind: "pass", peak: ps.passPeak, lapS: r.lapS });
+        if (r.fastest) this.addEvent({ t, seat: s.index, kind: "fastest", fastest: r.fastest, previous: r.previous });
+      }
     }
     s.lapId = ps.lapId;
   }
+}
+
+// The options dialog's limits: 2-99 laps, 0-999 whole seconds.
+export const LAP_COUNT_MIN = 2;
+export const LAP_COUNT_MAX = 99;
+export const MIN_LAP_MAX_S = 999;
+
+function validLapRules(r: LapRules): LapRules {
+  const d = DEFAULT_LAP_RULES;
+  const int = (v: unknown, lo: number, hi: number, def: number) =>
+    typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : def;
+  return {
+    fastestOn: typeof r.fastestOn === "boolean" ? r.fastestOn : d.fastestOn,
+    count: int(r.count, LAP_COUNT_MIN, LAP_COUNT_MAX, d.count),
+    minLapOn: typeof r.minLapOn === "boolean" ? r.minLapOn : d.minLapOn,
+    minLapS: int(r.minLapS, 0, MIN_LAP_MAX_S, d.minLapS),
+  };
 }

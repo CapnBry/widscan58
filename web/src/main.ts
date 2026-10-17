@@ -21,6 +21,7 @@ import { Telemetry, Console } from "./views/debug";
 import { Controls } from "./views/controls";
 import { RawIqView } from "./views/rawiq";
 import { FlashDialog } from "./views/flashDialog";
+import { ScreenWake } from "./util/wakeLock";
 import { RhEvents, RhGraph, RhSeats, RhSettings } from "./views/rh";
 
 const store = new Store();
@@ -210,6 +211,11 @@ document.addEventListener("keydown", (e) => {
 darkSwitch.onchange = () => applyTheme(darkSwitch.checked ? "dark" : "light");
 
 // ---- Connection ---------------------------------------------------------------
+// Keep screen on (detection events options): only while a device is connected.
+const screenWake = new ScreenWake((msg) => store.addLog("error", msg));
+const syncWake = () => screenWake.set(app.settings.keepScreenOn && !!app.device);
+store.subscribe(syncWake); // the option changing (app.changed touches the store)
+
 function setState(state: "off" | "ok" | "sim" | "err", text: string) {
   dot.className = `dot ${state === "off" ? "" : state}`;
   connText.textContent = connText.title = text; // the title shows it in full when cut short
@@ -219,6 +225,7 @@ function setState(state: "off" | "ok" | "sim" | "err", text: string) {
   simBtn.disabled = connected;
   replayBtn.disabled = connected;
   recordBtn.disabled = !connected || app.readOnly;
+  syncWake();
 }
 
 function updateBanner() {

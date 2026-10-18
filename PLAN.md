@@ -956,6 +956,45 @@ wandered ±10 dB with people moving). Data and scripts: `tmp/gain-sweep/`,
   headroom is smaller than measured here. Repeat the sweep with the antenna
   on before relying on it.
 
+**Power calibration (2026-10-18).** dBFS → dBm for the web UI's power meter
+mode, with `tools/powercal.py`: a SmartAudio VTX set over Betaflight MSP,
+VTX → u.FL pigtail → 30 dB pad → SMA adapter → (ImmersionRC RF Power Meter v2
+| C5), three runs (meter, C5, meter), 8 channels × pit/25/100/400 mW, 8 s
+steps; C5 at `MODE SINGLE`, `WIN 15000000 15000000`, gains 0–60 in steps of
+3. Data: `tmp/powercal/` (not tracked).
+- Meter over USB (CDC, CR LF, `OK` after each reply): `V`, `D` (average dBm),
+  `E` (peak), `F<idx>` (7–15 = 5600–6000 MHz; the `F` query always answers
+  35 on firmware 1.0.9, the set works). Its floor at 5.8 GHz: −24 dBm, so
+  25 mW through 30 dB (R5–R8 about −20 to −22 dBm) is at its floor.
+  It stayed on 380 s while polled (auto shutdown is 5 min).
+- Betaflight drops pit mode sent with a frequency change, and a SmartAudio
+  VTX still busy loses the next setting: resend until `MSP_VTX_CONFIG`
+  reports it. The VTX's labels: 25 → 100 mW is ~3 dB, MAX ~32 dBm (1.6 W).
+  Its output falls ~9 dB from R1 to R8 (repeatable back to back).
+- The C5 is linear: the 100 → 400 mW step reads the same as on the meter
+  within ~0.3 dB, and each step reads the same at every gain 0–24 (inputs
+  −43 to −4 dBFS). At gain 0 the ±15 MHz window's noise is ~−55 dBFS
+  (~−32 dBm at the input); −5.4 dBm read −30 dBFS, no compression. 400 mW
+  on R1 clips from gain 33.
+- Gain vs gain 0 (from the C5 alone, 400 or 100 mW): ~1 dB per index, but
+  15 → 18 is +3.6 dB on R1 rising to +7.2 dB on R8; e.g. gain 12 is +10.4 to
+  +10.9 dB, gain 24 +23.1 (R1) to +26.6 (R6).
+- Offset at gain 0 (dBm at the C5's input − dBFS): R1 ~25.1, R2 24.6, R3
+  24.2, R4 22.7, ±1.5 dB (the mean of two C5 connections, which differed by
+  1–2.7 dB). R5–R8 not determined: their meter readings moved 2–6.6 dB
+  between connections. Moving the cable chain by hand swung R7 at 400 mW
+  between −9.2 and −22.9 dBm on the meter; the VTX's u.FL (before the pad,
+  so it changes the VTX's load) is the likely cause. Repeat with the u.FL
+  fixed in place and the SMAs tightened, swapping only at the far SMA.
+- Check through the web UI's numbers, later the same day (C5 reconnected,
+  30 dB, R1, gain 0): 25 / 100 / 400 mW read 15.3 / 17.0 / 22.8 dBm against
+  the meter's earlier 15.2 / 17.8 / 24.0–24.4 (+0.1, −0.8, −1.2…−1.6 dB).
+  The VTX's "100" and "400 mW" are really ~60 and ~250–280 mW. R2–R6 read
+  within 1 dB of R1 at each level, where the meter showed the VTX falling up
+  to 9 dB toward R8: those channels need the repeat above.
+- One gain 12 setting in the C5 run clipped for all its 30 frames although
+  the frames reported gain 12 (+~24 dB). 600 gain changes did not repeat it.
+
 **Image rejection vs IQ calibration on the C5 (2026-10-10).** esp-sdr 77ffc12 stops redoing the (transmitting) loopback IQ calibration on retune and keeps the startup IQ. Tested with an analog VTX at low power on R7 and R1, antenna on the C5, gain 66, `RECALMODE EVERY`; LO stepped so the VTX sat at ±4…±36 MHz, 8 × 9180-sample captures per point, image rejection = VTX power in ±4 MHz around its offset vs the mirrored band (floor subtracted). The VTX was only ~23–28 dB over the floor in that band, so values above ~30 dB are floor-limited.
 - Per-LO IQ (current): R7 27–34 dB, R1 24–33 dB.
 - Startup IQ only (esp-sdr): ~20 dB at every offset at both channels (R7 18–21, R1 20–22). The startup words (+222: `f5 04 f4 04 f0 07 f0 06 ee 09 ec 0d e9 11`) are far from the per-LO ones at 5.6–5.9 GHz (`00 12 … 01 12`), which barely change across the band. In pair mode R7's image lands 1 MHz from R8 (and R1's from R2), so this would put a ~−20 dBc ghost on the partner channel.

@@ -1,0 +1,111 @@
+// Power meter mode: channel power in dBm from the C5's dBFS, with the board's
+// calibration and the user's attenuator. GPL-3.0-or-later.
+import type { Series } from "./store";
+
+/** The scan the calibration was measured with (tools/powercal.py): one LO
+ *  per channel, manual gain 0, RSSI window +/- 15 MHz, no display spectrum. */
+export const POWER_GAIN = 0;
+export const POWER_WIN_HZ = 15000000;
+export const powerCommands = (usableHz: number) => [
+  "MODE SINGLE",
+  `GAIN MANUAL ${POWER_GAIN}`,
+  `WIN ${POWER_WIN_HZ} ${POWER_WIN_HZ}`,
+  "METRICS FULL",
+  `SPEC 0 256 ${usableHz} MAX`,
+];
+
+/** Monitor mode's windows and spectrum per profile, put back on leaving
+ *  power meter mode when no snapshot of the user's own is at hand. */
+export const MONITOR_DEFAULTS: Record<string, { rssiHz: number; searchHz: number; spec: string }> = {
+  "c5-race": { rssiHz: 5000000, searchHz: 12000000, spec: "SPEC 4 256 40000000 MAX" },
+  "s3-race24": { rssiHz: 1410000, searchHz: 3390000, spec: "SPEC 4 256 11300000 MAX" },
+};
+
+/** dBm at the board's RF input minus dBFS at POWER_GAIN, by channel MHz.
+ *  Provisional (2026-10-18, PLAN.md "Power calibration"): R1-R4 only, about
+ *  +/- 1.5 dB, from an ImmersionRC RF Power Meter v2 through a cable chain
+ *  that did not repeat well; R5-R8 could not be measured. Above the last
+ *  point the offset stays at its value and the reading counts as uncalibrated. */
+export const CALIBRATION: Record<string, [number, number][]> = {
+  "c5-race": [
+    [5658, 25.1],
+    [5695, 24.6],
+    [5732, 24.2],
+    [5769, 22.7],
+  ],
+};
+
+/** Measured range at the board's input: the noise floor in the window is
+ *  about -32 dBm; the strongest input measured without compression -5.4 dBm. */
+export const INPUT_MAX_DBM = -5;
+
+export interface Offset {
+  db: number;
+  calibrated: boolean; // within the measured frequencies
+}
+
+export function calOffset(profile: string, mhz: number): Offset | null {
+  const pts = CALIBRATION[profile];
+  if (!pts?.length) return null;
+  const [lo, hi] = [pts[0][0], pts[pts.length - 1][0]];
+  if (mhz <= lo) return { db: pts[0][1], calibrated: mhz >= lo - 10 };
+  if (mhz >= hi) return { db: pts[pts.length - 1][1], calibrated: mhz <= hi + 10 };
+  for (let j = 1; j < pts.length; j++) {
+    const [f0, a] = pts[j - 1];
+    const [f1, b] = pts[j];
+    if (mhz <= f1) return { db: a + ((b - a) * (mhz - f0)) / (f1 - f0), calibrated: true };
+  }
+  return null;
+}
+
+/** Smoothing choices (seconds of averaging; 0: the latest hop). */
+export const SMOOTHING: [number, string][] = [
+  [0, "Off"],
+  [0.1, "0.1 s"],
+  [0.5, "0.5 s"],
+  [1, "1 s"],
+  [3, "3 s"],
+];
+
+/** Mean power (linear) of a dBFS series over the last `seconds`, in dBFS;
+ *  the newest value when seconds is 0 or nothing falls in the window. */
+export function meanDb(series: Series, now: number, seconds: number): number | null {
+  if (!series.size) return null;
+  const newest = series.v[(series.head - 1 + series.capacity) % series.capacity];
+  if (seconds <= 0) return newest;
+  let sum = 0;
+  let n = 0;
+  series.forEach((t, v) => {
+    if (now - t <= seconds) {
+      sum += 10 ** (v / 10);
+      n++;
+    }
+  });
+  return n ? 10 * Math.log10(sum / n) : newest;
+}
+
+/** Signal power without the window's noise, dBFS; null within 3 dB of it. */
+export function lessNoise(db: number, noiseDb: number | null): number | null {
+  if (noiseDb === null) return db;
+  const p = 10 ** (db / 10) - 10 ** (noiseDb / 10);
+  return p > 0 && db - noiseDb >= 3 ? 10 * Math.log10(p) : null;
+}
+
+export function formatMw(dbm: number): string {
+  const mw = 10 ** (dbm / 10);
+  if (mw >= 1000) return `${(mw / 1000).toFixed(mw >= 10000 ? 1 : 2)} W`;
+  if (mw >= 100) return `${mw.toFixed(0)} mW`;
+  if (mw >= 10) return `${mw.toFixed(1)} mW`;
+  if (mw >= 1) return `${mw.toFixed(2)} mW`;
+  return `${mw.toFixed(3)} mW`;
+}
+
+/** Attenuator sizes for the warning table: the board's input stays at or
+ *  below INPUT_MAX_DBM with 2 dB to spare for a VTX above its label. The
+ *  first attenuator takes nearly all the power: rated at least twice it. */
+export const ATTENUATOR_TABLE: { vtx: string; dbm: number; attenDb: number; rating: string }[] = [
+  { vtx: "25 mW", dbm: 14, attenDb: 30, rating: "0.5 W" },
+  { vtx: "500 mW", dbm: 27, attenDb: 40, rating: "1 W" },
+  { vtx: "1 W", dbm: 30, attenDb: 40, rating: "2 W" },
+  { vtx: "2 W", dbm: 33, attenDb: 40, rating: "5 W" },
+];

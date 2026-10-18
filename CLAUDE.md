@@ -34,6 +34,7 @@ keep that for anything new that is copied or derived from it.
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
 | `tools/ttyfix.py` | Leaves a serial port at VMIN=1 after pyserial use (see the Web UI "device has been lost" note). |
 | `tools/rh_check.py` | Runs RotorHazard's own node interface code (from `ref/RotorHazard`) against the board: discovery, seats, polling, passes, comm errors. |
+| `tools/powercal.py` | Power calibration (dBFS → dBm): sweeps a VTX (Betaflight MSP) over channels and power levels on an ImmersionRC RF Power Meter v2 and on the C5 at each gain, then fits the offset per gain and channel. |
 | `tools/gen_twiddle.py` | Generates `firmware/src/dsp/fft_twiddle_q15.h` for the radix-4 FFT. |
 | `.github/workflows/` | Builds firmware + web UI and publishes to GitHub Pages (https://capnbry.github.io/widscan58/). Only `esp32c5` firmware is published (`FW_ENVS`). |
 | `images/` | Screenshots used by README.md. |
@@ -292,10 +293,10 @@ npm install
 npm run dev                         # http://localhost:5173 (Web Serial: Chrome/Edge, Firefox, Android Chrome)
 ```
 
-- **Menu** (☰, top left): Monitor mode / RotorHazard mode, GPIO Configure,
+- **Menu** (☰, top left): Monitor mode / RotorHazard mode / Power meter mode, GPIO Configure,
   and the dark-mode switch. The choice is remembered and applied on every
   connect (`PROTOCOL?`, then `PROTOCOL MONITOR|RH`; firmware without
-  `PROTOCOL` is monitor only). GPIO Configure (`views/gpioDialog.ts`,
+  `PROTOCOL` is monitor only; power meter mode runs the monitor protocol). GPIO Configure (`views/gpioDialog.ts`,
   `model/gpio.ts`) shows each GPIO's setting (not its live level) as Not
   used / Low / High; a click sends `GPIO <n> …` (in effect at once) and
   reads `GPIO?` back. Pins whose setting differs from the saved one show
@@ -334,6 +335,22 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   output filter shows Median for firmware without `level_filter` in `CONFIG?`.
   Seats take the channels of the shared channel plan in frequency order (Edit
   channels). Disconnect before a RotorHazard server opens the port.
+- **Power meter mode** (`web/src/model/power.ts`, `views/power.ts`): the
+  power at a VTX's connector, through an attenuator, in dBm and mW per
+  channel. It sets the scan the calibration was made with (`MODE SINGLE`,
+  `GAIN MANUAL 0`, `WIN 15000000 15000000`, `SPEC 0 …`) and puts monitor
+  mode's windows and spectrum back on leaving (the channel plan, LO mode and
+  gain come back with the stored device settings). Per channel: the mean
+  power over the smoothing time (Off, 0.1–3 s, all channels; `UiSettings`),
+  less the window's noise, plus the calibration offset (`CALIBRATION`, dBm at
+  the board's input − dBFS at gain 0, by MHz) and the attenuation the user
+  enters. OVER while the ADC clips, "over range" above −5 dBm at the input,
+  "uncalibrated" outside the calibrated frequencies. Only `c5-race` has a
+  calibration, and it is provisional: R1–R4 only, about ±1.5 dB (PLAN.md,
+  "Power calibration"). The page opens with the attenuator warning and size
+  table (`ATTENUATOR_TABLE`); below the channel cards a yellow note says the
+  mode is still in development and needs further calibration (keep it short,
+  without numbers). `tools/powercal.py` measures the offsets.
 - **Installable / offline** (PWA): `public/manifest.webmanifest`, icons from
   `public/icon.svg` and `icon-maskable.svg` (PNGs made with `rsvg-convert`,
   committed), `sw.js` and `src/util/pwa.ts`. The build (`vite.config.ts`,

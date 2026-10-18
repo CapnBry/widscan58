@@ -17,7 +17,7 @@ export interface UiSettings {
   historySeconds: number;
   dbMin: number;
   dbMax: number;
-  uiMode: "monitor" | "rh"; // which protocol and page the UI asks the device for
+  uiMode: "monitor" | "rh" | "power"; // which page; power meter mode runs the monitor protocol
   rhShowCrossings: boolean; // detection events: list enters and exits
   rhShowFastest: boolean; // detection events: list new fastest runs
   keepScreenOn: boolean; // screen wake lock while a device is connected
@@ -25,6 +25,8 @@ export interface UiSettings {
   voiceVolume: number; // 0-100
   voiceRate: number; // 0.1-2
   voicePitch: number; // 0-2
+  powerAttenDb: number; // power meter mode: attenuation between the VTX and the board
+  powerSmoothS: number; // power meter mode: averaging, seconds (0: the latest hop)
 }
 
 export class App {
@@ -46,6 +48,8 @@ export class App {
     voiceVolume: 100,
     voiceRate: 1,
     voicePitch: 1,
+    powerAttenDb: 30,
+    powerSmoothS: 0.5,
   };
   /** Channel plan, hop mode and gain, restored on every connect. */
   deviceSettings: DeviceSettings = loadDeviceSettings();

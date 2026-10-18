@@ -179,15 +179,16 @@ export class Console implements View {
       else if (e.key === "ArrowDown" && this.hpos < this.history.length) input.value = this.history[++this.hpos] ?? "";
     };
     const quick = el("span", { class: "tools" });
-    // RotorHazard mode allows a few of our commands only (rh_allowed in commands.c).
+    // RotorHazard mode allows a few of our commands only (rh_allowed in commands.c);
+    // power meter mode runs the monitor protocol.
     for (const [cmd, modes] of [
-      ["INFO", "monitor rh"],
-      ["STATUS?", "monitor"],
+      ["INFO", "monitor rh power"],
+      ["STATUS?", "monitor power"],
       ["CONFIG?", "rh"],
-      ["TIMING?", "monitor"],
+      ["TIMING?", "monitor power"],
       ["SPURS?", "monitor"],
       ["METRICS?", "rh"],
-      ["GAIN?", "monitor rh"],
+      ["GAIN?", "monitor rh power"],
     ]) {
       const b = el("button", { "data-modes": modes }, cmd);
       b.onclick = () => void app.send(cmd);

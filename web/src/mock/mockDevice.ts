@@ -111,6 +111,8 @@ export class MockTransport implements Transport {
   private running = true;
   private gainManual = true;
   private gain = 45;
+  private rssiHz = 0; // WIN; the profile's until set
+  private searchHz = 0;
   private specEvery = 4;
   private specBins = 256;
   private specSpanHz = 0;
@@ -161,6 +163,8 @@ export class MockTransport implements Transport {
   constructor(target: SimTarget = "c5") {
     this.profile = target === "s3" ? race24 : c5race;
     this.channels = this.profile.channels;
+    this.rssiHz = this.profile.rssiHz;
+    this.searchHz = this.profile.searchHz;
     this.tskipDefault = this.tskip = target === "s3" ? 7 : 3;
     const reserved = target === "s3" ? [19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] : [13, 14, 16, 17, 18, 20, 21, 22];
     this.gpioSaved = Array.from({ length: target === "s3" ? 49 : 29 }, (_, n) => (reserved.includes(n) ? "x" : "-"));
@@ -231,8 +235,8 @@ export class MockTransport implements Transport {
             rate_hz: p.rateHz,
             usable_hz: p.usableHz,
             passband_hz: p.passbandHz,
-            rssi_hz: p.rssiHz,
-            search_hz: p.searchHz,
+            rssi_hz: this.rssiHz,
+            search_hz: this.searchHz,
             channels: this.channels.map((c, id) => ({ id, name: c.name, khz: c.khz })),
           })}\n`,
         );
@@ -294,8 +298,8 @@ export class MockTransport implements Transport {
             rawiq_max: 16380,
             recal: "ONCE",
             metrics: this.proto === "RH" ? this.rhMetric : this.metricsMode,
-            rssi_hz: p.rssiHz,
-            search_hz: p.searchHz,
+            rssi_hz: this.rssiHz,
+            search_hz: this.searchHz,
             dc_guard: 1,
             ema: this.ema,
             clear_ema: this.clearEma,
@@ -378,7 +382,12 @@ export class MockTransport implements Transport {
         if (parts.length !== 2 || !/^[0-7]$/.test(parts[1])) return this.text("ERR command\n");
         this.tskip = num(1);
         return ok();
-      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "WIN", "SPURS", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
+      case parts[0] === "WIN":
+        if (parts.length !== 3 || !(num(1) > 0 && num(2) >= num(1) && num(2) <= 20e6)) return this.text("ERR command\n");
+        this.rssiHz = num(1);
+        this.searchHz = num(2);
+        return ok();
+      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "SPURS", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
         return ok();
       case line === "REBOOT":
         // Like the firmware: back to defaults, silent in RotorHazard mode.
@@ -387,6 +396,8 @@ export class MockTransport implements Transport {
           this.rx = "";
           this.channels = p.channels;
           this.enabled = (1 << this.channels.length) - 1;
+          this.rssiHz = p.rssiHz;
+          this.searchHz = p.searchHz;
           this.metricsMode = "FULL";
           this.tskip = this.tskipDefault;
           this.gpioActive = [...this.gpioSaved];
@@ -664,8 +675,8 @@ export class MockTransport implements Transport {
       enbwBins: 1.5,
       floorBias: percentileBias(p.segments, 0.2),
       passbandHz: p.passbandHz,
-      rssiHz: p.rssiHz,
-      searchHz: p.searchHz,
+      rssiHz: this.rssiHz,
+      searchHz: this.searchHz,
       signalDb: 6,
       centroidDb: 6,
     };
@@ -673,7 +684,7 @@ export class MockTransport implements Transport {
     const chans = h.ch.map((id, j) => {
       const m = channelMetrics(input, floorBin, h.offsetHz[j]);
       for (const sp of p.spursKhz)
-        if (Math.abs((sp * 1000 - h.loKhz * 1000) - h.offsetHz[j]) <= p.searchHz) m.flags |= CHF.SPUR;
+        if (Math.abs((sp * 1000 - h.loKhz * 1000) - h.offsetHz[j]) <= this.searchHz) m.flags |= CHF.SPUR;
       const lin = 10 ** (m.rssi / 10);
       const st = this.state.get(id) ?? { ema: lin, clear: null };
       st.ema += this.ema * (lin - st.ema);

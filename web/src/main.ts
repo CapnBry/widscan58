@@ -27,6 +27,8 @@ import { registerServiceWorker } from "./util/pwa";
 import { lapCallout, speak } from "./util/speech";
 import { voiceSettings } from "./views/rhEventsDialog";
 import { RhEvents, RhGraph, RhSeats, RhSettings } from "./views/rh";
+import { PowerChannels, PowerWarning } from "./views/power";
+import { MONITOR_DEFAULTS, POWER_WIN_HZ, powerCommands } from "./model/power";
 
 const store = new Store();
 const app = new App(store);
@@ -69,13 +71,15 @@ const simBtn = el("button", {}, "Simulate");
 const replayInput = el("input", { type: "file", accept: ".widscan58", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
 const recordBtn = el("button", { title: "Record the raw device stream to a .widscan58 file" }, "● Record");
-// Menu: the page / device protocol (monitor or RotorHazard), GPIO Configure,
+// Menu: the page / device protocol (monitor, RotorHazard, or power meter on
+// the monitor protocol), GPIO Configure,
 // the theme, and about: the project link and the connected device's firmware
 // version.
 const menuBtn = el("button", { class: "menu-btn", title: "Menu", "aria-haspopup": "true", "aria-expanded": "false" }, "☰");
 const modeItems = {
   monitor: el("button", { class: "menu-item", role: "menuitemradio" }, "Monitor mode"),
   rh: el("button", { class: "menu-item", role: "menuitemradio" }, "RotorHazard mode"),
+  power: el("button", { class: "menu-item", role: "menuitemradio" }, "Power meter mode"),
 };
 const rhNote = el("div", { class: "menu-note" });
 const gpioItem = el("button", { class: "menu-item", role: "menuitem", title: "Pins the device sets at startup" }, "GPIO Configure");
@@ -89,6 +93,7 @@ const menu = el(
   el("div", { class: "menu-label" }, "Mode"),
   modeItems.monitor,
   modeItems.rh,
+  modeItems.power,
   rhNote,
   el("div", { class: "menu-sep" }),
   gpioItem,
@@ -110,7 +115,7 @@ const header = el(
 const sessionRow = el("div", { class: "session-row" }, simBtn, replayBtn, replayInput, recordBtn);
 const banner = el("div", { class: "banner", style: "display:none" });
 
-type Page = "monitor" | "rh" | "both";
+type Page = "monitor" | "rh" | "power" | "both";
 const views: { view: View; page: Page; minMs: number; last: number; drawn: number }[] = [];
 function addView(page: Page, view: View, minMs = 0) {
   views.push({ view, page, minMs, last: 0, drawn: -1 });
@@ -135,18 +140,24 @@ const rhMain = el(
   addView("rh", new RhEvents(app), 200),
   addView("rh", new RhSettings(app), 300),
 );
+const powerMain = el(
+  "main",
+  { class: "power-page" },
+  addView("power", new PowerWarning()),
+  addView("power", new PowerChannels(app), 100),
+);
 const sharedMain = el("main", { class: "shared" }, addView("both", new Console(app, sessionRow), 200));
-document.getElementById("app")!.append(header, banner, monitorMain, rhMain, sharedMain);
+document.getElementById("app")!.append(header, banner, monitorMain, rhMain, powerMain, sharedMain);
 
 // ---- Pages and device protocol ---------------------------------------------------
 // Firmware without the PROTOCOL command is always in monitor mode.
 let legacyFirmware = false;
 function showPage() {
-  const rh = app.settings.uiMode === "rh";
-  monitorMain.style.display = rh ? "none" : "";
-  rhMain.style.display = rh ? "" : "none";
-  modeItems.monitor.setAttribute("aria-checked", String(!rh));
-  modeItems.rh.setAttribute("aria-checked", String(rh));
+  const mode = app.settings.uiMode;
+  monitorMain.style.display = mode === "monitor" ? "" : "none";
+  rhMain.style.display = mode === "rh" ? "" : "none";
+  powerMain.style.display = mode === "power" ? "" : "none";
+  for (const [m, item] of Object.entries(modeItems)) item.setAttribute("aria-checked", String(m === mode));
   const replay = app.readOnly && !!app.device;
   modeItems.rh.disabled = legacyFirmware || replay;
   rhNote.textContent = legacyFirmware
@@ -184,6 +195,8 @@ function startMode(device: Device): Promise<void> {
         device.exitRh();
       } else if (!legacyFirmware) await app.send("PROTOCOL MONITOR");
       await syncDevice(device);
+      if (app.settings.uiMode === "power") await enterPower(device);
+      else await leavePower(device);
     }
     lastData = performance.now();
   };
@@ -198,7 +211,7 @@ function startMode(device: Device): Promise<void> {
   return p;
 }
 
-function setMode(mode: "monitor" | "rh") {
+function setMode(mode: "monitor" | "rh" | "power") {
   closeMenu();
   if (mode === app.settings.uiMode) return;
   app.settings.uiMode = mode;
@@ -208,6 +221,7 @@ function setMode(mode: "monitor" | "rh") {
 }
 modeItems.monitor.onclick = () => setMode("monitor");
 modeItems.rh.onclick = () => setMode("rh");
+modeItems.power.onclick = () => setMode("power");
 const gpioDialog = new GpioDialog(app);
 document.body.append(gpioDialog.el);
 gpioItem.onclick = () => {
@@ -299,6 +313,38 @@ async function syncDevice(device: Device) {
       store.addLog("error", (e as Error).message);
     }
   }
+}
+
+// Power meter mode runs the monitor protocol with the scan its calibration
+// was made with (model/power.ts). Monitor mode's own windows and spectrum are
+// kept here and put back on leaving it; the channel plan, LO mode and gain
+// come back with restoreDevice.
+let monitorScan: { win: string; spec: string } | null = null;
+const powerScan = (st: typeof store.status) => !!st && st.rssi_hz === POWER_WIN_HZ && st.spec_every === 0;
+async function sendAll(device: Device, cmds: string[]) {
+  for (const cmd of cmds) {
+    store.addLog("tx", cmd);
+    try {
+      await device.command(cmd);
+    } catch (e) {
+      store.addLog("error", (e as Error).message);
+    }
+  }
+}
+async function enterPower(device: Device) {
+  const st = store.status;
+  if (st && !powerScan(st))
+    monitorScan = {
+      win: `WIN ${st.rssi_hz} ${st.search_hz}`,
+      spec: `SPEC ${st.spec_every} ${st.spec_bins} ${st.spec_span_hz} ${st.spec_detector ? "MAX" : "MEAN"}`,
+    };
+  await sendAll(device, [...powerCommands(store.profile?.usable_hz ?? 40000000), "PROFILE?", "STATUS?"]);
+}
+async function leavePower(device: Device) {
+  if (!powerScan(store.status)) return;
+  const d = store.profile && MONITOR_DEFAULTS[store.profile.name];
+  const scan = monitorScan ?? (d && { win: `WIN ${d.rssiHz} ${d.searchHz}`, spec: d.spec });
+  if (scan) await sendAll(device, [scan.win, scan.spec, "PROFILE?", "STATUS?"]);
 }
 
 async function connect(transport: Transport, readOnly = false) {
@@ -471,7 +517,7 @@ showPage();
 let lastData = performance.now();
 setInterval(() => {
   const d = app.device;
-  if (!d || d.rh || app.readOnly || legacyFirmware || starting || flashing || app.settings.uiMode !== "monitor") return;
+  if (!d || d.rh || app.readOnly || legacyFirmware || starting || flashing || app.settings.uiMode === "rh") return;
   if (performance.now() - lastData > 3000) {
     store.addLog("info", "no data for 3 s: switching the device to monitor mode again");
     lastData = performance.now();

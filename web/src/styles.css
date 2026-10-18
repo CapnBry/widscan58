@@ -521,3 +521,28 @@ main.shared { padding-top: 0; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
 .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+
+/* Power meter mode */
+.power-warn { border: 2px solid var(--critical); }
+.power-warn-title { font-size: 20px; font-weight: 700; color: var(--critical); margin-bottom: 6px; }
+.power-warn p { margin: 6px 0; color: var(--ink-2); max-width: 900px; }
+.power-table { border-collapse: collapse; margin: 8px 0; font-variant-numeric: tabular-nums; }
+.power-table th, .power-table td { padding: 4px 12px 4px 0; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.power-table th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.power-table td strong { color: var(--ink); font-size: 15px; }
+.power-settings { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin-bottom: 10px; }
+.power-dev { margin-top: 10px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--warning); color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
+:root[data-theme="light"] .power-dev { color: #8a5a00; }
+.power-note { margin-bottom: 10px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); color: var(--warning); }
+.power-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.power-tile { cursor: default; }
+.power-dbm { font-size: 34px; font-weight: 700; margin: 6px 0 0; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.power-dbm small { font-size: 14px; color: var(--muted); font-weight: 400; }
+.power-mw { font-size: 20px; font-weight: 600; color: var(--ink-2); min-height: 26px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) {
+  .power-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .power-dbm { font-size: 26px; }
+  .power-mw { font-size: 16px; }
+  .power-table { display: block; overflow-x: auto; font-size: 13px; }
+  .power-table th, .power-table td { padding-right: 8px; }
+}

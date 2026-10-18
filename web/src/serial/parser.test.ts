@@ -129,14 +129,14 @@ describe("StreamParser", () => {
 
 describe("telemetry", () => {
   it("decodes u32 timings", () => {
-    const dv = new DataView(new ArrayBuffer(62));
+    const dv = new DataView(new ArrayBuffer(59));
     dv.setUint32(16, 69382, true);
     dv.setUint32(40, 66713, true);
     dv.setUint16(44, 250, true);
     dv.setUint32(46, 29872, true);
-    dv.setInt8(61, -1);
+    dv.setUint8(58, 1);
     const t = parseTelemetry(dv);
-    expect([t.hopUsAvg, t.dspUsMax, t.linkFill, t.heapFree, t.filter]).toEqual([69382, 66713, 0.25, 29872, -1]);
+    expect([t.hopUsAvg, t.dspUsMax, t.linkFill, t.heapFree, t.running]).toEqual([69382, 66713, 0.25, 29872, true]);
   });
 });
 

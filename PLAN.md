@@ -391,7 +391,7 @@ As built, the layouts are in `firmware/src/proto/frames.h`, mirrored by
 `web/src/proto/frames.ts` and `tools/widscan58cli.py`. That header is authoritative
 over the plan table below, and it static-asserts the sizes the parsers hard-code
 (metrics header 34 bytes, channel record 26, levels header 32, level record 4,
-telemetry 62). All µs timings are u32.
+telemetry 59). All µs timings are u32.
 The stream makes no compatibility promise across firmware versions: change all
 three together, and old recordings stop replaying.
 

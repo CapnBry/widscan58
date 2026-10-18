@@ -455,8 +455,6 @@ static IRAM_ATTR void do_hop(void) {
 
 static void emit_telemetry(int64_t now) {
     uint32_t window_us = (uint32_t)(now - sp->window_start);
-    unsigned gain_index;
-    radio_gain_mode_t gm = radio_get_gain(&gain_index);
     uint32_t n = sp->w_hops ? sp->w_hops : 1;
     frame_telemetry_t t = {
         .t_ms = (uint32_t)(now / 1000),
@@ -472,9 +470,6 @@ static void emit_telemetry(int64_t now) {
         .drops = link_drops(),
         .capture_errors = sp->capture_errors,
         .running = sp->cfg.running,
-        .recal_mode = (uint8_t)sp->cfg.recal,
-        .gain = gm == RADIO_GAIN_HARDWARE ? 255 : (uint8_t)gain_index,
-        .filter = (int8_t)radio_get_filter(),
     };
     link_frame(FRAME_TELEMETRY, &t, sizeof(t), NULL, 0, 0);
     sp->window_start = now;

@@ -27,7 +27,7 @@ CHANNEL = struct.Struct("<BBhhhhhhiihh")
 LEVELS_HDR = struct.Struct("<IIIIIIHBBBBBB")
 LEVEL = struct.Struct("<BBBB")
 SPECTRUM_HDR = struct.Struct("<IIiIHBB")
-TELEMETRY = struct.Struct("<IIIIIIIIIIIHIIIBBBb")
+TELEMETRY = struct.Struct("<IIIIIIIIIIIHIIIB")
 RAWIQ_HDR = struct.Struct("<IIHHBB")  # lo, rate, n, offset, conj, shift; then a chunk of I/Q
 CHF = {1: "SIG", 2: "SAT", 4: "DC", 8: "EDGE", 16: "NOC", 32: "SPUR"}
 
@@ -152,7 +152,7 @@ def parse_spectrum(p):
 
 def parse_telemetry(p):
     keys = ("t_ms rotations hops_total rotation_mhz hop_avg hop_max tune_avg tune_max cap_avg "
-            "dsp_avg dsp_max link_fill heap drops cap_errors running recal gain filter").split()
+            "dsp_avg dsp_max link_fill heap drops cap_errors running").split()
     return dict(zip(keys, TELEMETRY.unpack_from(p)))
 
 

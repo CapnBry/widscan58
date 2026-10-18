@@ -32,7 +32,6 @@ export class Telemetry implements View {
       ["usb", "Link throughput"],
       ["err", "Errors"],
       ["heap", "Free heap"],
-      ["radio", "Radio"],
     ]) {
       this.stats[k] = stat(label);
       grid.append(this.stats[k].root);
@@ -89,12 +88,6 @@ export class Telemetry implements View {
       const recent = tel.drops - this.dropHist[0].drops;
       this.set("link", (tel.linkFill * 100).toFixed(0), "%", `${recent} dropped in last 10 s · ${tel.drops} since boot`);
       this.set("heap", (tel.heapFree / 1024).toFixed(0), "KiB", "internal RAM");
-      this.set(
-        "radio",
-        tel.gain === 255 ? "AGC" : `G${tel.gain}`,
-        "",
-        `filter ${tel.filter < 0 ? "auto" : tel.filter} · recal ${["every LO", "once", "per-LO cache"][tel.recalMode] ?? tel.recalMode}`,
-      );
     }
     if (dev) {
       const st = dev.stats();

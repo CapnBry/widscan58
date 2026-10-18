@@ -89,9 +89,6 @@ typedef struct __attribute__((packed)) {
     uint32_t drops;
     uint32_t capture_errors;
     uint8_t running;
-    uint8_t recal_mode;
-    uint8_t gain;            /* 255 = hardware AGC */
-    int8_t filter;           /* -1 = automatic */
 } frame_telemetry_t;
 
 /* One per hop in METRICS RSSI|SNR mode. Levels are byte codes in 0.25 dB
@@ -122,7 +119,7 @@ _Static_assert(sizeof(frame_metrics_t) == 34, "frame_metrics_t layout");
 _Static_assert(sizeof(frame_channel_t) == 26, "frame_channel_t layout");
 _Static_assert(sizeof(frame_levels_t) == 32, "frame_levels_t layout");
 _Static_assert(sizeof(frame_level_t) == 4, "frame_level_t layout");
-_Static_assert(sizeof(frame_telemetry_t) == 62, "frame_telemetry_t layout");
+_Static_assert(sizeof(frame_telemetry_t) == 59, "frame_telemetry_t layout");
 
 /* Raw snapshot, signed 8-bit I then Q: the 10-bit samples >> shift, with the
  * smallest shift (0..2) that fits the capture's peak. Sent as consecutive

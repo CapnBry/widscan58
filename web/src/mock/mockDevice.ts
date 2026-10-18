@@ -794,7 +794,7 @@ export class MockTransport implements Transport {
   private telemetry(now: number) {
     const dt = (now - this.lastTelemetry) / 1000;
     this.lastTelemetry = now;
-    const out = new DataView(new ArrayBuffer(62));
+    const out = new DataView(new ArrayBuffer(59));
     out.setUint32(0, Math.floor(now - this.start), true);
     out.setUint32(4, this.rotations, true);
     out.setUint32(8, this.hopsTotal, true);
@@ -811,9 +811,6 @@ export class MockTransport implements Transport {
     out.setUint32(50, 0, true);
     out.setUint32(54, 0, true);
     out.setUint8(58, +this.running);
-    out.setUint8(59, 1);
-    out.setUint8(60, this.gainManual ? this.gain : 255);
-    out.setInt8(61, 60);
     this.winHops = this.winRot = 0;
     this.onBytes(encodeFrame(FRAME_TELEMETRY, new Uint8Array(out.buffer)));
   }

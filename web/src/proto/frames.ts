@@ -83,9 +83,6 @@ export interface Telemetry {
   drops: number;
   captureErrors: number;
   running: boolean;
-  recalMode: number;
-  gain: number;
-  filter: number;
 }
 
 export interface RawIq {
@@ -223,9 +220,6 @@ export function parseTelemetry(p: DataView): Telemetry {
     drops: p.getUint32(50, true),
     captureErrors: p.getUint32(54, true),
     running: p.getUint8(58) !== 0,
-    recalMode: p.getUint8(59),
-    gain: p.getUint8(60),
-    filter: p.getInt8(61),
   };
 }
 

@@ -337,7 +337,10 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   channels). Disconnect before a RotorHazard server opens the port.
 - **Power meter mode** (`web/src/model/power.ts`, `views/power.ts`): the
   power at a VTX's connector, through an attenuator, in dBm and mW per
-  channel. It sets the scan the calibration was made with (`MODE SINGLE`,
+  channel; only as accurate as the attenuation entered (attenuators often
+  differ from their rating: a "30 dB" chain measured ~25 dB at 5.8 GHz), so
+  the warning dialog presents it as a relative reading for the user's setup.
+  It sets the scan the calibration was made with (`MODE SINGLE`,
   `GAIN MANUAL 0`, `WIN 15000000 15000000`, `SPEC 0 …`) and puts monitor
   mode's windows and spectrum back on leaving (the channel plan, LO mode and
   gain come back with the stored device settings). Per channel: the mean
@@ -346,10 +349,10 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   the board's input − dBFS at gain 0, by MHz) and the attenuation the user
   enters. OVER while the ADC clips, "over range" above −5 dBm at the input,
   "uncalibrated" outside the calibrated frequencies. Only `c5-race` has a
-  calibration, and it is provisional: R1–R4 only, about ±1.5 dB (PLAN.md,
-  "Power calibration"). The page opens with the attenuator warning and size
+  calibration: R1–R8, about ±1 dB (2026-10-19; PLAN.md, "Power
+  calibration"). The page opens with the attenuator warning and size
   table (`ATTENUATOR_TABLE`); below the channel cards a yellow note says the
-  mode is still in development and needs further calibration (keep it short,
+  values are approximate, from a calibration with a single C5 (keep it short,
   without numbers). `tools/powercal.py` measures the offsets.
 - **Installable / offline** (PWA): `public/manifest.webmanifest`, icons from
   `public/icon.svg` and `icon-maskable.svg` (PNGs made with `rsvg-convert`,

@@ -58,8 +58,9 @@ export class PowerWarning implements View {
         "p",
         { class: "muted" },
         `The board reads from about −32 dBm to ${dbmText(INPUT_MAX_DBM)} dBm at its input. Rating: the power the attenuator ` +
-          "nearest the VTX must be rated for. Enter the attenuation you use below; " +
-          "the readings are the power at the VTX's connector.",
+          "nearest the VTX must be rated for. Enter the attenuation you use below. " +
+          "Note that many attenuators misreport their power reduction-- take the reported power " +
+          "as simply a relative power reading for your measurement setup.",
       ),
     );
   }
@@ -135,7 +136,7 @@ export class PowerChannels implements View {
       ),
       this.note,
       this.grid,
-      el("div", { class: "power-dev" }, "Power meter mode is still in development and needs further calibration."),
+      el("div", { class: "power-dev" }, "Power values are approximate from a calibration with a single C5."),
     );
   }
 

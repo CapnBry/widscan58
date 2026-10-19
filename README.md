@@ -45,7 +45,7 @@ second.*
   automatically switches to an 8-seat receiver for lap timing. See
   [our docs](docs/RotorHazard.md) for setup and configuration.
 - **Standalone lap timer:** with short lap rejection, fastest N, and voice time callouts.
-- **Power meter mode:** to estimate VTX output power (experimental).
+- **Power meter mode:** to estimate VTX output power.
 - **Deep diagnostics** for the curious: hop timing, raw I/Q snapshots with a
   constellation view, scanner settings and a command console.
 - **Channel editor:** pick your channels on a frequency chart that looks like

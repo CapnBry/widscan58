@@ -11,7 +11,8 @@ describe("calOffset", () => {
     expect(mid.db).toBeCloseTo((pts[0][1] + pts[1][1]) / 2, 6);
     expect(mid.calibrated).toBe(true);
     const last = pts[pts.length - 1];
-    expect(calOffset("c5-race", 5917)).toEqual({ db: last[1], calibrated: false });
+    expect(calOffset("c5-race", last[0] + 5)).toEqual({ db: last[1], calibrated: true });
+    expect(calOffset("c5-race", last[0] + 20)).toEqual({ db: last[1], calibrated: false });
   });
 
   it("has no offset for a board without a calibration", () => {

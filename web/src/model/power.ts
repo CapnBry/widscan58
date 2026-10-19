@@ -22,16 +22,21 @@ export const MONITOR_DEFAULTS: Record<string, { rssiHz: number; searchHz: number
 };
 
 /** dBm at the board's RF input minus dBFS at POWER_GAIN, by channel MHz.
- *  Provisional (2026-10-18, PLAN.md "Power calibration"): R1-R4 only, about
- *  +/- 1.5 dB, from an ImmersionRC RF Power Meter v2 through a cable chain
- *  that did not repeat well; R5-R8 could not be measured. Above the last
- *  point the offset stays at its value and the reading counts as uncalibrated. */
+ *  From 2026-10-19 (PLAN.md "Power calibration"): R1-R8 against an
+ *  ImmersionRC RF Power Meter v2, the mean of 25/100/400 mW, about +/- 1 dB
+ *  (the C5's steps between power levels read ~0.8 of the meter's). Outside
+ *  the measured points the offset stays at the nearest one's value and,
+ *  beyond 10 MHz, the reading counts as uncalibrated. */
 export const CALIBRATION: Record<string, [number, number][]> = {
   "c5-race": [
-    [5658, 25.1],
-    [5695, 24.6],
-    [5732, 24.2],
-    [5769, 22.7],
+    [5658, 27.9],
+    [5695, 27.8],
+    [5732, 27.3],
+    [5769, 26.6],
+    [5806, 26.4],
+    [5843, 25.3],
+    [5880, 25.2],
+    [5917, 26.1],
   ],
 };
 

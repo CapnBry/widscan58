@@ -179,6 +179,17 @@ def sweep(args, measure):
     label = {lv["index"]: lv for lv in levels}
     plan = steps(args, levels)
     print(f"{len(plan)} steps, {len(plan) * args.step / 60:.1f} min", file=sys.stderr)
+    try:
+        run_steps(args, measure, msp, label, plan)
+    finally:
+        # Leave the VTX at its lowest power, not at the last step's.
+        mhz = msp.vtx_config()["freq"]
+        msp.set_vtx(mhz, levels[0]["index"])
+        msp.wait_vtx(mhz, levels[0]["index"], False)
+        print(f"VTX left at {mhz} MHz, {levels[0]['label']}", file=sys.stderr)
+
+
+def run_steps(args, measure, msp, label, plan):
     with open(args.output, "a") as f:
         for i, (mhz, power, pit) in enumerate(plan):
             t0 = time.time()

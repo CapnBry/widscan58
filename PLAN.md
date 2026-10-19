@@ -995,6 +995,57 @@ steps; C5 at `MODE SINGLE`, `WIN 15000000 15000000`, gains 0–60 in steps of
 - One gain 12 setting in the C5 run clipped for all its 30 frames although
   the frames reported gain 12 (+~24 dB). 600 gain changes did not repeat it.
 
+**Power calibration, repeat (2026-10-19).** The same setup with a new cable
+and the chain fixed in place; the VTX's battery out between runs (it cools),
+a fan on the VTX (in heat shrink). Data: `tmp/powercal/b_*`.
+- The two meter runs agree within 0.5 dB on most steps (worst 1.65 dB, R8 at
+  25 mW), against 2–6.6 dB in the first session. The meter reads 2–10 dB
+  higher than then, the C5 ~2.5 dB lower at 400 mW: the two connections
+  differed in at least one session, most likely the first.
+- Offset at gain 0 (dBm − dBFS, mean of 25/100/400 mW): R1 27.9, R2 27.8,
+  R3 27.3, R4 26.6, R5 26.4, R6 25.3, R7 25.2, R8 26.1; now in the web UI's
+  `CALIBRATION`. Fit slope 0.81: the C5's steps between power levels read
+  0.5–0.8 dB smaller than the meter's (the first session: within 0.3 dB), so
+  the offset depends on the level by ~1 dB over 25–400 mW; not explained.
+- VTX heating: a meter run from R8 to R1 read R8 as the forward runs did
+  (+0.05 dB at 400 mW) and R1 0.8 dB lower than when R1 came first; the
+  later channels lose up to ~0.8 dB over a 4.3 min run. The VTX's own fall
+  from R1 to R8 at 400 mW is ~3.2 dB (both directions averaged). Meter and
+  C5 runs share the schedule and start cool, so heating mostly cancels in
+  the offsets.
+- The chain (pigtail, "30 dB" attenuator, adapter, cable) loses only ~25 dB
+  at R1: the meter straight on the VTX read 13.5 / 15.5 / 21.0 dBm at
+  25 / 100 / 400 mW (22 / 35 / 124 mW), 25.0 / 24.8 / 24.5 dB over its
+  readings through the chain, with the same steps between levels, so not
+  the meter's low end. The web UI on that chain with 30 dB entered read
+  ~45 mW; with 25 dB it would be ~14 mW, ~2 dB under the meter (C5
+  connection or VTX temperature, as in the first session). The warning
+  dialog now calls the reading relative to the user's setup.
+
+**Does the C5 transmit? (2026-10-19).** A C5 near the RF power meter moved
+its readings, so the meter (ImmersionRC v2, average `D`, peak `E`) went
+straight on the C5's RF port, polled for 4–5 s per state. Its floor is
+−24.5 to −23.6 dBm average across 5650–6000 MHz (the meter's correction
+per frequency; spec starts at −20 dBm), peak ~0.6 dB above that; `E` does
+not hold a peak for long, so a short burst only shows if a poll lands on it.
+- Idle, scan stopped, scanning in `RECALMODE CACHE`: at the floor.
+- `RECALMODE EVERY`, one channel (`MODE SINGLE`) at each meter point
+  5650–5900: the same as `CACHE` within 0.2 dB, on every channel. The
+  per-hop calibration in `EVERY` no longer redoes the loopback IQ
+  calibration (esp-sdr 77ffc12, below), which fits.
+- `RECAL` (cache cleared, each LO's full calibration once): peak −22.1 to
+  −22.3 dBm, ~1.7 dB over the floor, average unchanged: a small burst, likely
+  the loopback IQ tone, seen twice; missed once by a check that started 1 s
+  later.
+- Boot (`REBOOT`): average up to −4 dBm, peak +6.3 dBm (~4 mW): the
+  power-on calibration. Any reset sends it again, including a port open
+  that resets the C5 (a RotorHazard server's).
+So while scanning the C5 sends nothing the meter can see (< ~−22 dBm peak
+at its port). It does transmit at boot (strongly) and after `RECAL`
+(weakly): during a power calibration, don't reset the C5 or clear its
+cache while the meter is measuring nearby. The test scripts were not kept;
+they set the C5 state over its port and polled `D`/`E` alternately.
+
 **Image rejection vs IQ calibration on the C5 (2026-10-10).** esp-sdr 77ffc12 stops redoing the (transmitting) loopback IQ calibration on retune and keeps the startup IQ. Tested with an analog VTX at low power on R7 and R1, antenna on the C5, gain 66, `RECALMODE EVERY`; LO stepped so the VTX sat at ±4…±36 MHz, 8 × 9180-sample captures per point, image rejection = VTX power in ±4 MHz around its offset vs the mirrored band (floor subtracted). The VTX was only ~23–28 dB over the floor in that band, so values above ~30 dB are floor-limited.
 - Per-LO IQ (current): R7 27–34 dB, R1 24–33 dB.
 - Startup IQ only (esp-sdr): ~20 dB at every offset at both channels (R7 18–21, R1 20–22). The startup words (+222: `f5 04 f4 04 f0 07 f0 06 ee 09 ec 0d e9 11`) are far from the per-LO ones at 5.6–5.9 GHz (`00 12 … 01 12`), which barely change across the band. In pair mode R7's image lands 1 MHz from R8 (and R1's from R2), so this would put a ~−20 dBc ghost on the partner channel.

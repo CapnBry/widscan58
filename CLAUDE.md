@@ -218,6 +218,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `RECAL`, `RECALMODE ONCE\|EVERY\|CACHE`, `SETTLE <us>`, `TUNESKIP <mask>` | Calibration and tuning (debug). `CACHE` (the C5 default) calibrates each LO once and restores it on later visits; on the S3 it behaves like `EVERY`. `RECAL` clears the cache. `SETTLE` overlaps the DSP: the next capture waits for what is left of it. `TUNESKIP` bit 0 retunes only the PLL between full tunes (S3 default 7, C5 default 3; `TUNESKIP 0` runs the C5's full channel setup every hop), bit 1 skips the RX path re-apply, bit 2 the gain re-apply (wrong on the C5: +27 dB). Reported as `tskip` in `STATUS?`/`CONFIG?`, and set from the UI's Scanner controls |
 | `THROTTLE <hz>` | Rotation rate cap, 10–100000 or 0 (none); default 1050. Reported as `throttle_hz` in `STATUS?`/`CONFIG?`; each mode keeps its own, not saved by `CONFIG SAVE` |
 | `PHYIDLE <depth> [min_us]`, `PHYIDLE?` | Debug, C5 (default 0, nothing): power the radio down while the throttle waits, for waits of at least `min_us` that fit the wake-up. 1 RX path (saves nothing), 2 RF with the full channel setup on wake (~0.6 ms), 3 also the modem clocks, 4 as 3 with a PLL-only retune (~0.38 ms; −12 mA at 1100 /s with one LO). The first power-down raises the gain ~1–2.4 dB until a reboot (PLAN.md). `PHYIDLE?` reports and resets the counts and times. Reported as `phy_idle`/`phy_idle_min_us` in `STATUS?`/`CONFIG?` |
+| `REGWATCH 0\|1` | Debug, C5: read three modem register blocks (0x600a0000, 0x600a0800: 64 words each; 0x600a7000: 256, with the gain register) right before and after each capture, learn the bits that change by themselves for 5 s, then print `REGDIFF t=<ms> lo=<MHz> w\|x n=<count> <addr>:<old>><new> …` for other changes (`w`: during the capture, `x`: since the same LO's previous capture; 8 LOs, 2000 lines per enable). ~17 KB of heap, kept once used; off, no measurable cost (hop times unchanged). PLAN.md, "Level jumps behind a powered VTX" |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
 | `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
@@ -345,9 +346,11 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   mode's windows and spectrum back on leaving (the channel plan, LO mode and
   gain come back with the stored device settings). Per channel: the mean
   power over the smoothing time (Off, 0.1–3 s, all channels; `UiSettings`),
-  less the window's noise, plus the calibration offset (`CALIBRATION`, dBm at
+  less the window's noise, both leaving out the captures that clipped (OVER
+  when more than half of the window clipped; with smoothing Off, when the
+  latest capture clipped), plus the calibration offset (`CALIBRATION`, dBm at
   the board's input − dBFS at gain 0, by MHz) and the attenuation the user
-  enters. OVER while the ADC clips, "over range" above −5 dBm at the input,
+  enters. "Over range" above −5 dBm at the input,
   "uncalibrated" outside the calibrated frequencies. Only `c5-race` has a
   calibration: R1–R8, about ±1 dB (2026-10-19; PLAN.md, "Power
   calibration"). The page opens with the attenuator warning and size

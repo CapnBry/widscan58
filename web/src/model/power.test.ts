@@ -1,6 +1,6 @@
 // GPL-3.0-or-later.
 import { describe, expect, it } from "vitest";
-import { ATTENUATOR_TABLE, CALIBRATION, INPUT_MAX_DBM, calOffset, formatMw, lessNoise, meanDb } from "./power";
+import { ATTENUATOR_TABLE, CALIBRATION, INPUT_MAX_DBM, calOffset, clippedIn, formatMw, lessNoise, meanDb } from "./power";
 import { Series } from "./store";
 
 describe("calOffset", () => {
@@ -30,6 +30,28 @@ describe("meanDb", () => {
     expect(meanDb(s, 10, 1)).toBeCloseTo(10 * Math.log10((1e-3 + 1e-2) / 2), 6);
     expect(meanDb(s, 20, 1)).toBe(-20); // nothing in the last second
     expect(meanDb(new Series(4), 0, 1)).toBeNull();
+  });
+
+  it("leaves out the skipped times", () => {
+    const s = new Series(8);
+    s.push(9, -40);
+    s.push(9.5, 0); // a clipped capture
+    s.push(10, -40);
+    expect(meanDb(s, 10, 2, new Set([9.5]))).toBeCloseTo(-40, 6);
+  });
+});
+
+describe("clippedIn", () => {
+  it("lists the clipped captures in the window and their share", () => {
+    const c = new Series(8);
+    c.push(5, 1); // outside the window
+    c.push(9, 0);
+    c.push(9.5, 1);
+    c.push(10, 0);
+    const r = clippedIn(c, 10, 2);
+    expect([...r.times]).toEqual([9.5]);
+    expect(r.share).toBeCloseTo(1 / 3, 6);
+    expect(clippedIn(new Series(4), 10, 2).share).toBe(0);
   });
 });
 

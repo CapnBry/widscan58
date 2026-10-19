@@ -540,6 +540,9 @@ static void handle(char *line) {
         link_printf("PHYIDLE depth %u min %" PRIu32 " n %" PRIu32 " skipped %" PRIu32 " down %" PRIu32 " up %" PRIu32
                     " up_max %" PRIu32 " up_est %" PRIu32 "\n", c.phy_idle, c.phy_idle_min_us, s.n, s.skipped,
                     s.down_us_avg, s.up_us_avg, s.up_us_max, s.up_est_us);
+    } else if (sscanf(line, "REGWATCH %" SCNu32 " %c", &a, &extra) == 1 && a <= 1) {
+        radio_set_regwatch(a);
+        link_text("OK\n");
     } else if (sscanf(line, "TUNESKIP %" SCNu32 " %c", &a, &extra) == 1 && a <= 7) {
         radio_set_tune_skip(a);
         link_text("OK\n");

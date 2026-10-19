@@ -10,6 +10,7 @@ import {
   SMOOTHING,
   calOffset,
   formatMw,
+  clippedIn,
   lessNoise,
   meanDb,
 } from "../model/power";
@@ -231,14 +232,20 @@ export class PowerChannels implements View {
         tile.badges.replaceChildren();
         return;
       }
-      const rssi = meanDb(cs.rssi, nowS, this.app.settings.powerSmoothS)!;
-      const noise = meanDb(cs.floor, nowS, this.app.settings.powerSmoothS);
+      // Averaging leaves out clipped captures: a powered VTX's setup can clip
+      // single captures far above its level (PLAN.md, 2026-10-19). Off, the
+      // latest capture shows as it is.
+      const smoothS = this.app.settings.powerSmoothS;
+      const clip = smoothS > 0 ? clippedIn(cs.clipped, nowS, smoothS) : null;
+      const over = clip ? clip.share > 0.5 : (m.flags & CHF.SATURATED) !== 0;
+      const rssi = meanDb(cs.rssi, nowS, smoothS, clip?.times)!;
+      const noise = meanDb(cs.floor, nowS, smoothS, clip?.times);
       const sig = lessNoise(rssi, noise);
       const badges: [string, string][] = [];
       if (now - cs.updated > 1000) badges.push(["stale", "warning"]);
       let input: number | null = null;
-      if (m.flags & CHF.SATURATED) {
-        // The ADC clips: the level means nothing.
+      if (over) {
+        // The ADC clips (most of the window when averaging): the level means nothing.
         tile.dbm.replaceChildren("OVER");
         tile.mw.textContent = "";
         badges.push(["clipping", "critical"]);

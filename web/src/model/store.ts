@@ -1,6 +1,7 @@
 // Application state built from the device stream. Views read from here and
 // redraw when `version` changes. GPL-3.0-or-later.
 import {
+  CHF,
   FRAME_LOG,
   FRAME_LEVELS,
   FRAME_METRICS,
@@ -65,6 +66,7 @@ export interface ChannelState {
   rssi: Series;
   ema: Series;
   floor: Series;
+  clipped: Series; // 1 where the capture clipped (CHF.SATURATED); the same times as rssi
 }
 
 export interface Segment {
@@ -146,6 +148,7 @@ export class Store {
         rssi: new Series(cap),
         ema: new Series(cap),
         floor: new Series(cap),
+        clipped: new Series(cap),
       }));
       this.segments.clear();
     }
@@ -224,6 +227,7 @@ export class Store {
       st.loKhz = m.loKhz;
       st.updated = wall;
       st.rssi.push(t, c.rssi);
+      st.clipped.push(t, c.flags & CHF.SATURATED ? 1 : 0);
       if (c.rssiEma !== null) st.ema.push(t, c.rssiEma);
       if (c.floor !== null) st.floor.push(t, c.floor);
     }

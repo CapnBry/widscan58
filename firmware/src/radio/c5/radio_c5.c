@@ -3,6 +3,8 @@
  * from esp-sdr main/families/c5_c6_c61/receiver.c, main/targets/esp32c5/ and
  * main/common/burst_gain.h (https://github.com/ESPARGOS/esp-sdr),
  * GPL-3.0-or-later. The PLL-only retune (radio_tune) is our own. */
+#include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/lock.h>
@@ -15,6 +17,7 @@
 #include "heap_memory_layout.h"
 #include "soc/lp_aon_reg.h"
 #include "soc/soc.h"
+#include "link.h"
 #include "radio.h"
 #include "recal_c5.h"
 
@@ -480,6 +483,95 @@ static IRAM_ATTR bool dump_capture(unsigned n, unsigned rate_code) {
     return done;
 }
 
+/* REGWATCH: three modem register blocks (0x600a7000 holds the gain
+ * register) read right before and after each capture. A capture's "w" line
+ * lists what changed during it, "x" what changed since the same LO's
+ * previous capture; bits that change in the first WATCH_LEARN_US are
+ * masked. Off, it costs two branches per capture. Used to show that the level
+ * jumps behind a powered VTX change no gain setting (PLAN.md, 2026-10-19). */
+static const struct { uint32_t base, words; } watch_ranges[] = {
+    {0x600a0000u, 64}, {0x600a0800u, 64}, {0x600a7000u, 256}};
+#define WATCH_WORDS 384u
+#define WATCH_LOS 8u
+#define WATCH_LEARN_US 5000000
+typedef struct { uint32_t lo; uint32_t v[WATCH_WORDS]; } watch_lo_t;
+static watch_lo_t *watch_lo;
+static uint32_t *watch_vol, *watch_pre, *watch_post;
+static int64_t watch_learn_end;
+static uint32_t watch_lines;
+static bool watch_on;
+
+void radio_set_regwatch(bool on) {
+    watch_on = false;
+    /* Kept once allocated (~17 KB): the scan task may be in a capture. */
+    if (!on) return;
+    if (!watch_lo) {
+        watch_lo = calloc(WATCH_LOS, sizeof(watch_lo_t));
+        watch_vol = calloc(3 * WATCH_WORDS, sizeof(uint32_t));
+        if (!watch_lo || !watch_vol) {
+            free(watch_lo);
+            free(watch_vol);
+            watch_lo = NULL;
+            watch_vol = NULL;
+            link_printf("ERR regwatch nomem\n");
+            return;
+        }
+        watch_pre = watch_vol + WATCH_WORDS;
+        watch_post = watch_pre + WATCH_WORDS;
+    }
+    memset(watch_lo, 0, WATCH_LOS * sizeof(watch_lo_t));
+    memset(watch_vol, 0, WATCH_WORDS * sizeof(uint32_t));
+    watch_learn_end = esp_timer_get_time() + WATCH_LEARN_US;
+    watch_lines = 0;
+    watch_on = true;
+}
+
+static void watch_read(uint32_t *v) {
+    unsigned k = 0;
+    for (unsigned r = 0; r < sizeof watch_ranges / sizeof watch_ranges[0]; r++)
+        for (unsigned j = 0; j < watch_ranges[r].words; j++) v[k++] = REG_READ(watch_ranges[r].base + 4u * j);
+}
+
+static uint32_t watch_addr(unsigned k) {
+    for (unsigned r = 0; r < sizeof watch_ranges / sizeof watch_ranges[0]; r++) {
+        if (k < watch_ranges[r].words) return watch_ranges[r].base + 4u * k;
+        k -= watch_ranges[r].words;
+    }
+    return 0;
+}
+
+static void watch_compare(const char *what, const uint32_t *a, const uint32_t *b, bool learn) {
+    char line[200];
+    int len = 0, shown = 0, n = 0;
+    for (unsigned k = 0; k < WATCH_WORDS; k++) {
+        uint32_t d = (a[k] ^ b[k]) & ~watch_vol[k];
+        if (!d) continue;
+        if (learn) { watch_vol[k] |= d; continue; }
+        n++;
+        if (shown < 4 && len < (int)sizeof line - 40)
+            len += snprintf(line + len, sizeof line - len, " %08" PRIx32 ":%08" PRIx32 ">%08" PRIx32, watch_addr(k), a[k], b[k]), shown++;
+    }
+    if (n) {
+        if (watch_lines < 2000) {
+            watch_lines++;
+            link_printf("REGDIFF t=%" PRIu32 " lo=%" PRIu32 " %s n=%d%s\n", (uint32_t)(esp_timer_get_time() / 1000),
+                        tuned_lo_khz / 1000u, what, n, line);
+        }
+    }
+}
+
+static void watch_after(void) {
+    bool learn = esp_timer_get_time() < watch_learn_end;
+    watch_compare("w", watch_pre, watch_post, learn);
+    watch_lo_t *slot = NULL;
+    for (unsigned j = 0; j < WATCH_LOS && !slot; j++)
+        if (watch_lo[j].lo == tuned_lo_khz || !watch_lo[j].lo) slot = &watch_lo[j];
+    if (!slot) return;
+    if (slot->lo) watch_compare("x", slot->v, watch_pre, learn);
+    slot->lo = tuned_lo_khz;
+    memcpy(slot->v, watch_pre, sizeof slot->v);
+}
+
 IRAM_ATTR esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
                         uint32_t *elapsed_us) {
     if (n < 16 || n > IQ_WORDS || rate_code >= RADIO_MAX_RATES) return ESP_ERR_INVALID_ARG;
@@ -488,11 +580,16 @@ IRAM_ATTR esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settl
     while (esp_timer_get_time() - tune_end_us < (int64_t)settle_us) {}
     filter_apply();
     uint32_t owner = REG_READ(SRAM_OWNER_REG);
+    if (watch_on) watch_read(watch_pre);
     int64_t start = esp_timer_get_time();
     /* esp-sdr: do NOT set CTRL bit 17 as on the C61; on the C5 that gave a
      * short, incomplete snapshot. */
     bool done = dump_capture(n, rate_code);
     uint32_t elapsed = (uint32_t)(esp_timer_get_time() - start);
+    if (watch_on) {
+        watch_read(watch_post);
+        watch_after();
+    }
     REG_WRITE(SRAM_OWNER_REG, owner);
     filter_restore();
     if (!done) return ESP_ERR_TIMEOUT;

@@ -62,6 +62,8 @@ static bool tuned_once;
 static int64_t last_full_tune;
 static uint32_t tuned_lo_khz; /* LO currently programmed */
 static int64_t tune_end_us;   /* when the LO last moved; radio_capture settles from it */
+void radio_set_regwatch(bool on) { (void)on; }
+
 void radio_set_tune_skip(unsigned mask) {
     tune_skip = mask;
     tuned_once = false;

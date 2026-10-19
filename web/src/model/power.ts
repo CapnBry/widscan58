@@ -72,21 +72,35 @@ export const SMOOTHING: [number, string][] = [
   [3, "3 s"],
 ];
 
-/** Mean power (linear) of a dBFS series over the last `seconds`, in dBFS;
- *  the newest value when seconds is 0 or nothing falls in the window. */
-export function meanDb(series: Series, now: number, seconds: number): number | null {
+/** Mean power (linear) of a dBFS series over the last `seconds`, in dBFS,
+ *  leaving out the values at the times in `skip`; the newest value when
+ *  seconds is 0 or nothing falls in the window. */
+export function meanDb(series: Series, now: number, seconds: number, skip?: Set<number>): number | null {
   if (!series.size) return null;
   const newest = series.v[(series.head - 1 + series.capacity) % series.capacity];
   if (seconds <= 0) return newest;
   let sum = 0;
   let n = 0;
   series.forEach((t, v) => {
-    if (now - t <= seconds) {
+    if (now - t <= seconds && !skip?.has(t)) {
       sum += 10 ** (v / 10);
       n++;
     }
   });
   return n ? 10 * Math.log10(sum / n) : newest;
+}
+
+/** The times of the clipped captures (a 0/1 series) in the last `seconds`,
+ *  and the share of the window's captures they are. */
+export function clippedIn(clipped: Series, now: number, seconds: number): { times: Set<number>; share: number } {
+  const times = new Set<number>();
+  let n = 0;
+  clipped.forEach((t, v) => {
+    if (now - t > seconds) return;
+    n++;
+    if (v) times.add(t);
+  });
+  return { times, share: n ? times.size / n : 0 };
 }
 
 /** Signal power without the window's noise, dBFS; null within 3 dB of it. */

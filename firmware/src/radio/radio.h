@@ -60,6 +60,10 @@ radio_gain_mode_t radio_get_gain(unsigned *index);
 esp_err_t radio_capture(unsigned n, unsigned rate_code, uint32_t settle_us, const uint32_t **words,
                         uint32_t *elapsed_us);
 
+/* Debug (REGWATCH): report modem register changes around each capture as
+ * REGDIFF lines. The C5 only; the S3 ignores it. */
+void radio_set_regwatch(bool on);
+
 /* Debug: skip parts of the per-hop tune sequence between full tunes (bit 0:
  * channel setup, retuning only the PLL; bit 1: PBUS/RX clock re-enable;
  * bit 2: gain re-apply). Defaults: S3 7, C5 3. */

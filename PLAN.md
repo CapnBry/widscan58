@@ -1046,6 +1046,62 @@ at its port). It does transmit at boot (strongly) and after `RECAL`
 cache while the meter is measuring nearby. The test scripts were not kept;
 they set the C5 state over its port and polled `D`/`E` alternately.
 
+**Level jumps behind a powered VTX (2026-10-19).** Power meter mode
+sometimes showed ~4 W for about the smoothing time with a 25 mW VTX behind
+the ~25 dB chain. Power meter mode's scan (8 channels, `MODE SINGLE`, gain
+0, ±15 MHz window), counting captures more than 6 dB over a channel's
+running level:
+- Single captures, on the VTX's channel and on empty ones, +15 to +42 dB
+  (empty channels up to −12 dBFS, about +13 dBm at the input at gain 0: no
+  real signal here), often with 1000–4096 of 4096 samples clipped, some
+  without signal in the window (all samples on a rail).
+- 7–96 per 90 s with the VTX on or in pit mode, varying from run to run
+  rather than with the VTX's mode; none with the VTX unpowered (2 min and
+  10 s) or nothing connected (2 min). The calibration runs' two clipped
+  30-frame sets (gain 12 on 2026-10-18, gain 3 here) were likely the same.
+- Not PHY tracking: a test build counted its runs (a `--wrap` of
+  `phy_param_track_tot`, once a second) and flagged the frames after one:
+  no jump in ~200 followed one, none ran during a capture, and holding the
+  PHY lock across the capture did not stop them.
+- No register change: `REGWATCH` (three modem register blocks around each
+  capture) showed nothing at 11 of 15 jumps, including +36 dB clipped ones;
+  at the other 4 only 0x600a704c, already before the capture and back by
+  the next, its three bytes up ~31 for +36 dB and ~15 for +18 dB: it
+  behaves like a power measurement, so the receiver saw the energy. Other
+  changes, unrelated to the jumps: 0x600a706c on every LO within ~40 ms
+  every few seconds; 0x600a708c and 0x600a7138 step together every ~10 s.
+- So energy reaching the input, not our gain or math; most likely conducted
+  from the battery-powered FC and VTX (shield, ground), not yet isolated:
+  next, the VTX powered with the coax off the C5, and the C5 on an isolated
+  USB port or behind a DC block. The web UI's averaging now leaves clipped
+  captures out (OVER only when most of the window clipped); unclipped jumps
+  still count.
+
+**Antenna SWR with an RF bridge: does not work (2026-10-19).** The idea: a
+user checks an antenna in the field (a broken element, or antenna A vs B)
+with the quad's VTX as the source, a cheap return-loss bridge and the C5
+reading the reflected level against an Open reference (scalar only: the
+C5 has no coherent reference for phase). Comparing antennas needs ~30 dB
+of directivity at 5.8 GHz (with 20 dB, a true 15 dB return loss reads
+anywhere from 7.8 to 18.9 dB). Tested with a common "0.1–3000 MHz"
+resistive bridge (ports RF IN / REF / DUT / OUT, 50 Ω on REF): the VTX at
+400 mW over MSP through the ~25 dB chain into RF IN, OUT on the C5,
+`tools/powercal.py c5` at gains 0–60 on 10 channels from 5645 to 5945 MHz,
+each DUT state against Open at the gains where both read cleanly.
+- Open: about −35 dBm at the C5, ~32 dB below RF IN (~12 dB expected for
+  this kind of bridge in its rated range); up to ~38 dB over the window
+  noise (gains 48–51). Two Open runs agreed within ~1.5 dB.
+- 50 Ω on DUT: **3–8 dB above Open** on every channel (+2.9 at 5658, +8.1
+  at 5806 MHz), where a working bridge reads 20–30 dB below. At 5.8 GHz the
+  output is stray coupling, not the reflection: no usable directivity,
+  not even go/no-go. The antennas were not measured.
+So not with this bridge. A coupler or bridge rated for 5.8 GHz, plus a
+25 mW VTX (~$25 now) and pads, costs about as much as a cheap 6 GHz VNA,
+which also measures properly. Other sources considered: a second C5
+(`esp_phy_wifi_tx_tone` is in the C5's `librftest.a`, documented for
+channels 1–14 only) and a broadband noise source (whole band at once, but
+users don't have one).
+
 **Image rejection vs IQ calibration on the C5 (2026-10-10).** esp-sdr 77ffc12 stops redoing the (transmitting) loopback IQ calibration on retune and keeps the startup IQ. Tested with an analog VTX at low power on R7 and R1, antenna on the C5, gain 66, `RECALMODE EVERY`; LO stepped so the VTX sat at ±4…±36 MHz, 8 × 9180-sample captures per point, image rejection = VTX power in ±4 MHz around its offset vs the mirrored band (floor subtracted). The VTX was only ~23–28 dB over the floor in that band, so values above ~30 dB are floor-limited.
 - Per-LO IQ (current): R7 27–34 dB, R1 24–33 dB.
 - Startup IQ only (esp-sdr): ~20 dB at every offset at both channels (R7 18–21, R1 20–22). The startup words (+222: `f5 04 f4 04 f0 07 f0 06 ee 09 ec 0d e9 11`) are far from the per-LO ones at 5.6–5.9 GHz (`00 12 … 01 12`), which barely change across the band. In pair mode R7's image lands 1 MHz from R8 (and R1's from R2), so this would put a ~−20 dBc ghost on the partner channel.

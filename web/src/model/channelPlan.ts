@@ -14,6 +14,7 @@ export const BANDS: Band[] = [
   { letter: "B", name: "Boscam B", mhz: [5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866] },
   { letter: "E", name: "Boscam E", mhz: [5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945] },
   { letter: "F", name: "Fatshark", mhz: [5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880] },
+  { letter: "L", name: "Low band", mhz: [5362, 5399, 5436, 5473, 5510, 5547, 5584, 5621] },
 ];
 
 /** The firmware scans at most this many channels. */

@@ -26,8 +26,8 @@ second.*
 
 ## Features
 
-- **Eight channels at once.** any eight channels from bands A, B, E, F and R.
-  Each one updates about 50 times a second in monitor mode.
+- **Eight channels at once.** any eight channels from across the bands, 
+  each one updates about 60 times a second in monitor mode.
 - **Per-channel readings:** RSSI, noise floor, SNR, the measured center of the
   video signal (to spot a VTX that is off frequency), and the 99 %
   occupied bandwidth.

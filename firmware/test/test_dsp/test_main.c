@@ -472,13 +472,13 @@ static void test_plan_groups(void) {
     TEST_ASSERT_EQUAL(1, plan.nhops);
     TEST_ASSERT_EQUAL(3, plan.hop[0].nch);
     TEST_ASSERT_EQUAL(5759000, plan.hop[0].lo_khz);
-    /* Whole bands: A, B and F take 3 LOs, R and E still 4. */
-    const uint32_t bands[5][8] = {
+    /* Whole bands: A, B and F take 3 LOs, R, E and L still 4. */
+    const uint32_t bands[6][8] = {
         {5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917}, {5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725},
         {5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866}, {5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945},
-        {5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880}};
-    const unsigned hops[5] = {4, 3, 3, 4, 3};
-    for (unsigned b = 0; b < 5; b++) {
+        {5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880}, {5362, 5399, 5436, 5473, 5510, 5547, 5584, 5621}};
+    const unsigned hops[6] = {4, 3, 3, 4, 3, 4};
+    for (unsigned b = 0; b < 6; b++) {
         plan_build(p, ch, chans(p, bands[b], 8, ch), 0xff, PLAN_GROUP, &plan);
         TEST_ASSERT_EQUAL(hops[b], plan.nhops);
     }
@@ -511,10 +511,14 @@ static void test_profile_equiv(void) {
     TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5645000, &khz)); /* E4 */
     TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5945000, &khz)); /* E8 */
     TEST_ASSERT_FALSE(profile_from_equiv_khz(p, 5960000, &khz));
+    TEST_ASSERT_FALSE(profile_from_equiv_khz(p, 5362000, &khz)); /* L1: below 2.4 GHz */
     p = profile_default("esp32c5");
     TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5945000, &khz));
     TEST_ASSERT_EQUAL(5945000, khz);
-    TEST_ASSERT_FALSE(profile_from_equiv_khz(p, 5600000, &khz));
+    TEST_ASSERT_TRUE(profile_from_equiv_khz(p, 5362000, &khz)); /* L1 */
+    TEST_ASSERT_EQUAL(5362000, khz);
+    TEST_ASSERT_FALSE(profile_from_equiv_khz(p, 5300000, &khz));
+    TEST_ASSERT_FALSE(profile_from_equiv_khz(p, 5960000, &khz));
 }
 
 int main(void) {

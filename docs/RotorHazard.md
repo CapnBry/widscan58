@@ -99,7 +99,7 @@ the seat, the interval between updates:
 | 7 | 4 | ~1.96 ms | ~510 /s |
 | 8 | 4 | ~1.96 ms | ~510 /s |
 
-- The LO count decides the rate, not the seat count. Bands R and E need 4 LOs
+- The LO count decides the rate, not the seat count. Bands R, E and L need 4 LOs
   for 8 channels; A, B and F need 3. Spread-out mixed channels can need one LO
   per seat.
 - RSSI and SNR run at nearly the same rate (8 seats: ~2.0 ms with SNR).

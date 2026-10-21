@@ -281,7 +281,8 @@ button.icon { display: inline-flex; align-items: center; justify-content: center
 .plan-chan { min-width: 54px; }
 .plan-band { min-width: 76px; background: var(--surface-2); }
 .plan-band span { white-space: nowrap; }
-/* Spectrum view (wide screens): channels on a frequency axis. */
+/* Spectrum view (wide screens): channels on a frequency axis, one section per
+ * axis (the usual bands, then low band). */
 .spec-view { display: none; }
 @media (min-width: 760px) {
   .plan-dialog { width: min(900px, calc(100vw - 32px)); }
@@ -290,6 +291,7 @@ button.icon { display: inline-flex; align-items: center; justify-content: center
 }
 .spec-defs { position: absolute; width: 0; height: 0; }
 .spec { --band-w: 76px; position: relative; }
+.spec + .spec { margin-top: 10px; }
 .spec-row { display: grid; grid-template-columns: var(--band-w) 1fr; height: 46px; border-bottom: 1px solid var(--grid); }
 .spec-row .plan-band { margin: 4px 6px 4px 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; padding: 2px 4px; }
 .spec-row .plan-band span { font-size: 10px; color: var(--muted); }

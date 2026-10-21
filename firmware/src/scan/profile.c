@@ -6,10 +6,12 @@
  * snapshot sees the same fraction of the band, in channels, as on the C5.
  *
  * The band runs on to 2486.5 MHz, past the ISM edge, so that CHANNELS can
- * place every A/B/E/F/R channel: E8 (5945 MHz) lands at 2486.2 MHz.
+ * place every A/B/E/F/R channel: E8 (5945 MHz) lands at 2486.2 MHz. Low band
+ * (L, 5362-5621 MHz) would land at 2322-2395 MHz and is refused.
  *
  * c5-race: the real thing (PLAN.md section 2.1). The C5 tunes in whole MHz, so
- * pair LOs land half a MHz off the channel midpoint; offsets stay exact. */
+ * pair LOs land half a MHz off the channel midpoint; offsets stay exact. It
+ * tunes down to low band; band_lo/hi_khz stay the usual 5645-5945 MHz. */
 #include <string.h>
 #include "profile.h"
 
@@ -21,6 +23,7 @@ static const profile_t profiles[] = {
         .description = "Raceband scaled to 2.4 GHz (k=0.2821), ESP32-S3 mock-up",
         .target = "esp32s3",
         .band_lo_khz = 2400000, .band_hi_khz = 2486500,
+        .tune_lo_khz = 2400000, .tune_hi_khz = 2486500,
         .base_khz = 2400000, .equiv_base_khz = 5639500, .scale = K24,
         .rate_code = 1, .rate_hz = 40000000,
         .capture_samples = 4096, .nfft = 1024, .segments = 4, /* 39 kHz bins; 2048-pt halves the hop rate */
@@ -45,6 +48,7 @@ static const profile_t profiles[] = {
         .description = "Raceband R1-R8, ESP32-C5",
         .target = "esp32c5",
         .band_lo_khz = 5645000, .band_hi_khz = 5945000,
+        .tune_lo_khz = 5345000, .tune_hi_khz = 5945000, /* from L1 (5362 MHz) */
         .base_khz = 5639500, .equiv_base_khz = 5639500, .scale = 1.0f,
         .rate_code = 0, .rate_hz = 80000000,
         .capture_samples = 4096, .nfft = 1024, .segments = 4, /* 78 kHz bins */
@@ -78,7 +82,7 @@ double profile_equiv_khz(const profile_t *p, double khz) {
 
 bool profile_from_equiv_khz(const profile_t *p, uint32_t equiv_khz, uint32_t *khz) {
     double v = p->base_khz + ((double)equiv_khz - p->equiv_base_khz) * p->scale;
-    if (v < p->band_lo_khz || v > p->band_hi_khz) return false;
+    if (v < p->tune_lo_khz || v > p->tune_hi_khz) return false;
     *khz = (uint32_t)(v + 0.5);
     return true;
 }

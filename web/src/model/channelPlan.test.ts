@@ -38,7 +38,7 @@ describe("planBuild", () => {
     expect(planBuild(c5, chans([5733, 5732, 5752, 5760]), 15, true).map((h) => h.loKhz)).toEqual([5743000]);
     expect(planBuild(c5, chans([5733, 5774]), 3, true)).toHaveLength(2);
     const hops = (b: string) => planBuild(c5, chans(BANDS.find((x) => x.letter === b)!.mhz), 0xff, true).length;
-    expect(["R", "A", "B", "E", "F"].map(hops)).toEqual([4, 3, 3, 4, 3]);
+    expect(["R", "A", "B", "E", "F", "L"].map(hops)).toEqual([4, 3, 3, 4, 3, 4]);
     expect(planBuild(c5, chans([5880, 5880]), 3, true).map((h) => h.loKhz)).toEqual([5872000]);
   });
 });

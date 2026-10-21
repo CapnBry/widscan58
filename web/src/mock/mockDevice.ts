@@ -23,6 +23,8 @@ const race24: SimProfile = {
   target: "esp32s3",
   bandLoKhz: 2400000,
   bandHiKhz: 2486500,
+  tuneLoKhz: 2400000,
+  tuneHiKhz: 2486500,
   baseKhz: 2400000,
   equivBaseKhz: 5639500,
   scale: K24,
@@ -53,6 +55,8 @@ const c5race: SimProfile = {
   target: "esp32c5",
   bandLoKhz: 5645000,
   bandHiKhz: 5945000,
+  tuneLoKhz: 5345000,
+  tuneHiKhz: 5945000,
   baseKhz: 5639500,
   equivBaseKhz: 5639500,
   scale: 1,
@@ -323,7 +327,7 @@ export class MockTransport implements Transport {
         const list = parts.slice(1).map((t) => {
           const [name, mhz] = t.split("=");
           const khz = Math.round(p.baseKhz + (Number(mhz) * 1000 - p.equivBaseKhz) * p.scale);
-          return /^[A-Za-z0-9]{1,5}$/.test(name ?? "") && khz >= p.bandLoKhz && khz <= p.bandHiKhz ? { name, khz } : null;
+          return /^[A-Za-z0-9]{1,5}$/.test(name ?? "") && khz >= p.tuneLoKhz && khz <= p.tuneHiKhz ? { name, khz } : null;
         });
         if (!list.length || list.length > 8 || list.some((c) => !c)) return this.text("ERR channels\n");
         this.channels = list as { name: string; khz: number }[];
@@ -541,7 +545,7 @@ export class MockTransport implements Transport {
       const khz = Math.round(p.baseKhz + (mhz * 1000 - p.equivBaseKhz) * p.scale);
       if (mhz !== s.mhz || !s.mapped) s.lap.reset();
       s.mhz = mhz;
-      s.mapped = khz >= p.bandLoKhz && khz <= p.bandHiKhz;
+      s.mapped = khz >= p.tuneLoKhz && khz <= p.tuneHiKhz;
       s.nextPass = performance.now() + 1500 + Math.random() * 4000;
     } else if (cmd === RH.WRITE_ENTER_AT_LEVEL) s.lap.enterAt = d[0];
     else if (cmd === RH.WRITE_EXIT_AT_LEVEL) s.lap.exitAt = d[0];

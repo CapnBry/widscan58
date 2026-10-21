@@ -5,8 +5,9 @@
 // the build's files, FILES, the page itself, and FLASH_FILES, the firmware and
 // the flasher's code, and writes the result to dist/sw.js. A deploy changes
 // CACHE, so the browser installs the new worker in the background; it takes
-// over at once but the open page keeps the code it loaded, and the next launch
-// runs the new version. No prompts either way.
+// over at once. Page loads go to the network first (the fetch handler), so a
+// load after a deploy runs the new version; the cached page is the fallback
+// offline. No prompts either way.
 //
 // FLASH_FILES are not installed with the page: those who flash download them
 // then, and they are kept (RUNTIME) for flashing again offline, until the next
@@ -56,10 +57,29 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// The page and the saved firmware from their caches; page loads (any query:
-// ?sim, ?bridge=) get index.html. Everything else from the network, kept in
-// RUNTIME for when it is offline: the firmware manifest and its parts are
-// fetched together when flashing, so the cached ones match each other.
+/** A page load from the network, revalidated past the HTTP cache (GitHub
+ *  Pages: max-age=600); null when it fails or takes over NAV_TIMEOUT_MS. */
+const NAV_TIMEOUT_MS = 3000;
+async function navigateFromNetwork(req) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), NAV_TIMEOUT_MS);
+  try {
+    const r = await fetch(req.url, { cache: "no-cache", credentials: "same-origin", signal: abort.signal });
+    return r.ok ? r : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Page loads (any query: ?sim, ?bridge=) from the network first, so a deploy
+// shows at once; its assets have new hashed names, so they come from the
+// network too. Offline (or slow), the cached index.html. The saved firmware
+// and the rest of the page from their caches. Everything else from the
+// network, kept in RUNTIME for when it is offline: the firmware manifest and
+// its parts are fetched together when flashing, so the cached ones match each
+// other.
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
@@ -67,8 +87,8 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     (async () => {
       if (req.mode === "navigate") {
-        const index = await caches.match("index.html", { cacheName: CACHE });
-        if (index) return index;
+        const page = (await navigateFromNetwork(req)) ?? (await caches.match("index.html", { cacheName: CACHE }));
+        if (page) return page;
       }
       for (const cacheName of [CACHE, OFFLINE]) {
         const hit = await caches.match(req, { ...opts, cacheName });

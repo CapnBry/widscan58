@@ -204,8 +204,8 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | Command | Purpose |
 |---|---|
 | `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration (including `rawiq_max`), band profile, DSP time breakdown, masked board spurs |
-| `CHANNELS <name>=<MHz> …`, `CHANNELS DEFAULT` | Channel plan: up to 8 channels by their 5.8 GHz frequency, e.g. `CHANNELS R1=5658 A8=5725` (the S3 maps them into its scaled band). Ids follow the order given; all are enabled. The UI's Channels → Edit sends this on every connect |
-| `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R and E take 4), keeping it clear of every channel center where it can; `SINGLE` gives each channel its own LO |
+| `CHANNELS <name>=<MHz> …`, `CHANNELS DEFAULT` | Channel plan: up to 8 channels by their 5.8 GHz frequency, e.g. `CHANNELS R1=5658 A8=5725`. The C5 takes 5345–5945 MHz (`tune_lo_khz`/`tune_hi_khz` in `profile.c`: bands A, B, E, F, R and low band L, 5362–5621 MHz; L is untested on hardware and has no spur list or power calibration); the S3 maps them into its scaled band, which has no room for L. The web UI's panorama spans the LO segments scanned (`bandRange`, `views/panorama.ts`; `band_khz`, 5645–5945 MHz, only before the first spectrum), so board spurs and channels outside the scanned channels' span are not shown. Ids follow the order given; all are enabled. The UI's Channels → Edit sends this on every connect |
+| `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R, E and L take 4), keeping it clear of every channel center where it can; `SINGLE` gives each channel its own LO |
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
@@ -370,9 +370,13 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   downloads them now and with every update (cache `…-fw`; the setting is the
   `widscan58-prefs` cache, which the worker can read). Offline without the
   firmware, the dialog says so and disables Flash; a download that fails while
-  flashing (`OfflineError`) says so too. A deploy installs silently and takes
-  effect on the next load; there is no install or update prompt, keep it
-  that way. Only `npm run build` output registers it (not the dev server), so
+  flashing (`OfflineError`) says so too. Page loads are network first:
+  `index.html` is fetched with `cache: "no-cache"` (Pages sends max-age=600)
+  and a 3 s timeout (`NAV_TIMEOUT_MS`), the cached one only when that fails,
+  so a deploy shows on the first load after it (it used to show on the second:
+  the cached page loaded while the new worker installed). The new worker
+  installs silently in the background; there is no install or update prompt,
+  keep it that way. Only `npm run build` output registers it (not the dev server), so
   test with `npx vite preview`.
 - **Connect device**: Web Serial. Chrome, Edge, Firefox and Android Chrome all
   work, flashing included. Chrome remembers the grant, so later visits and

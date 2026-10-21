@@ -15,10 +15,13 @@ export interface Composite {
   floor: Float32Array;
 }
 
+/** The span of the LO segments scanned (stale ones drop out after 3 s,
+ *  store.ts), or the profile's band before the first spectrum. */
 export function bandRange(app: App): [number, number] {
   const p = app.store.profile!;
-  let lo = p.band_khz[0];
-  let hi = p.band_khz[1];
+  if (!app.store.segments.size) return [p.band_khz[0], p.band_khz[1]];
+  let lo = Infinity;
+  let hi = -Infinity;
   for (const s of app.store.segments.values()) {
     const a = s.latest.loKhz + s.latest.startOffHz / 1000;
     const b = a + (s.latest.db.length * s.latest.binHz) / 1000;
@@ -203,7 +206,12 @@ export class Panorama implements View {
     this.lastAxes = a;
     const ctx = s.ctx;
     const st = store.status;
-    // Channel windows first, so traces draw over them.
+    // Channel windows first, so traces draw over them. Clipped to the plot:
+    // disabled channels can lie outside the scanned span.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top);
+    ctx.clip();
     p.channels.forEach((c, id) => {
       const enabled = st ? (st.enabled & (1 << id)) !== 0 : true;
       const rssi = (st?.rssi_hz ?? p.rssi_hz) / 1000;
@@ -219,12 +227,14 @@ export class Panorama implements View {
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     });
+    ctx.restore();
     drawGrid(s, a, (v) => (v / 1000).toFixed(1), (v) => `${v}`, 10, 5);
     // Channel labels and the LO markers of the current plan.
     ctx.font = "600 11px system-ui";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     p.channels.forEach((c, id) => {
+      if (c.khz < f0 || c.khz > f1) return;
       ctx.fillStyle = t.ink2;
       ctx.fillText(app.channelName(id), a.sx(c.khz), a.top + 2);
     });

@@ -9,8 +9,9 @@ export function isInstalledApp(): boolean {
   );
 }
 
-/** Registers sw.js (built page only: the dev server has none). Updates
- *  install in the background and apply on the next launch, silently. */
+/** Registers sw.js (built page only: the dev server has none). Page loads
+ *  come from the network first and the cache offline; the worker's own
+ *  updates install in the background, silently. */
 export function registerServiceWorker() {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
   navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("service worker:", e));

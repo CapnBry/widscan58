@@ -538,13 +538,13 @@ main.shared { padding-top: 0; }
 .power-note { margin-bottom: 10px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); color: var(--warning); }
 .power-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .power-tile { cursor: default; }
-.power-dbm { font-size: 34px; font-weight: 700; margin: 6px 0 0; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.power-dbm small { font-size: 14px; color: var(--muted); font-weight: 400; }
-.power-mw { font-size: 20px; font-weight: 600; color: var(--ink-2); min-height: 26px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.power-main { font-size: 34px; font-weight: 700; margin: 6px 0 0; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.power-main small { font-size: 14px; color: var(--muted); font-weight: 400; }
+.power-sub { font-size: 20px; font-weight: 600; color: var(--ink-2); min-height: 26px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) {
   .power-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .power-dbm { font-size: 26px; }
-  .power-mw { font-size: 16px; }
+  .power-main { font-size: 26px; }
+  .power-sub { font-size: 16px; }
   .power-table { display: block; overflow-x: auto; font-size: 13px; }
   .power-table th, .power-table td { padding-right: 8px; }
 }

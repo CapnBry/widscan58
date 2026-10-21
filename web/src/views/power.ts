@@ -42,8 +42,8 @@ export class PowerWarning implements View {
         "p",
         {},
         "Connecting a VTX directly to the board destroys its receiver. Fit the attenuator before powering the VTX, " +
-          "and never power a VTX with nothing on its output. Use at least the attenuation below for the VTX's power; " +
-          "a VTX often puts out more than its label, so when in doubt use the next row.",
+          "and never power a VTX with nothing on its output. Use at least the attenuation below for the VTX's power. " +
+          "Enter the attenuation you use below.",
       ),
       el(
         "table",
@@ -58,8 +58,8 @@ export class PowerWarning implements View {
       el(
         "p",
         { class: "muted" },
-        `The board reads from about −32 dBm to ${dbmText(INPUT_MAX_DBM)} dBm at its input. Rating: the power the attenuator ` +
-          "nearest the VTX must be rated for. Enter the attenuation you use below. " +
+        `The ESP can read from about −32 dBm to ${dbmText(INPUT_MAX_DBM)} dBm. ` +
+          "" +
           "Note that many attenuators misreport their power reduction-- take the reported power " +
           "as simply a relative power reading for your measurement setup.",
       ),
@@ -74,8 +74,8 @@ interface Tile {
   key: HTMLSpanElement;
   name: HTMLSpanElement;
   freq: HTMLDivElement;
-  dbm: HTMLDivElement;
-  mw: HTMLDivElement;
+  main: HTMLDivElement; // the power in mW or W, large
+  sub: HTMLDivElement; // the same in dBm
   kv: HTMLDivElement;
   badges: HTMLDivElement;
   toggle: HTMLInputElement;
@@ -168,13 +168,13 @@ export class PowerChannels implements View {
         key: el("span", { class: "key" }),
         name: el("span", {}),
         freq: el("div", { class: "freq" }),
-        dbm: el("div", { class: "power-dbm" }),
-        mw: el("div", { class: "power-mw" }),
+        main: el("div", { class: "power-main" }),
+        sub: el("div", { class: "power-sub" }),
         kv: el("div", { class: "kv" }),
         badges: el("div", { class: "badges" }),
         toggle,
       };
-      t.root.append(el("div", { class: "name" }, t.key, t.name), el("label", { class: "switch" }, toggle), t.freq, t.dbm, t.mw, t.kv, t.badges);
+      t.root.append(el("div", { class: "name" }, t.key, t.name), el("label", { class: "switch" }, toggle), t.freq, t.main, t.sub, t.kv, t.badges);
       return t;
     });
     this.grid.replaceChildren(...this.tiles.map((t) => t.root));
@@ -223,8 +223,8 @@ export class PowerChannels implements View {
       const m = cs?.latest;
       const off = calOffset(p.name, mhz);
       const blank = () => {
-        tile.dbm.replaceChildren("—");
-        tile.mw.textContent = "";
+        tile.main.replaceChildren("—");
+        tile.sub.textContent = "";
       };
       if (!m || !enabled || !off || !ready) {
         blank();
@@ -246,8 +246,8 @@ export class PowerChannels implements View {
       let input: number | null = null;
       if (over) {
         // The ADC clips (most of the window when averaging): the level means nothing.
-        tile.dbm.replaceChildren("OVER");
-        tile.mw.textContent = "";
+        tile.main.replaceChildren("OVER");
+        tile.sub.textContent = "";
         badges.push(["clipping", "critical"]);
       } else if (sig === null) {
         blank();
@@ -255,8 +255,9 @@ export class PowerChannels implements View {
       } else {
         input = sig + off.db;
         const vtx = input + atten;
-        tile.dbm.replaceChildren(vtx.toFixed(1).replace("-", "−"), el("small", {}, " dBm"));
-        tile.mw.textContent = formatMw(vtx);
+        const [value, unit] = formatMw(vtx).split(" ");
+        tile.main.replaceChildren(value, el("small", {}, ` ${unit}`));
+        tile.sub.textContent = `${vtx.toFixed(1).replace("-", "−")} dBm`;
         if (input > INPUT_MAX_DBM) badges.push(["over range", "critical"]);
       }
       if (!off.calibrated) badges.push(["uncalibrated", "serious"]);

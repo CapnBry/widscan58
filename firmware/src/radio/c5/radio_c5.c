@@ -46,6 +46,8 @@ SOC_RESERVE_MEMORY_REGION(0x40820000, 0x40840000, widscan58_rf_dump);
 extern void phy_set_chanfreq(unsigned mhz, unsigned mode);
 extern unsigned char phy_param[];
 extern void phy_rfpll_set_adc_rate(void);
+extern void phy_adc_rate_set(unsigned);
+extern void phy_rx_filter_mode(unsigned);
 extern unsigned phy_set_channel_rfpll_freq_new(unsigned mhz, unsigned xtal, int offset_khz);
 extern void phy_set_pbus_mem(unsigned, unsigned, unsigned);
 extern void phy_set_rx_gain_table(unsigned, unsigned);
@@ -62,11 +64,11 @@ extern void phy_i2c_writeReg(unsigned, unsigned, unsigned, unsigned);
 
 /* Found with an LO sweep (5600-5975 MHz in 5 MHz steps, dummy load on the
  * antenna port, gain 40): lines fixed in RF and seen from >= 75 % of the LOs
- * covering them, ~7-10 dB over the floor in 39 kHz bins. 5600/5680/5760/5920
- * are multiples of 80 MHz; 5712 and 5760 are 48 MHz crystal harmonics.
- * 5840 (80 MHz x 73, 10-15 dB, in R6's RSSI window) shows only from LOs at
- * or below 5830 MHz, R6's group LO among them. */
-static const uint32_t c5_spurs_khz[] = {5600000, 5680000, 5712000, 5760000, 5840000, 5920000};
+ * covering them, ~7-10 dB over the floor in 39 kHz bins. 5600/5760/5920
+ * are multiples of 160 MHz; 5712 and 5760 are 48 MHz crystal harmonics. The
+ * odd multiples of 80 MHz (5680, 5840) came from ADC rate 0 and are gone at
+ * rate 1 (adc_path_set). */
+static const uint32_t c5_spurs_khz[] = {5600000, 5712000, 5760000, 5920000};
 
 static radio_caps_t caps = {
     .target = "esp32c5",
@@ -285,8 +287,8 @@ static IRAM_ATTR bool full_tune_here(uint32_t lo_khz, int64_t now) {
 /* PLL-only retune: what phy_chip_set_chan does that depends on the frequency
  * in 5 GHz RX, without the rest (AGC, TX power, DC memory clear, PHY
  * registers that only change with band or bandwidth):
- * - phy_rfpll_set_adc_rate: ADC rate and RX filter mode, which change between
- *   5830 and 5831 MHz (the filter skirt above 5831, PLAN.md);
+ * - phy_rfpll_set_adc_rate: ADC rate and RX filter mode (adc_path_set then
+ *   puts every LO on the above-5830 MHz setting);
  * - phy_set_channel_rfpll_freq_new, the PLL itself (also phy_chip_set_chan_ana):
  *   band, SDM, 5 GHz ckgen and PLL calibration, frequency registers. Passed
  *   the kHz correction (+30) and crystal code (+49) as channel setup does;
@@ -301,6 +303,21 @@ static IRAM_ATTR void pll_retune(unsigned mhz, bool restored, int64_t now) {
     phy_set_pbus_mem(phy_param[290], mhz, phy_param[42]);
     if (restored || gain_mhz != mhz || gain_gen != cal_gen) gain_table_load(mhz, now);
     phy_xtal_duty_set(mhz);
+}
+
+/* The PHY runs 5 GHz at ADC rate 0 with no decimation filter (RX filter mode
+ * 0), and only above 5830 MHz at rate 1 with filter mode 8
+ * (phy_rfpll_set_adc_rate). Rate 1 + mode 8 everywhere: a VTX 50-60 MHz from
+ * the LO aliases 24-30 dB down at rate 0 and below the noise here, the odd
+ * 80 MHz board spurs (5680, 5840 MHz) go away, SNR is unchanged; the price is
+ * the skirt R7/R8 always had (-3 dB at +-24 MHz, ~0.8 dB at a pair channel).
+ * Set after every tune, before the settle and gain apply: switching the rate
+ * only around a capture lost 5-8 dB (PLAN.md, the 5830/5831 MHz skirt). */
+#define ADC_RATE1_ABOVE_MHZ 5830u
+static IRAM_ATTR void adc_path_set(unsigned mhz) {
+    if (mhz > ADC_RATE1_ABOVE_MHZ) return; /* the PHY's own setting */
+    phy_adc_rate_set(1);
+    phy_rx_filter_mode(8);
 }
 
 static IRAM_ATTR esp_err_t tune_locked(uint32_t lo_khz) {
@@ -347,6 +364,7 @@ static IRAM_ATTR esp_err_t tune_locked(uint32_t lo_khz) {
     } else {
         pll_retune(mhz, restored, now);
     }
+    adc_path_set(mhz);
     rx_tuning = false;
     if (full || !(tune_skip & 2)) {
         phy_stop_tx_tone(1);

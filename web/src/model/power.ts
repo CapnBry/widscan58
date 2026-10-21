@@ -26,14 +26,18 @@ export const MONITOR_DEFAULTS: Record<string, { rssiHz: number; searchHz: number
  *  ImmersionRC RF Power Meter v2, the mean of 25/100/400 mW, about +/- 1 dB
  *  (the C5's steps between power levels read ~0.8 of the meter's). Outside
  *  the measured points the offset stays at the nearest one's value and,
- *  beyond 10 MHz, the reading counts as uncalibrated. */
+ *  beyond 10 MHz, the reading counts as uncalibrated. R1-R5 are 0.5 dB
+ *  lower than measured: the calibration was made at ADC rate 0, and the
+ *  firmware now runs rate 1 at every LO, which reads ~0.3-1.2 dB higher there
+ *  (PLAN.md, "The 5830/5831 MHz skirt"); R6-R8 already ran rate 1. An
+ *  estimate until the calibration is redone. */
 export const CALIBRATION: Record<string, [number, number][]> = {
   "c5-race": [
-    [5658, 27.9],
-    [5695, 27.8],
-    [5732, 27.3],
-    [5769, 26.6],
-    [5806, 26.4],
+    [5658, 27.4],
+    [5695, 27.3],
+    [5732, 26.8],
+    [5769, 26.1],
+    [5806, 25.9],
     [5843, 25.3],
     [5880, 25.2],
     [5917, 26.1],

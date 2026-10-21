@@ -112,6 +112,17 @@ lower half (`radio_c5.c`, `RADIO_RAM`). PlatformIO does not regenerate its
 `sections.ld` when a `.lf` file changes: delete
 `.pio/build/esp32c5/sections.ld` after editing one.
 
+**ADC rate on the C5:** the PHY runs 5 GHz at ADC rate 0 with no decimation
+filter, and only above 5830 MHz at rate 1 with RX filter mode 8
+(`phy_rfpll_set_adc_rate`). `adc_path_set` (`radio_c5.c`) puts every LO on
+rate 1 + mode 8 after each tune: aliases from 50–60 MHz off the LO drop below
+the noise (24–30 dB down at rate 0), and the odd 80 MHz board spurs (5680,
+5840 MHz) disappear, at the same SNR. The cost is the skirt R7/R8 always had:
+−3 dB at ±24 MHz, ~0.8 dB at a pair channel (PLAN.md, "The 5830/5831 MHz
+skirt"). The analog filter code (`FILTER`) does not change the ADC rate. The
+web UI's power calibration was made at rate 0; R1–R5 are lowered 0.5 dB for
+it (`CALIBRATION`), an estimate until it is redone.
+
 **Firmware version:** `INFO` (and RotorHazard's firmware version) reports
 `PROJECT_VER`, the `git describe --tags --always --dirty` that
 `firmware/CMakeLists.txt` takes at CMake configure time. PlatformIO only
@@ -353,7 +364,7 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   enters. "Over range" above −5 dBm at the input,
   "uncalibrated" outside the calibrated frequencies. Only `c5-race` has a
   calibration: R1–R8, about ±1 dB (2026-10-19; PLAN.md, "Power
-  calibration"). The page opens with the attenuator warning and size
+  calibration"; R1–R5 lowered 0.5 dB since for ADC rate 1, unmeasured). The page opens with the attenuator warning and size
   table (`ATTENUATOR_TABLE`); below the channel cards a yellow note says the
   values are approximate, from a calibration with a single C5 (keep it short,
   without numbers). `tools/powercal.py` measures the offsets.

@@ -75,12 +75,12 @@ Other ESP32-C5 boards work too, such as the C5 devkit.
 
 ## Credits
 
-Widscan58 would not exist without
-**[esp-sdr](https://github.com/ESPARGOS/esp-sdr)** by the
-**[ESPARGOS](https://github.com/ESPARGOS)** team. They found the hidden debug
-path that lets an ESP32 capture raw I/Q samples from its own radio, and they
-published the code that drives it. The radio capture, tuning and calibration
-code in this project, and the S3's SIMD FFT, come from or build on their work. If you like this project, go look at theirs: it is a remarkable piece of reverse engineering, and they are awesome.
+Widscan58 would not exist without **[C5VRX](https://github.com/Twotoz/C5VRX)** and
+the derived **[esp-sdr](https://github.com/ESPARGOS/esp-sdr)** projects.
+The hidden debug path that lets an ESP32 capture raw I/Q samples from its own radio
+is instrumental to the explosion of projects using this path. The radio capture,
+tuning and calibration code in this project build on their work.
+If you like this project, go look at theirs!
 
 This project is almost entirely written by AI apart from the esp-sdr source.
 

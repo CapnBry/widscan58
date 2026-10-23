@@ -121,9 +121,9 @@ export class MockTransport implements Transport {
   private specBins = 256;
   private specSpanHz = 0;
   private specDetector = 1;
-  private ema = 0.25;
+  private emaMs = 100;
   private metricsMode: MetricsMode = "FULL";
-  private clearEma = 0.02;
+  private clearMs = 2000;
   private plan: Hop[] = [];
   private hop = 0;
   private seq = 0;
@@ -136,7 +136,7 @@ export class MockTransport implements Transport {
   private winRot = 0;
   private vtx: Vtx[] = [];
   private wifi = { centerKhz: 0, until: 0, next: 0 };
-  private state = new Map<number, { ema: number; clear: number | null }>();
+  private state = new Map<number, { ema: number; clear: number | null; last: number }>();
   // Protocol, as the firmware: boots silent in RotorHazard mode.
   private proto: "RH" | "MONITOR" = "RH";
   private rhSeats = Array.from({ length: 8 }, (_, j) => ({
@@ -292,7 +292,6 @@ export class MockTransport implements Transport {
             segments: p.segments,
             rate_code: p.rateCode,
             filter: p.filterCode,
-            conjugate: 1,
             iq_corr: 1,
             settle_us: 100,
             tskip: this.tskip,
@@ -305,8 +304,8 @@ export class MockTransport implements Transport {
             rssi_hz: this.rssiHz,
             search_hz: this.searchHz,
             dc_guard: 1,
-            ema: this.ema,
-            clear_ema: this.clearEma,
+            ema_ms: this.emaMs,
+            clear_ms: this.clearMs,
             signal_db: 6,
             avg_shift: 7,
             spec_every: this.specEvery,
@@ -370,8 +369,8 @@ export class MockTransport implements Transport {
       case line === "METRICS?":
         return this.text(`METRICS ${this.metricsMode}\n`);
       case parts[0] === "EMA":
-        this.ema = num(1) / 1000;
-        this.clearEma = num(2) / 1000;
+        this.emaMs = num(1);
+        this.clearMs = num(2);
         return ok();
       case parts[0] === "RAWIQ":
         if (num(1) % p.loStepKhz) return this.text("ERR rawiq_args\n");
@@ -391,7 +390,7 @@ export class MockTransport implements Transport {
         this.rssiHz = num(1);
         this.searchHz = num(2);
         return ok();
-      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "CONJ", "IQCORR", "RECALMODE", "SPURS", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
+      case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "IQCORR", "RECALMODE", "SPURS", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
         return ok();
       case line === "REBOOT":
         // Like the firmware: back to defaults, silent in RotorHazard mode.
@@ -690,9 +689,13 @@ export class MockTransport implements Transport {
       for (const sp of p.spursKhz)
         if (Math.abs((sp * 1000 - h.loKhz * 1000) - h.offsetHz[j]) <= this.searchHz) m.flags |= CHF.SPUR;
       const lin = 10 ** (m.rssi / 10);
-      const st = this.state.get(id) ?? { ema: lin, clear: null };
-      st.ema += this.ema * (lin - st.ema);
-      if (!(m.flags & CHF.SIGNAL)) st.clear = st.clear === null ? lin : st.clear + this.clearEma * (lin - st.clear);
+      // As the firmware: EMAs weighted by the time since the channel's last update.
+      const st = this.state.get(id) ?? { ema: lin, clear: null, last: now };
+      const dt = now - st.last;
+      st.last = now;
+      st.ema += (1 - Math.exp(-dt / this.emaMs)) * (lin - st.ema);
+      if (!(m.flags & CHF.SIGNAL))
+        st.clear = st.clear === null ? lin : st.clear + (1 - Math.exp(-dt / this.clearMs)) * (lin - st.clear);
       this.state.set(id, st);
       return { id, m, ema: db(st.ema), clear: st.clear === null ? null : db(st.clear) };
     });

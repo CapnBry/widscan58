@@ -20,7 +20,6 @@ typedef struct {
     uint8_t segments;
     uint8_t rate_code;
     int8_t filter;
-    bool conjugate;
     bool iq_corr;            /* digital IQ imbalance correction (psd_iq_t) */
     uint32_t settle_us;
     radio_gain_mode_t gain_mode;
@@ -33,8 +32,8 @@ typedef struct {
     uint32_t spur_guard_hz;  /* +/- width masked around each known spur */
     uint8_t nspurs;
     uint32_t spurs_khz[16];
-    float ema_alpha;
-    float clear_alpha;
+    uint16_t ema_ms;         /* RSSI EMA time constant (METRICS FULL) */
+    uint16_t clear_ms;       /* clear-channel floor EMA time constant */
     float signal_snr_db;
     float centroid_db;
     uint8_t avg_shift;       /* time-averaged peak/center/OBW weight 2^-avg_shift (metrics.h) */

@@ -51,10 +51,9 @@ export class Controls implements View {
 
   private build() {
     const app = this.app;
-    // Scan + hop strategy
+    // Hop strategy
     this.ctl(
-      "Scan",
-      this.seg([["1", "Running"], ["0", "Stopped"]], (v) => void this.apply(v === "1" ? "SCAN START" : "SCAN STOP"), (st) => String(st.running)),
+      "LO plan",
       this.seg(
         [["GROUP", "Group LOs"], ["SINGLE", "One LO per channel"]],
         (v) => {
@@ -96,20 +95,15 @@ export class Controls implements View {
     filter.onchange = () => void this.apply(Number(filter.value) < 0 ? "FILTER AUTO" : `FILTER ${filter.value}`);
     this.ctl("Analog filter code (-1 = PHY auto; 60 ≈ 13 MHz, 0 ≈ 69 MHz)", filter);
     this.syncs.push((st) => (filter.value = String(st.filter)));
-    // FFT / capture
+    // FFT size; the device captures 4 FFTs' worth of samples and averages them (Welch), as in RotorHazard mode.
     const fftSel = el("select") as HTMLSelectElement;
-    for (const v of [64, 128, 256, 512, 1024, 2048]) fftSel.append(new Option(`${v}-pt FFT`, String(v)));
+    const fftOption = (v: number) => new Option(`${v}-pt FFT (${4 * v} samples)`, String(v));
+    for (const v of [64, 128, 256, 512, 1024]) fftSel.append(fftOption(v));
     fftSel.onchange = () => void this.apply(`FFT ${fftSel.value}`);
-    const capSel = el("select") as HTMLSelectElement;
-    for (const v of [256, 512, 1024, 2048, 4096, 8192, 16380]) capSel.append(new Option(`${v} samples`, String(v)));
-    capSel.onchange = () => void this.apply(`CAPN ${capSel.value}`);
-    const segs = this.num(1, 64, 1, 56);
-    segs.onchange = () => void this.apply(`SEGMENTS ${segs.value}`);
-    this.ctl("Capture & Welch PSD (segments = max FFTs averaged)", capSel, fftSel, segs);
+    this.ctl("FFT size (finer bins with larger FFTs, more updates per second with smaller ones)", fftSel);
     this.syncs.push((st) => {
+      if (![...fftSel.options].some((o) => o.value === String(st.nfft))) fftSel.append(fftOption(st.nfft));
       fftSel.value = String(st.nfft);
-      capSel.value = String(st.capture_samples);
-      segs.value = String(st.segments);
     });
     // Per-channel measurements
     this.ctl(
@@ -127,32 +121,33 @@ export class Controls implements View {
       rssi.value = String(st.rssi_hz / 1000);
       search.value = String(st.search_hz / 1000);
     });
-    // Smoothing
-    const ema = this.num(0.001, 1, 0.01, 70);
-    const clear = this.num(0.001, 1, 0.005, 70);
-    const sm = () => void this.apply(`EMA ${Math.round(Number(ema.value) * 1000)} ${Math.round(Number(clear.value) * 1000)}`);
+    // Smoothing: time constants, the same at any update rate
+    const ema = this.num(1, 60000, 10, 70);
+    const clear = this.num(1, 60000, 100, 70);
+    const sm = () => void this.apply(`EMA ${Math.round(Number(ema.value))} ${Math.round(Number(clear.value))}`);
     ema.onchange = sm;
     clear.onchange = sm;
-    this.ctl("RSSI EMA α · clear-floor EMA α (per update)", ema, clear);
+    this.ctl("Smoothing RSSI · channel floor (ms)", ema, clear);
     this.syncs.push((st) => {
-      ema.value = st.ema.toFixed(3);
-      clear.value = st.clear_ema.toFixed(3);
+      ema.value = String(st.ema_ms);
+      clear.value = String(st.clear_ms);
     });
     // Display spectrum
     const every = this.num(0, 255, 1, 56);
     const bins = el("select") as HTMLSelectElement;
     for (const v of [64, 128, 256, 512, 1024]) bins.append(new Option(`${v} bins`, String(v)));
-    const span = this.num(100, 40000, 100, 80);
     const det = el("select") as HTMLSelectElement;
     det.append(new Option("max", "MAX"), new Option("mean", "MEAN"));
-    const spec = () =>
-      void this.apply(`SPEC ${every.value} ${bins.value} ${Math.round(Number(span.value) * 1000)} ${det.value}`);
-    for (const c of [every, bins, span, det]) c.onchange = spec;
-    this.ctl("Display spectrum: every N hops (0 off) · bins · ± span kHz · detector", every, bins, span, det);
+    // The span isn't offered here: SPEC keeps the device's current one.
+    const spec = () => {
+      const span = this.app.store.status?.spec_span_hz;
+      if (span !== undefined) void this.apply(`SPEC ${every.value} ${bins.value} ${span} ${det.value}`);
+    };
+    for (const c of [every, bins, det]) c.onchange = spec;
+    this.ctl("Display spectrum: every N hops (0 off) · bins · detector", every, bins, det);
     this.syncs.push((st) => {
       every.value = String(st.spec_every);
       bins.value = String(st.spec_bins);
-      span.value = String(st.spec_span_hz / 1000);
       det.value = st.spec_detector ? "MAX" : "MEAN";
     });
     // Calibration / tuning
@@ -191,10 +186,6 @@ export class Controls implements View {
         b.disabled = st.tskip === undefined;
       }
     });
-    this.ctl(
-      "Spectrum orientation",
-      this.seg([["1", "Conjugate (default)"], ["0", "Raw"]], (v) => void this.apply(`CONJ ${v}`), (st) => String(st.conjugate)),
-    );
     this.ctl(
       "IQ correction",
       this.seg([["1", "On"], ["0", "Off"]], (v) => void this.apply(`IQCORR ${v}`), (st) => String(st.iq_corr)),

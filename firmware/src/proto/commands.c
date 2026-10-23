@@ -91,12 +91,14 @@ static proto_t proto = PROTO_RH;
 /* Scan configuration of the protocol not in use, restored on a switch. */
 static scan_config_t other_cfg;
 
-/* In RotorHazard mode the capture is always four FFT segments. */
-#define RH_SEGMENTS 4
-static void rh_set_fft(scan_config_t *c, unsigned nfft) {
+/* FFT sets the capture to four FFT segments, in both modes. In monitor mode
+ * CAPN and SEGMENTS can still override it (debug); RotorHazard mode refuses
+ * CAPN. */
+#define FFT_SEGMENTS 4
+static void set_fft(scan_config_t *c, unsigned nfft) {
     c->nfft = (uint16_t)nfft;
-    c->capture_samples = (uint16_t)(RH_SEGMENTS * nfft);
-    c->segments = RH_SEGMENTS;
+    c->capture_samples = (uint16_t)(FFT_SEGMENTS * nfft);
+    c->segments = FFT_SEGMENTS;
 }
 
 /* RotorHazard mode defaults: per-channel levels only, small FFT, no spectrum,
@@ -107,14 +109,14 @@ static void rh_defaults(scan_config_t *c) {
     c->gain_mode = RADIO_GAIN_MANUAL;
     c->gain = 45;
     c->metrics_mode = METRICS_RSSI;
-    rh_set_fft(c, 64);
+    set_fft(c, 64);
     c->spec_every = 0;
     c->mode = PLAN_GROUP;
     rh_apply_plan(c);
 }
 
 /* RotorHazard mode settings saved by CONFIG SAVE (NVS blob, layout by version).
- * The capture length follows the FFT size (rh_set_fft). Versions 1 and 2
+ * The capture length follows the FFT size (set_fft). Versions 1 and 2
  * start with the same 8 bytes as this one; 1 then stored the capture
  * length. Both are read with the median filter (they predate LEVELFILTER). */
 #define RH_SAVED_VERSION 3
@@ -143,7 +145,7 @@ static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
     c->gain = s->gain;
     c->metrics_mode = s->metrics_mode;
     c->mode = (plan_mode_t)s->mode;
-    rh_set_fft(c, s->nfft);
+    set_fft(c, s->nfft);
     rh_set_filter((lap_filter_t)s->filter);
 }
 
@@ -250,17 +252,17 @@ static void send_status(const char *keyword) {
     scanner_get_plan(&plan);
     reply_add("%s {\"protocol\":\"%s\",\"profile\":\"%s\",\"running\":%d,\"enabled\":%" PRIu32 ",\"mode\":\"%s\","
               "\"capture_samples\":%u,\"nfft\":%u,\"segments\":%u,\"rate_code\":%u,\"filter\":%d,"
-              "\"conjugate\":%d,\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"tskip\":%u,\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
+              "\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"tskip\":%u,\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
-              "\"ema\":%.3f,\"clear_ema\":%.3f,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
+              "\"ema_ms\":%u,\"clear_ms\":%u,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"throttle_hz\":%" PRIu32 ","
               "\"phy_idle\":%u,\"phy_idle_min_us\":%" PRIu32 ",\"plan\":[",
               keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
-              c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.conjugate, c.iq_corr, c.settle_us, radio_get_tune_skip(),
+              c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.iq_corr, c.settle_us, radio_get_tune_skip(),
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, (unsigned)radio_caps()->max_samples,
               c.recal == RADIO_RECAL_ONCE ? "ONCE" : c.recal == RADIO_RECAL_CACHE ? "CACHE" : "EVERY",
               metrics_mode_name(c.metrics_mode), c.rssi_hz, c.search_hz, c.dc_guard,
-              (double)c.ema_alpha, (double)c.clear_alpha, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
+              c.ema_ms, c.clear_ms, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type),
               level_filter_name(rh_get_filter()), c.max_rotation_hz, c.phy_idle, c.phy_idle_min_us);
     for (unsigned j = 0; j < plan.nhops; j++) {
@@ -422,8 +424,7 @@ static void handle(char *line) {
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (sscanf(line, "FFT %" SCNu32 " %c", &a, &extra) == 1 && a >= 64 && a <= PSD_MAX_FFT && !(a & (a - 1))) {
-        if (proto == PROTO_RH) rh_set_fft(&c, a);
-        else c.nfft = (uint16_t)a;
+        set_fft(&c, a);
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (sscanf(line, "SEGMENTS %" SCNu32 " %c", &a, &extra) == 1 && a >= 1 && a <= 64) {
@@ -436,10 +437,6 @@ static void handle(char *line) {
         link_text("OK\n");
     } else if (sscanf(line, "SETTLE %" SCNu32 " %c", &a, &extra) == 1 && a <= 20000) {
         c.settle_us = a;
-        scanner_set_config(&c);
-        link_text("OK\n");
-    } else if (sscanf(line, "CONJ %" SCNu32 " %c", &a, &extra) == 1 && a <= 1) {
-        c.conjugate = a;
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (sscanf(line, "IQCORR %" SCNu32 " %c", &a, &extra) == 1 && a <= 1) {
@@ -471,9 +468,10 @@ static void handle(char *line) {
         c.avg_shift = (uint8_t)a;
         scanner_set_config(&c);
         link_text("OK\n");
-    } else if (sscanf(line, "EMA %" SCNu32 " %" SCNu32 " %c", &a, &b, &extra) == 2 && a >= 1 && a <= 1000 && b >= 1 && b <= 1000) {
-        c.ema_alpha = a / 1000.0f;
-        c.clear_alpha = b / 1000.0f;
+    } else if (sscanf(line, "EMA %" SCNu32 " %" SCNu32 " %c", &a, &b, &extra) == 2 && a >= 1 && a <= 60000 && b >= 1 &&
+               b <= 60000) {
+        c.ema_ms = (uint16_t)a;
+        c.clear_ms = (uint16_t)b;
         scanner_set_config(&c);
         link_text("OK\n");
     } else if (sscanf(line, "SPEC %" SCNu32 " %" SCNu32 " %" SCNu32 " %31s %c", &a, &b, &d, arg2, &extra) == 4 &&

@@ -29,7 +29,6 @@ typedef struct {
     uint16_t nfft;
     uint8_t segments;
     int8_t filter_code;     /* -1 = PHY automatic */
-    bool iq_conjugate;      /* RF above the LO appears at negative baseband frequency */
     /* Spans, all one-sided (+/-) in Hz */
     uint32_t usable_hz;     /* bins kept; mimics the C5 Nyquist span on scaled profiles */
     uint32_t passband_hz;   /* analog filter passband; used for the noise floor */

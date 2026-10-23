@@ -29,7 +29,6 @@ static const profile_t profiles[] = {
         .capture_samples = 4096, .nfft = 1024, .segments = 4, /* 39 kHz bins; 2048-pt halves the hop rate */
         /* esp-sdr S3 curve: code 60 ~ 13 MHz full width (C5 48 MHz x k = 13.5). */
         .filter_code = 60,
-        .iq_conjugate = true,
         .usable_hz = 11300000,   /* C5 +/-40 MHz x k */
         .passband_hz = 6770000,  /* C5 +/-24 MHz x k; measured flat to ~6.5 MHz */
         .rssi_hz = 1410000,      /* C5 +/-5 MHz x k */
@@ -54,7 +53,6 @@ static const profile_t profiles[] = {
         .capture_samples = 4096, .nfft = 1024, .segments = 4, /* 78 kHz bins */
         /* PHY channel mode 1 (wide path), capacitor code 0 ~ 48 MHz full width. */
         .filter_code = 0,
-        .iq_conjugate = true,    /* as on the S3; verify with an LO-offset capture */
         .usable_hz = 40000000,   /* Nyquist */
         .passband_hz = 24000000,
         .rssi_hz = 5000000,

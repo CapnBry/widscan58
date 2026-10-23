@@ -39,6 +39,7 @@ typedef struct {
     float rssi_ema;
     float clear_floor;
     bool clear_init;
+    uint32_t last_us; /* the previous update, for the EMA weights */
     metrics_avg_t avg; /* time-averaged occupancy: peak, center, occupied band */
 } channel_state_t;
 
@@ -94,7 +95,6 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->segments = p->segments;
     c->rate_code = p->rate_code;
     c->filter = p->filter_code;
-    c->conjugate = p->iq_conjugate;
     c->iq_corr = true;
     c->settle_us = 100;
     c->gain_mode = RADIO_GAIN_MANUAL;
@@ -108,8 +108,12 @@ void scanner_defaults(const profile_t *p, scan_config_t *c) {
     c->recal = (radio_recal_t)rc->recal_default;
     c->nspurs = rc->nspurs > 16 ? 16 : rc->nspurs;
     for (unsigned j = 0; j < c->nspurs; j++) c->spurs_khz[j] = rc->spurs_khz[j];
-    c->ema_alpha = 0.25f;
-    c->clear_alpha = 0.02f;
+    /* Time constants, so the smoothing is the same at any FFT size or plan:
+     * 100 ms takes an empty channel's 0.3-1.1 dB per-update scatter (FFT
+     * 1024-64) to ~0.1 dB and still follows a pass; the clear floor is a
+     * slow baseline (PLAN.md, RSSI smoothing). */
+    c->ema_ms = 100;
+    c->clear_ms = 2000;
     c->signal_snr_db = 6.0f;
     c->centroid_db = 6.0f;
     c->avg_shift = 7; /* ~2.3 s at 56 hops/s */
@@ -334,6 +338,28 @@ static void do_levels(metrics_input_t *in, const psd_result_t *psd, const plan_h
     hop_stats(t0, t1, t2, t3);
 }
 
+/* METRICS FULL's smoothed RSSI and clear-channel floor (linear power), each
+ * an EMA weighted 1 - exp(-dt / tau) by the time since the channel's last
+ * update. Not in IRAM: METRICS FULL runs from flash anyway. */
+static __attribute__((noinline)) void smooth_channel(channel_state_t *st, float lin, bool clear, uint32_t now_us,
+                                                     const scan_config_t *c) {
+    float dt = (float)(now_us - st->last_us);
+    st->last_us = now_us;
+    if (!st->init) {
+        st->rssi_ema = lin;
+        st->init = true;
+    } else {
+        st->rssi_ema += (1.0f - expf(-dt / (1000.0f * c->ema_ms))) * (lin - st->rssi_ema);
+    }
+    if (!clear) return;
+    if (!st->clear_init) {
+        st->clear_floor = lin;
+        st->clear_init = true;
+    } else {
+        st->clear_floor += (1.0f - expf(-dt / (1000.0f * c->clear_ms))) * (lin - st->clear_floor);
+    }
+}
+
 static IRAM_ATTR void do_hop(void) {
     const scan_config_t *c = &sp->cfg;
     const profile_t *p = c->profile;
@@ -360,7 +386,8 @@ static IRAM_ATTR void do_hop(void) {
     const int64_t t1 = t2 - (tb - ta);
     const float rate = radio_caps()->rates_hz[c->rate_code];
     psd_result_t psd;
-    esp_err_t err = psd_compute(words, c->capture_samples, c->nfft, c->segments, rate, c->conjugate,
+    /* Conjugated: RF above the LO appears at negative baseband frequency on both targets. */
+    esp_err_t err = psd_compute(words, c->capture_samples, c->nfft, c->segments, rate, true,
                                 p->usable_hz, c->dc_guard, c->iq_corr ? &sp->iq[sp->hop] : NULL, &psd);
     if (err != ESP_OK) {
         sp->capture_errors++;
@@ -407,13 +434,7 @@ static IRAM_ATTR void do_hop(void) {
             float d = ((float)c->spurs_khz[k] - (float)hop->lo_khz) * 1000.0f - hop->offset_hz[j];
             if (fabsf(d) <= c->search_hz) m.flags |= CHF_SPUR;
         }
-        float lin = m.rssi;
-        if (!st->init) { st->rssi_ema = lin; st->init = true; }
-        else st->rssi_ema += c->ema_alpha * (lin - st->rssi_ema);
-        if (!(m.flags & CHF_SIGNAL)) {
-            if (!st->clear_init) { st->clear_floor = lin; st->clear_init = true; }
-            else st->clear_floor += c->clear_alpha * (lin - st->clear_floor);
-        }
+        smooth_channel(st, m.rssi, !(m.flags & CHF_SIGNAL), (uint32_t)t0, c);
         out[j] = (frame_channel_t){
             .id = hop->ch[j], .flags = m.flags,
             .rssi_cdb = cdb(m.rssi_db), .rssi_ema_cdb = cdb(metrics_db(st->rssi_ema)),
@@ -500,14 +521,14 @@ static void do_rawiq(const scan_request_t *r) {
     for (unsigned j = 0; j < r->n; j++) {
         uint32_t w = words[j];
         int i = radio_word_i(w) >> shift, q = radio_word_q(w) >> shift;
-        if (c->conjugate) q = -q;
+        q = -q; /* conjugated, as the spectra */
         iq[2 * j] = (int8_t)(i > 127 ? 127 : i < -128 ? -128 : i);
         iq[2 * j + 1] = (int8_t)(q > 127 ? 127 : q < -128 ? -128 : q);
     }
     /* In chunks, so the link queue needn't hold a whole snapshot: the samples
      * stay put in the capture aperture while each chunk waits for room. */
     frame_rawiq_t h = {.lo_khz = r->lo_khz, .rate_hz = radio_caps()->rates_hz[r->rate_code],
-                       .n = r->n, .conjugated = c->conjugate, .shift = (uint8_t)shift};
+                       .n = r->n, .conjugated = 1, .shift = (uint8_t)shift};
     for (unsigned off = 0; off < r->n; off += RAWIQ_CHUNK) {
         unsigned len = r->n - off < RAWIQ_CHUNK ? r->n - off : RAWIQ_CHUNK;
         h.offset = (uint16_t)off;

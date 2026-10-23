@@ -319,7 +319,6 @@ export interface Status {
   segments: number;
   rate_code: number;
   filter: number;
-  conjugate: number;
   iq_corr: number;
   settle_us: number;
   tskip?: number; // TUNESKIP mask; absent from firmware before it was reported
@@ -332,8 +331,8 @@ export interface Status {
   rssi_hz: number;
   search_hz: number;
   dc_guard: number;
-  ema: number;
-  clear_ema: number;
+  ema_ms: number; // RSSI EMA time constant (METRICS FULL)
+  clear_ms: number; // clear-channel floor EMA time constant
   signal_db: number;
   avg_shift: number;
   spec_every: number;

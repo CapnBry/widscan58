@@ -69,10 +69,6 @@ void radio_set_tune_skip(unsigned mask) {
     tuned_once = false;
 }
 unsigned radio_get_tune_skip(void) { return tune_skip; }
-void radio_set_plan(const uint32_t *lo_khz, unsigned n) {
-    (void)lo_khz;
-    (void)n;
-}
 static radio_gain_mode_t gain_mode = RADIO_GAIN_MANUAL;
 static unsigned gain_code = 45;
 static int filter_code = -1;

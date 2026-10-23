@@ -70,12 +70,6 @@ void radio_set_regwatch(bool on);
 void radio_set_tune_skip(unsigned mask);
 unsigned radio_get_tune_skip(void);
 
-/* The scan plan's LOs in hop order (at most RADIO_PLAN_MAX_LOS), whenever it
- * changes; call from the task that tunes. The C5 gives its periodic full
- * tunes to them in turn; the S3 ignores it. */
-#define RADIO_PLAN_MAX_LOS 8
-void radio_set_plan(const uint32_t *lo_khz, unsigned n);
-
 /* Debug: power the radio down while the scanner waits (depth 1: the RX path,
  * 2: the RF, as esp_phy_disable does, 3: also the modem clocks, 4: as 3 with a
  * lighter wake-up), and back up, retuned to the last LO, which then settles as

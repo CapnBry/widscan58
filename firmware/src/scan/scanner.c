@@ -175,10 +175,6 @@ static void apply_config(void) {
         sp->spec_countdown = sp->cfg.spec_every;
         sp->spec_k = 0;
     }
-    _Static_assert(PROFILE_MAX_CHANNELS <= RADIO_PLAN_MAX_LOS, "plan LOs");
-    uint32_t los[RADIO_PLAN_MAX_LOS];
-    for (unsigned j = 0; j < sp->plan.nhops; j++) los[j] = sp->plan.hop[j].lo_khz;
-    radio_set_plan(los, sp->plan.nhops);
     sp->tuned_lo_khz = 0; /* settings below (recalibration mode) apply at the next tune */
     psd_set_fft((psd_fft_t)sp->cfg.fft_type);
     psd_release_unused();

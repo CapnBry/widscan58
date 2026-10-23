@@ -58,6 +58,7 @@ static struct {
     uint16_t freq_mhz;
     bool set;          /* the server has set the frequency */
     bool mapped;       /* and the profile can tune it */
+    bool resync;       /* reset when the scanner applies the next plan */
     int64_t last_us;
     lap_seat_t lap;
 } *seat;
@@ -118,6 +119,17 @@ void rh_set_filter(lap_filter_t f) {
 }
 
 lap_filter_t rh_get_filter(void) { return (lap_filter_t)seat[0].lap.filter; }
+
+void rh_plan_applied(void) {
+    portENTER_CRITICAL(&mux);
+    for (unsigned j = 0; j < RH_SEATS; j++) {
+        if (!seat[j].resync) continue;
+        seat[j].resync = false;
+        lap_reset(&seat[j].lap);
+        seat[j].last_us = 0;
+    }
+    portEXIT_CRITICAL(&mux);
+}
 
 IRAM_ATTR void rh_feed(unsigned seat_idx, int64_t t_us, uint8_t level) {
     if (seat_idx >= RH_SEATS) return;
@@ -227,6 +239,10 @@ static void set_frequency(uint16_t mhz) {
     if (changed) {
         lap_reset(&seat[cur].lap);
         seat[cur].last_us = 0;
+        /* This seat and the ones it joins restart together on the new
+         * plan, so seats on one frequency stay identical (rh_plan_applied). */
+        for (unsigned j = 0; j < RH_SEATS; j++)
+            if (j == cur || (seat[j].set && seat[j].freq_mhz == mhz)) seat[j].resync = true;
     }
     portEXIT_CRITICAL(&mux);
     if (!changed) return;

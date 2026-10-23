@@ -94,7 +94,7 @@ export class Controls implements View {
     // Analog filter
     const filter = this.num(-1, 63, 1, 64);
     filter.onchange = () => void this.apply(Number(filter.value) < 0 ? "FILTER AUTO" : `FILTER ${filter.value}`);
-    this.ctl("Analog filter code (-1 = PHY auto; S3: 60 ≈ 13 MHz, 0 ≈ 69 MHz)", filter);
+    this.ctl("Analog filter code (-1 = PHY auto; 60 ≈ 13 MHz, 0 ≈ 69 MHz)", filter);
     this.syncs.push((st) => (filter.value = String(st.filter)));
     // FFT / capture
     const fftSel = el("select") as HTMLSelectElement;

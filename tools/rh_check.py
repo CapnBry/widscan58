@@ -42,6 +42,8 @@ ap.add_argument("--rh", default=os.path.join(here, "..", "ref", "RotorHazard"), 
 ap.add_argument("--enter", type=int, default=145, help="EnterAt for every seat (level code)")
 ap.add_argument("--exit", type=int, default=125, help="ExitAt for every seat (level code)")
 ap.add_argument("--seats", type=int, default=6, help="seats given R1.. (the rest off, as RotorHazard does)")
+ap.add_argument("--freq", type=int, metavar="MHZ",
+                help="put every used seat on this frequency and report how far apart their passes and laps are")
 ap.add_argument("--cmd", action="append", default=[], metavar="LINE",
                 help="device command to send after discovery, e.g. 'METRICS RSSI' (repeatable; not saved)")
 args = ap.parse_args()
@@ -86,7 +88,7 @@ intf.node_crossing_callback = lambda node: crossings.append((node.index + 1, nod
 intf.new_enter_or_exit_at_callback = lambda node, enter: None
 raceband = [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917]
 for j, n in enumerate(nodes):
-    ok = intf.set_frequency(j, raceband[j] if j < args.seats else 0)
+    ok = intf.set_frequency(j, (args.freq or raceband[j]) if j < args.seats else 0)
     intf.set_enter_at_level(j, args.enter)
     intf.set_exit_at_level(j, args.exit)
     print(f"  set node {j + 1}: {'ok' if ok else 'FAILED'} freq {n.frequency} enter {n.enter_at_level} exit {n.exit_at_level}")
@@ -102,3 +104,28 @@ intf.stop()
 print(f"passes ({len(passes)}):", passes[:20])
 print(f"crossing changes ({len(crossings)}):", crossings[:20])
 print(intf.get_intf_error_report_str(True))
+if args.freq and passes:
+    # Seats on one frequency see the same passes: group them (passes within
+    # 50 ms) and compare the server's timestamps, and the laps between
+    # events every seat saw.
+    events = []
+    for seat, ts, _ in sorted(passes, key=lambda p: p[1]):
+        if events and ts - events[-1][0] < 0.05 and seat not in events[-1][1]:
+            events[-1][1][seat] = ts
+        else:
+            events.append((ts, {seat: ts}))
+    # Only events every seat saw, 300 ms clear of the others: passes closer
+    # than the server's 100 ms poll can merge differently per seat.
+    gaps = [b[0] - a[0] for a, b in zip(events, events[1:])]
+    full = [e[1] for j, e in enumerate(events) if len(e[1]) == args.seats and
+            (j == 0 or gaps[j - 1] >= 0.3) and (j == len(gaps) or gaps[j] >= 0.3)]
+    spread = sorted((max(e.values()) - min(e.values())) * 1000 for e in full)
+    laps = []
+    for a, b in zip(full, full[1:]):
+        lap = [b[k] - a[k] for k in a]
+        laps.append((max(lap) - min(lap)) * 1000)
+    laps.sort()
+    med = lambda v: v[len(v) // 2] if v else float("nan")
+    print(f"same frequency: {len(events)} events, {len(full)} seen by all {args.seats} seats and isolated")
+    print(f"  pass spread across seats: median {med(spread):.2f} ms, max {max(spread, default=float('nan')):.2f} ms")
+    print(f"  lap spread across seats:  median {med(laps):.2f} ms, max {max(laps, default=float('nan')):.2f} ms")

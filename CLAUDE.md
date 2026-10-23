@@ -278,15 +278,26 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   plateau. Peaks
   and nadirs (4-code, 1 dB hysteresis, 8 queued each) feed the server's RSSI graph.
   A frequency change keeps the lap count (the server counts passes by its
-  change). `LEVELFILTER EMA` replaces the median with a median of 3 and an
+  change), and resets the seat, with every seat already on that frequency,
+  when the scanner applies the new plan (`rh_plan_applied`): seats on one
+  frequency (`MODE GROUP`) get the same updates from the same point, so
+  they report identical passes. The server timestamps each seat by its own
+  read (read midpoint − ms since the pass, whole ms), so such seats still
+  differ by its read jitter and the ms rounding: ~2 ms per lap
+  (`rh_check.py --freq`). `LEVELFILTER EMA` replaces the median with a median of 3 and an
   exponential average (time constant `LAP_EMA_TAU_US`, 2.72 ms; the weight
   1 − exp(−dt/τ) per update from its interval, as an integer Padé
   approximant), reported from the first update with the middle update's time
   less ~3 ms of average delay.
 - **Check:** `tools/rh_check.py` runs RotorHazard's own interface code against
   the board (no VTX: thresholds inside the filtered noise make noise
-  crossings; at manual gain 60 the seats sit at codes ~64–71 and `--enter 67
-  --exit 67` gave 239 passes in 30 s).
+  crossings; at manual gain 60 the seats sit at codes ~79–83, drifting with
+  temperature, and `--enter 82 --exit 82` gave ~4 passes/s; 2026-10-23).
+  `--freq <MHz>` puts every seat on one frequency and reports how far apart
+  their pass and lap times are, from events 300 ms clear of others (noise
+  passes closer than the 100 ms poll merge differently per seat). 60 s,
+  8 seats: lap spread median 2 ms, max 2 ms (2 / 3 ms before same-frequency
+  seats were reset together; 1 / 2 ms with µs lap times too, not kept).
 - **Testing in RotorHazard mode:** `PROTOCOL RH` applies the user's saved
   defaults, so after switching, *set* `MODE`, `FFT`, `GAIN`,
   `METRICS` and `LEVELFILTER` to what the test needs, but never `CONFIG SAVE` them (or `CONFIG RESET`). Leave them

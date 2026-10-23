@@ -190,6 +190,7 @@ static void apply_config(void) {
     sp->floor_bias = metrics_percentile_bias(segs ? segs : 1, FLOOR_PERCENTILE);
     sp->floor_bias_q8 = (int32_t)lrintf(METRICS_LEVEL_PER_DB * 10.0f * log10f(sp->floor_bias) * 256.0f);
     sp->centroid_ratio = powf(10.0f, sp->cfg.centroid_db / 10.0f);
+    if (sp->cfg.rh) rh_plan_applied();
 }
 
 /* log2(1 + i/256) * 256, for spectrum codes without per-bin float math. */

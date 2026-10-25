@@ -11,7 +11,7 @@ export interface LapRules {
   minLapOn: boolean; // ignore short laps
   minLapS: number; // shorter laps are ignored
 }
-export const DEFAULT_LAP_RULES: LapRules = { fastestOn: true, count: 3, minLapOn: true, minLapS: 8 };
+export const DEFAULT_LAP_RULES: LapRules = { fastestOn: true, count: 3, minLapOn: true, minLapS: 5 };
 
 export interface FastestRun {
   totalS: number;

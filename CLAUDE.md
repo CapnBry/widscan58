@@ -336,7 +336,7 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   localStorage and written on connect; a metric change leaves them as they
   are), a level graph with passes, the detection events with lap times, and
   the receiver settings this mode allows. Laps (`web/src/model/laps.ts`): a
-  pass under the minimum lap (8 s) after the last counted one is listed as
+  pass under the minimum lap (5 s) after the last counted one is listed as
   ignored, and each seat keeps its fastest 3 consecutive laps (tile, and an
   event row for each new record). Clear, a seat's channel change, a device
   restart and a reconnect break a run (no lap across them); only Clear drops
@@ -351,8 +351,9 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   records). Voice callouts (`util/speech.ts`, the browser's speech
   synthesis, a Google voice when there is one; saved in `UiSettings`): each
   lap as channel and seconds to 0.1 ("R4 13.7"), with volume, rate, pitch
-  and a Test button; hidden while off, an error line without speech
-  synthesis.
+  and a Test button; hidden while off; greyed out with an error line when the
+  browser has no speech synthesis or no voices (Firefox on Linux without a
+  speech service has the API but no voices, and speaks nothing).
   The page takes the metric and receiver settings from the device (`CONFIG?`)
   and never sets them on connect; Receiver (gain, LO plan, FFT size, output
   value, output filter) → Save sends `CONFIG SAVE`, Reset `CONFIG RESET`. The

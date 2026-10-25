@@ -6,7 +6,7 @@ import type { App, UiSettings } from "../model/app";
 import type { LapRules } from "../model/laps";
 import { LAP_COUNT_MAX, LAP_COUNT_MIN, MIN_LAP_MAX_S } from "../model/rh";
 import { el } from "../util/canvas";
-import { lapCallout, speak, speechSupported } from "../util/speech";
+import { lapCallout, onVoicesChanged, speak, speechAvailable } from "../util/speech";
 import { ScreenWake } from "../util/wakeLock";
 
 type Flag = "rhShowCrossings" | "rhShowFastest" | "keepScreenOn" | "voiceOn";
@@ -21,12 +21,13 @@ export class RhEventsDialog {
   private showFastest!: HTMLLabelElement;
   private sliders: { key: Slider; input: HTMLInputElement; out: HTMLElement; fmt: (v: number) => string }[] = [];
   private voiceControls = el("div", { class: "voice-controls" });
+  private voiceOption!: HTMLLabelElement;
+  private voiceError = el("div", { class: "options-error" }, "Speech is not available: this browser has no voices.");
 
   constructor(private app: App) {
     const closeBtn = el("button", { class: "primary", autofocus: "" }, "Close");
     closeBtn.onclick = () => this.el.close();
     const wake = ScreenWake.supported();
-    const voice = speechSupported();
     const testBtn = el("button", { title: "Speak a callout for the selected seat" }, "Test");
     testBtn.onclick = () => this.testCallout();
     this.voiceControls.append(
@@ -52,11 +53,13 @@ export class RhEventsDialog {
       this.rule("minLapOn", "minLapS", "Minimum lap time", "s", 0, MIN_LAP_MAX_S, "Ignore passes sooner than this after the last one."),
       this.rule("fastestOn", "count", "Fastest consecutive laps", "laps", LAP_COUNT_MIN, LAP_COUNT_MAX, "Each seat's fastest run of this many laps."),
       el("h3", {}, "Voice callouts"),
-      this.option("voiceOn", "Announce laps", "Each lap's channel and time, e.g. “R4 13.7”.", !voice),
-      voice ? this.voiceControls : el("div", { class: "options-error" }, "Speech is not available in this browser."),
+      (this.voiceOption = this.option("voiceOn", "Announce laps", "Each lap's channel and time, e.g. “R4 13.7”.")),
+      this.voiceControls,
+      this.voiceError,
       el("div", { class: "flash-buttons" }, closeBtn),
     );
     this.boxes.get("voiceOn")!.addEventListener("change", () => this.syncVoice());
+    onVoicesChanged(() => this.syncVoice());
   }
 
   open() {
@@ -66,8 +69,15 @@ export class RhEventsDialog {
     this.el.showModal();
   }
 
+  /** Greyed out (and shown off, the setting kept) while there is no voice. */
   private syncVoice() {
-    this.voiceControls.hidden = !this.app.settings.voiceOn;
+    const voice = speechAvailable();
+    const box = this.boxes.get("voiceOn")!;
+    box.disabled = !voice;
+    box.checked = voice && this.app.settings.voiceOn;
+    this.voiceOption.classList.toggle("disabled", !voice);
+    this.voiceError.hidden = voice;
+    this.voiceControls.hidden = !box.checked;
     for (const { key, input, out, fmt } of this.sliders) {
       input.value = String(this.app.settings[key]);
       out.textContent = fmt(this.app.settings[key]);

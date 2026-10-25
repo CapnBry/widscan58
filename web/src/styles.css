@@ -249,6 +249,8 @@ header.top .actions button { white-space: nowrap; }
 .gpio-status.err { color: var(--critical); }
 .options-dialog .rule-value input { padding: 2px 4px; text-align: right; font-variant-numeric: tabular-nums; }
 button.icon { display: inline-flex; align-items: center; justify-content: center; padding-left: 6px; padding-right: 6px; }
+/* As tall as the text buttons beside it; the icon keeps its size. */
+.card h2 .tools button.icon { align-self: stretch; }
 /* Grid view (narrow screens): fade an edge while there is more to scroll to. */
 .plan-scroll-wrap { position: relative; }
 .plan-scroll-wrap::before, .plan-scroll-wrap::after {

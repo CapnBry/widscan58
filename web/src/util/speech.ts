@@ -12,6 +12,18 @@ export function speechSupported(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
 }
 
+/** Speech that can be heard: the API and at least one voice. Firefox on Linux
+ *  has the API but no voices without a speech service, and then speaks nothing
+ *  without an error. Voices can arrive later (onVoicesChanged). */
+export function speechAvailable(): boolean {
+  return speechSupported() && speechSynthesis.getVoices().length > 0;
+}
+
+/** Calls fn whenever the browser's voice list changes. */
+export function onVoicesChanged(fn: () => void) {
+  if (speechSupported()) speechSynthesis.addEventListener("voiceschanged", fn);
+}
+
 /** A lap callout: the channel ("R4") and the lap in seconds to 0.1 s. */
 export function lapCallout(channel: string, lapS: number): string {
   return `${channel} ${lapS.toFixed(1)}`;
@@ -35,7 +47,8 @@ function pickVoice(): SpeechSynthesisVoice | null {
   );
 }
 
-if (speechSupported()) speechSynthesis.addEventListener("voiceschanged", () => (voice = undefined));
+onVoicesChanged(() => (voice = undefined));
+if (speechSupported()) speechSynthesis.getVoices(); // starts loading them (Chrome)
 
 export function speak(text: string, s: VoiceSettings) {
   if (!speechSupported()) return;

@@ -1,20 +1,20 @@
 // Detection events options (the gear by Clear): what the event list shows,
 // keeping the screen on while a device is connected, the lap rules
-// (RhModel.lapRules) and voice callouts of lap times. Changes apply at once.
+// (TimerModel.lapRules) and voice callouts of lap times. Changes apply at once.
 // GPL-3.0-or-later.
 import type { App, UiSettings } from "../model/app";
 import type { LapRules } from "../model/laps";
-import { LAP_COUNT_MAX, LAP_COUNT_MIN, MIN_LAP_MAX_S } from "../model/rh";
+import { LAP_COUNT_MAX, LAP_COUNT_MIN, MIN_LAP_MAX_S } from "../model/timer";
 import { el } from "../util/canvas";
 import { lapCallout, onVoicesChanged, speak, speechAvailable } from "../util/speech";
 import { ScreenWake } from "../util/wakeLock";
 
-type Flag = "rhShowCrossings" | "rhShowFastest" | "keepScreenOn" | "voiceOn";
+type Flag = "timerShowCrossings" | "timerShowFastest" | "keepScreenOn" | "voiceOn";
 type Slider = "voiceVolume" | "voiceRate" | "voicePitch";
 type RuleFlag = "minLapOn" | "fastestOn";
 type RuleValue = "minLapS" | "count";
 
-export class RhEventsDialog {
+export class TimerEventsDialog {
   readonly el: HTMLDialogElement;
   private boxes = new Map<Flag, HTMLInputElement>();
   private rules: { flag: RuleFlag; value: RuleValue; box: HTMLInputElement; input: HTMLInputElement }[] = [];
@@ -41,8 +41,8 @@ export class RhEventsDialog {
       { class: "options-dialog" },
       el("h2", {}, "Detection events"),
       el("h3", {}, "Display"),
-      this.option("rhShowCrossings", "Split Enter/Exit events", "List each crossing's enter and exit, besides the passes."),
-      (this.showFastest = this.option("rhShowFastest", "Fastest consecutive", "List each new fastest run. The seats show it either way.")),
+      this.option("timerShowCrossings", "Split Enter/Exit events", "List each crossing's enter and exit, besides the passes."),
+      (this.showFastest = this.option("timerShowFastest", "Fastest consecutive", "List each new fastest run. The seats show it either way.")),
       this.option(
         "keepScreenOn",
         "Keep screen on",
@@ -99,27 +99,27 @@ export class RhEventsDialog {
 
   /** The selected seat's channel (or the first one on) and a made-up lap. */
   private testCallout() {
-    const seats = this.app.rh.seats;
+    const seats = this.app.timer.seats;
     const s = seats.find((x) => x.index === this.app.settings.selected && x.channel) ?? seats.find((x) => x.channel);
     const lapS = 10 + Math.random() * 20;
     speak(lapCallout(s?.channel ?? "R1", lapS), voiceSettings(this.app.settings));
   }
 
   private syncRules() {
-    const r = this.app.rh.lapRules;
+    const r = this.app.timer.lapRules;
     for (const { flag, value, box, input } of this.rules) {
       box.checked = r[flag];
       input.disabled = !r[flag];
       input.value = String(r[value]);
     }
     // Nothing to list while no fastest run is kept.
-    const box = this.boxes.get("rhShowFastest")!;
+    const box = this.boxes.get("timerShowFastest")!;
     box.disabled = !r.fastestOn;
     this.showFastest.classList.toggle("disabled", !r.fastestOn);
   }
 
   private setRules(patch: Partial<LapRules>) {
-    this.app.rh.setLapRules(patch);
+    this.app.timer.setLapRules(patch);
     this.syncRules();
   }
 

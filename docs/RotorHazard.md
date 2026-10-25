@@ -10,7 +10,7 @@ port in its config.
 1. Open https://capnbry.github.io/widscan58/ in a web browser, plug in the
    ESP32-C5 board and click **Flash device**.
 2. Click **Connect device**, open the menu (☰, top left) and pick
-   **RotorHazard mode**. The firmware also boots in this mode.
+   **Lap timer mode**. The firmware also boots in this mode.
 3. Under **Receiver**, set the RX gain, pick the level the seats report and
    how it is smoothed:
    - **RX gain**: the default is 45. Higher gains reach further but a nearby
@@ -25,7 +25,7 @@ port in its config.
      own nodes), or **EMA**, a much lighter filter (see Smoothing).
 4. Click **Save** so the board keeps these settings. RotorHazard's own UI can't
    set them, and the board applies the saved ones every time it enters
-   RotorHazard mode.
+   lap timer mode.
 5. Click **Disconnect** (only one program can hold the serial port), then plug
    the board into the RotorHazard server.
 
@@ -57,7 +57,7 @@ RotorHazard's web UI.
 ## RX gain
 
 The RX gain is an index into the radio's gain table, 0–83. Set it on the web
-UI's RotorHazard mode page under **Receiver** → **RX gain**, then click
+UI's lap timer mode page under **Receiver** → **RX gain**, then click
 **Save**. It takes effect at once. RotorHazard's own UI can't change it.
 
 ![Seat levels against RX gain: a 25 mW VTX on R1, 0.9 m from a XIAO ESP32-C5 with no antenna; the other seats show the noise floor](../images/rh-gain-sweep.png)
@@ -68,7 +68,7 @@ the noise floor.*
 
 To adjust it, set the gain using the webui and "Save" the settings. Then,
 move the device over to RotorHazard and fly a few passes (or hold a powered
-quad in the gate) and watch the seat's level graph on the RotorHazard mode page:
+quad in the gate) and watch the seat's level graph on the lap timer mode page:
 
 - If passes reach 254 and stay flat at the top, lower the gain by 5–10.
 - If passes rise less than about 40 codes (10 dB) over the level with no VTX,
@@ -82,7 +82,7 @@ mode, channels within 40 MHz share an LO, so one capture covers two Raceband
 channels. A full pass over the seats is "number of LOs × hop time". With only
 one LO the board never retunes, which is much faster.
 
-Measured on the C5 with the default RotorHazard settings (a 64-point FFT:
+Measured on the C5 with the default lap timer mode settings (a 64-point FFT:
 each capture is four 64-point FFTs with 1.25 MHz bins, averaged), RSSI, GROUP
 LO, Raceband R1 up to Rn, using RotorHazard's own interface code
 (`tools/rh_check.py`). The time is the median of the board's `loop_time` for
@@ -166,4 +166,4 @@ the median's, so leave more room between EnterAt and ExitAt.
 - In GROUP mode a very strong VTX can show a faint mirror image on its pair
   channel (R1 on R2, for example). The digital IQ correction (`IQCORR`, on by
   default) removes it. Using SINGLE mode also avoids it, at half the rate.
-- The web UI's RotorHazard page polls the board the same way the server does.
+- The web UI's lap timer page polls the board the same way the server does.

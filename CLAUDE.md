@@ -9,9 +9,9 @@ FPV channel scanner using the ESP32's built-in radio as an SDR, through the raw
 I/Q debug path found by [ESPARGOS/esp-sdr](https://github.com/ESPARGOS/esp-sdr).
 The firmware steps through up to eight FPV channels and reports RSSI, noise
 floor, SNR, peak and video-center frequency per channel, plus a decimated
-spectrum. A Web Serial dashboard shows it all live. In RotorHazard mode the
-board is a RotorHazard timer node instead: one USB port with a seat per channel
-(see "RotorHazard mode" below).
+spectrum. A Web Serial dashboard shows it all live. In lap timer mode the
+board is a lap timer instead, and also a RotorHazard timer node: one USB port
+with a seat per channel (see "Lap timer mode" below).
 
 Targets: the **ESP32-C5** (real 5.8 GHz) runs on a Seeed XIAO ESP32-C5 and works
 with the web UI: ~4.0 ms/hop, about 60 rotations/s over R1–R8 (PLAN.md, Status,
@@ -72,14 +72,14 @@ e.g. on a board flashed with something else. Recover with BOOT + RESET, then
 `ERR boot <step> <error> heap=… largest=…` every second (once a host has sent
 something) instead of reboot-looping.
 
-**The firmware boots silent, in RotorHazard mode** (`firmware/src/proto/commands.c`):
+**The firmware boots silent, in lap timer mode** (`firmware/src/proto/commands.c`):
 it sends nothing until asked, as a RotorHazard server expects of a node, and
 there is no `READY` line any more. Our hosts switch with `PROTOCOL MONITOR`
 (the web UI, `widscan58cli.py` and `tools/flash.sh` do this themselves; with
 `pio device monitor` or a terminal, type it). In monitor mode a lone RotorHazard
-probe byte (0x22) after 100 ms of input silence switches back to RotorHazard
+probe byte (0x22) after 100 ms of input silence switches back to lap timer
 mode, so a RotorHazard server can take over a port a monitor left streaming.
-In RotorHazard mode, input bytes `A`–`P` and `T` (unused by RotorHazard) start one of our
+In lap timer mode, input bytes `A`–`P` and `T` (unused by RotorHazard) start one of our
 command lines; only a few are allowed there (`rh_allowed`).
 
 **Slim build:** `firmware/CMakeLists.txt` sets `COMPONENTS` to our component
@@ -180,7 +180,7 @@ for its 952 µs slot, blocking on a timer (the CPU idles) when at least 100 µs
 are left, so a single LO at `FFT 64` (~0.28 ms hops) reads 1050 /s. The hop
 times in the frames and telemetry leave the wait out. `main.c` clears
 `PCR_CPU_WAIT_MODE_FORCE_ON` so the CPU clock stops in WFI (IDF leaves it set
-on the C5). USB current at 5.23 V, RotorHazard mode, one seat (2026-10-17, with the cap at 1100 /s):
+on the C5). USB current at 5.23 V, lap timer mode, one seat (2026-10-17, with the cap at 1100 /s):
 99.4 mA unthrottled (~3500 /s), 93.5 mA throttled, 93.3 mA throttled with
 the clock gating, 90.4 mA with the scan stopped. The rest is the radio and
 board, not the CPU: powering the RF down in the wait (`PHYIDLE 4`) gives
@@ -220,8 +220,8 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
-| `FFT <n>`, `CAPN <samples>`, `SEGMENTS <n>` | FFT size (from 64; S3: up to 2048; C5: up to 1024). `FFT` sets the capture to 4 × the FFT size, averaged as 4 Welch segments, in both modes; the web UI only offers the FFT size (64–1024). `CAPN` (from 256) and `SEGMENTS` override that in monitor mode (debug; the next `FFT` resets them); RotorHazard mode refuses `CAPN` |
-| `EMA <rssi_ms> <clear_ms>` | `METRICS FULL` smoothing time constants, 1–60000 ms (default 100 and 2000): the smoothed RSSI and the clear-channel floor (RSSI averaged only while the channel is empty), each update weighted 1 − exp(−dt/τ) by the time since that channel's last one, so the smoothing is the same at any FFT size or plan. Reported as `ema_ms`/`clear_ms` in `STATUS?`. Not used by `METRICS RSSI\|SNR` or RotorHazard mode, whose levels are coded per hop and filtered by `LEVELFILTER` |
+| `FFT <n>`, `CAPN <samples>`, `SEGMENTS <n>` | FFT size (from 64; S3: up to 2048; C5: up to 1024). `FFT` sets the capture to 4 × the FFT size, averaged as 4 Welch segments, in both modes; the web UI only offers the FFT size (64–1024). `CAPN` (from 256) and `SEGMENTS` override that in monitor mode (debug; the next `FFT` resets them); lap timer mode refuses `CAPN` |
+| `EMA <rssi_ms> <clear_ms>` | `METRICS FULL` smoothing time constants, 1–60000 ms (default 100 and 2000): the smoothed RSSI and the clear-channel floor (RSSI averaged only while the channel is empty), each update weighted 1 − exp(−dt/τ) by the time since that channel's last one, so the smoothing is the same at any FFT size or plan. Reported as `ema_ms`/`clear_ms` in `STATUS?`. Not used by `METRICS RSSI\|SNR` or lap timer mode, whose levels are coded per hop and filtered by `LEVELFILTER` |
 | `METRICS FULL\|RSSI\|SNR`, `METRICS?` | Per-channel measurements. `FULL` (default): everything, `METRICS` frames. `RSSI`: only the RSSI-window power; `SNR`: that plus noise floor and SNR. Both send compact `LEVELS` frames of byte codes (integer math per channel, for lap timing); the UI leaves the rest blank. They do not mask board spurs (at `FFT 128` the mask would cover ~1.9 MHz of R8 on the C5; the unmasked spur adds ~2 dB to the empty channel) |
 | `SPEC <every_n_hops> <bins> <span_hz> MAX\|MEAN` | Display spectrum rate and resolution (default `SPEC 4 256 <usable span> MAX`: 40000000 on the C5, 11300000 on the S3). Spectra are N hops apart, N+1 each time the LO sequence would repeat (when N shares a factor with the number of LOs), so they cycle through all LOs |
 | `RAWIQ <lo_kHz> <samples> [rate]` | One raw I/Q snapshot (8-bit, auto-scaled), sent as consecutive 1024-sample `RAWIQ` frames (header: total `n` and this chunk's `offset`). At most `rawiq_max` samples, the capture buffer: 16380 on both targets. The C5 tunes in whole MHz, so `lo_kHz` must be a multiple of 1000 there |
@@ -233,14 +233,21 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `REGWATCH 0\|1` | Debug, C5: read three modem register blocks (0x600a0000, 0x600a0800: 64 words each; 0x600a7000: 256, with the gain register) right before and after each capture, learn the bits that change by themselves for 5 s, then print `REGDIFF t=<ms> lo=<MHz> w\|x n=<count> <addr>:<old>><new> …` for other changes (`w`: during the capture, `x`: since the same LO's previous capture; 8 LOs, 2000 lines per enable). ~17 KB of heap, kept once used; off, no measurable cost (hop times unchanged). PLAN.md, "Level jumps behind a powered VTX" |
 | `AVG <shift>` | Averaging of the reported most-occupied frequency, center and 99 % OBW: weight 2^-shift per hop, 4–8 (default 7: about 2.3 s at 56 hops/s, longer when fewer hops reach a channel) |
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
-| `CONFIG SAVE` | RotorHazard mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the RotorHazard mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
-| `CONFIG RESET` | RotorHazard mode only: erase the saved RotorHazard mode defaults and apply the built-in ones |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in RotorHazard mode. In RotorHazard mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
-| `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | RotorHazard mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
+| `CONFIG SAVE` | Lap timer mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the lap timer mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
+| `CONFIG RESET` | Lap timer mode only: erase the saved lap timer mode defaults and apply the built-in ones |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in lap timer mode. In lap timer mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
+| `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | Lap timer mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
 | `GPIO <n> NONE\|LOW\|HIGH`, `GPIO SAVE`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `GPIO SAVE` makes the settings in effect the boot ones (NVS, base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; `src/gpio_out.c`), applied right after `nvs_flash_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `x` not available (USB, and the flash pins IDF reserves). Works in both modes |
-| `REBOOT` | Restart (USB stays connected). The board comes back silent in RotorHazard mode; the web UI notices the missing telemetry and switches it back to monitor mode |
+| `REBOOT` | Restart (USB stays connected). The board comes back silent in lap timer mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
-## RotorHazard mode
+## Lap timer mode
+
+Called "RotorHazard mode" until 2026-10-25. The name changed as a courtesy to
+the RotorHazard developers, so the feature reads as complementary to their
+project rather than a copy of it: describe our functionality as lap timer
+mode, and use RotorHazard's name only for their protocol, server and code
+(`PROTOCOL RH`, `rh.c`, `proto/rh.ts`, `RhLink`, `rh_check.py`; the web UI's
+lap timer code is `TimerModel`, `views/timer.ts`).
 
 The board answers RotorHazard's serial node protocol (node API level 36) as one
 multi-node processor with 8 seats, like an S32_BPill board with 8 receivers.
@@ -257,9 +264,8 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   updates of a seat (~660 /s; R1–R8 ~1.96 ms, ~510 /s; `rh_check.py`'s
   `loop_time`, docs/RotorHazard.md). The default gain is manual 45, as in
   monitor mode (gain sweeps with a 25 mW VTX at 0.9 m, no antenna on the
-  board: PLAN.md, "Gain sweep"). `CONFIG SAVE` replaces the gain, FFT, metric, LO plan and level filter defaults (NVS blob version 3, `commands.c`; versions 1
-  and 2 load with the median filter); they are applied on every switch to this
-  mode.
+  board: PLAN.md, "Gain sweep"). `CONFIG SAVE` replaces the gain, FFT, metric, LO plan and level filter defaults (NVS blob `timer`, version 1, `commands.c`);
+  they are applied on every switch to this mode.
 - **Levels** are the `METRICS` byte codes, in 0.25 dB steps: RSSI (dBFS =
   code / 4 − 63.75) or SNR (dB = code / 4), clamped to 1–254. The RSSI range
   starts just below the ADC noise in the ±5 MHz window (about −59 to −62
@@ -299,7 +305,7 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   passes closer than the 100 ms poll merge differently per seat). 60 s,
   8 seats: lap spread median 2 ms, max 2 ms (2 / 3 ms before same-frequency
   seats were reset together; 1 / 2 ms with µs lap times too, not kept).
-- **Testing in RotorHazard mode:** `PROTOCOL RH` applies the user's saved
+- **Testing in lap timer mode:** `PROTOCOL RH` applies the user's saved
   defaults, so after switching, *set* `MODE`, `FFT`, `GAIN`,
   `METRICS` and `LEVELFILTER` to what the test needs, but never `CONFIG SAVE` them (or `CONFIG RESET`). Leave them
   as the test set them afterwards; there is no need to restore anything.
@@ -317,7 +323,7 @@ npm install
 npm run dev                         # http://localhost:5173 (Web Serial: Chrome/Edge, Firefox, Android Chrome)
 ```
 
-- **Menu** (☰, top left): Monitor mode / RotorHazard mode / Power meter mode, GPIO Configure,
+- **Menu** (☰, top left): Monitor mode / Lap timer mode / Power meter mode, GPIO Configure,
   and the dark-mode switch. The choice is remembered and applied on every
   connect (`PROTOCOL?`, then `PROTOCOL MONITOR|RH`; firmware without
   `PROTOCOL` is monitor only; power meter mode runs the monitor protocol). GPIO Configure (`views/gpioDialog.ts`,
@@ -329,7 +335,7 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   An About section below them links to the GitHub project and shows the
   connected device's firmware version (from `INFO`; over Web Serial also a
   newer version the page can flash).
-- **RotorHazard mode page** (`web/src/model/rh.ts`, `views/rh.ts`): polls the
+- **Lap timer mode page** (`web/src/model/timer.ts`, `views/timer.ts`; seats card "Timer seats"): polls the
   board as RotorHazard's server does (every 100 ms: per seat, select it and read
   the pass stats and one queued peak/nadir), and shows each seat's level with
   EnterAt/ExitAt (editable, "now" = average of the last second, kept in
@@ -341,11 +347,11 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   event row for each new record). Clear, a seat's channel change, a device
   restart and a reconnect break a run (no lap across them); only Clear drops
   the fastest. The gear by Clear opens the events options
-  (`views/rhEventsDialog.ts`). Display (saved in `UiSettings`): list
+  (`views/timerEventsDialog.ts`). Display (saved in `UiSettings`): list
   enter/exit events, list new fastest runs (the tiles show them either way),
   and Keep screen on (a screen wake lock while any device is connected,
   `util/wakeLock.ts`; greyed out without `navigator.wakeLock`). Lap
-  processing (`RhModel.lapRules`, saved with the thresholds; a change
+  processing (`TimerModel.lapRules`, saved with the thresholds; a change
   recomputes from the passes since Clear): minimum lap on/off and 0–999 s,
   fastest consecutive laps on/off and 2–99 laps (off: no tile row, no
   records). Voice callouts (`util/speech.ts`, the browser's speech
@@ -412,7 +418,7 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   bursts, board spurs and IMD3 products. It simulates the C5 (`c5-race`:
   80 MS/s, whole-MHz LOs, the C5's measured spurs); `?sim=s3` simulates the
   S3's scaled 2.4 GHz band (`s3-race24`) instead, for the Simulate button
-  too. It boots in RotorHazard mode like the firmware, and
+  too. It boots in lap timer mode like the firmware, and
   there flies a pass past every seat every 5–9 s.
 - **Bridge**: `python3 tools/serial_bridge.py`, then open
   `http://localhost:5173/?bridge=ws://127.0.0.1:5809`. This does not work from
@@ -445,5 +451,5 @@ node e2e/headless.mjs                      # writes screenshots + results.json t
 ```
 
 The e2e run covers both modes (switching through the menu) and recovery after
-`REBOOT`. For RotorHazard compatibility, `tools/rh_check.py` (see "RotorHazard
+`REBOOT`. For RotorHazard compatibility, `tools/rh_check.py` (see "Lap timer
 mode").

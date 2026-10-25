@@ -2,7 +2,7 @@
 import type { Device } from "../serial/device";
 import type { Store } from "./store";
 import { loadDeviceSettings, restoreCommands, saveDeviceSettings, type DeviceSettings } from "./channelPlan";
-import { RhModel } from "./rh";
+import { TimerModel } from "./timer";
 
 export interface View {
   el: HTMLElement;
@@ -17,11 +17,11 @@ export interface UiSettings {
   historySeconds: number;
   dbMin: number;
   dbMax: number;
-  uiMode: "monitor" | "rh" | "power"; // which page; power meter mode runs the monitor protocol
-  rhShowCrossings: boolean; // detection events: list enters and exits
-  rhShowFastest: boolean; // detection events: list new fastest runs
+  uiMode: "monitor" | "timer" | "power"; // which page; power meter mode runs the monitor protocol
+  timerShowCrossings: boolean; // detection events: list enters and exits
+  timerShowFastest: boolean; // detection events: list new fastest runs
   keepScreenOn: boolean; // screen wake lock while a device is connected
-  voiceOn: boolean; // RotorHazard mode: speak each lap
+  voiceOn: boolean; // lap timer mode: speak each lap
   voiceVolume: number; // 0-100
   voiceRate: number; // 0.1-2
   voicePitch: number; // 0-2
@@ -41,8 +41,8 @@ export class App {
     dbMin: -85,
     dbMax: -20,
     uiMode: "monitor",
-    rhShowCrossings: false,
-    rhShowFastest: true,
+    timerShowCrossings: false,
+    timerShowFastest: true,
     keepScreenOn: false,
     voiceOn: false,
     voiceVolume: 100,
@@ -53,12 +53,12 @@ export class App {
   };
   /** Channel plan, hop mode and gain, restored on every connect. */
   deviceSettings: DeviceSettings = loadDeviceSettings();
-  /** RotorHazard mode: seats, polling and detection events. */
-  rh: RhModel;
+  /** Lap timer mode: seats, polling and detection events. */
+  timer: TimerModel;
   private listeners = new Set<() => void>();
 
   constructor(readonly store: Store) {
-    this.rh = new RhModel(store);
+    this.timer = new TimerModel(store);
     try {
       const saved = localStorage.getItem("widscan58.settings");
       if (saved) Object.assign(this.settings, JSON.parse(saved));

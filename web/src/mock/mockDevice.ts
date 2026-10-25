@@ -137,7 +137,7 @@ export class MockTransport implements Transport {
   private vtx: Vtx[] = [];
   private wifi = { centerKhz: 0, until: 0, next: 0 };
   private state = new Map<number, { ema: number; clear: number | null; last: number }>();
-  // Protocol, as the firmware: boots silent in RotorHazard mode.
+  // Protocol, as the firmware: boots silent in lap timer mode.
   private proto: "RH" | "MONITOR" = "RH";
   private rhSeats = Array.from({ length: 8 }, (_, j) => ({
     mhz: [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917][j],
@@ -393,7 +393,7 @@ export class MockTransport implements Transport {
       case ["FILTER", "CAPN", "FFT", "SEGMENTS", "RATE", "SETTLE", "IQCORR", "RECALMODE", "SPURS", "AVG", "PROMISC", "BOOTLOADER"].includes(parts[0]):
         return ok();
       case line === "REBOOT":
-        // Like the firmware: back to defaults, silent in RotorHazard mode.
+        // Like the firmware: back to defaults, silent in lap timer mode.
         setTimeout(() => {
           this.proto = "RH";
           this.rx = "";
@@ -429,7 +429,7 @@ export class MockTransport implements Transport {
     }
   }
 
-  // ---- RotorHazard mode -------------------------------------------------------
+  // ---- Lap timer mode (RotorHazard protocol) --------------------------------
   // The firmware's protocol (firmware/src/proto/rh.c) on synthetic levels:
   // each seat on a channel sees a quad pass the gate every 5-9 s.
 

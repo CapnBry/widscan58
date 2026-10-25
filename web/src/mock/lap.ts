@@ -1,4 +1,4 @@
-// Gate-crossing detection for the simulator's RotorHazard seats: the same
+// Gate-crossing detection for the simulator's lap timer seats: the same
 // behaviour as firmware/src/scan/lap.c (255 ms running median from a
 // histogram of the level codes, crossing from EnterAt to below ExitAt, pass at
 // the middle of the peak plateau, peak/nadir history with hysteresis), and

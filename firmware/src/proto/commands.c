@@ -17,7 +17,6 @@
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include "esp_app_desc.h"
@@ -115,32 +114,27 @@ static void rh_defaults(scan_config_t *c) {
     rh_apply_plan(c);
 }
 
-/* RotorHazard mode settings saved by CONFIG SAVE (NVS blob, layout by version).
- * The capture length follows the FFT size (set_fft). Versions 1 and 2
- * start with the same 8 bytes as this one; 1 then stored the capture
- * length. Both are read with the median filter (they predate LEVELFILTER). */
-#define RH_SAVED_VERSION 3
+/* Lap timer mode settings saved by CONFIG SAVE (NVS blob, layout by version).
+ * The capture length follows the FFT size (set_fft). */
+#define TIMER_SAVED_VERSION 1
 typedef struct {
     uint8_t version;
     uint8_t gain_mode, gain, metrics_mode, mode;
     uint16_t nfft;
     uint8_t filter; /* lap_filter_t */
-} rh_saved_t;
-#define RH_SAVED_V2_LEN 8
-#define RH_SAVED_V1_LEN 10
-_Static_assert(offsetof(rh_saved_t, filter) == RH_SAVED_V2_LEN, "versions 1 and 2 are a prefix");
-static rh_saved_t rh_saved; /* applied on every switch to RotorHazard mode */
-static rh_saved_t rh_builtin; /* the defaults without a save (boot) */
+} timer_saved_t;
+static timer_saved_t timer_saved; /* applied on every switch to lap timer mode */
+static timer_saved_t timer_builtin; /* the defaults without a save (boot) */
 #define NVS_NAMESPACE "widscan58"
-#define NVS_KEY_RH "rh"
+#define NVS_KEY_TIMER "timer"
 
-static void rh_saved_from(rh_saved_t *s, const scan_config_t *c) {
-    *s = (rh_saved_t){.version = RH_SAVED_VERSION, .gain_mode = (uint8_t)c->gain_mode, .gain = c->gain,
-                      .metrics_mode = c->metrics_mode, .mode = (uint8_t)c->mode, .nfft = c->nfft,
-                      .filter = (uint8_t)rh_get_filter()};
+static void timer_saved_from(timer_saved_t *s, const scan_config_t *c) {
+    *s = (timer_saved_t){.version = TIMER_SAVED_VERSION, .gain_mode = (uint8_t)c->gain_mode, .gain = c->gain,
+                         .metrics_mode = c->metrics_mode, .mode = (uint8_t)c->mode, .nfft = c->nfft,
+                         .filter = (uint8_t)rh_get_filter()};
 }
 
-static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
+static void timer_saved_apply(scan_config_t *c, const timer_saved_t *s) {
     c->gain_mode = (radio_gain_mode_t)s->gain_mode;
     c->gain = s->gain;
     c->metrics_mode = s->metrics_mode;
@@ -150,7 +144,7 @@ static void rh_saved_apply(scan_config_t *c, const rh_saved_t *s) {
 }
 
 /* The same limits as the commands that set these. */
-static bool rh_saved_valid(const rh_saved_t *s) {
+static bool timer_saved_valid(const timer_saved_t *s) {
     return
            (s->gain_mode == RADIO_GAIN_HARDWARE || (s->gain_mode == RADIO_GAIN_MANUAL && s->gain <= radio_caps()->gain_max)) &&
            (s->metrics_mode == METRICS_RSSI || s->metrics_mode == METRICS_SNR) &&
@@ -158,42 +152,36 @@ static bool rh_saved_valid(const rh_saved_t *s) {
            !(s->nfft & (s->nfft - 1)) && (s->filter == LAP_FILTER_MEDIAN || s->filter == LAP_FILTER_EMA);
 }
 
-/* rh_saved from NVS; left alone (the defaults) when there is none. */
-static void rh_saved_load(void) {
+/* timer_saved from NVS; left alone (the defaults) when there is none. */
+static void timer_saved_load(void) {
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
     uint8_t b[16] = {0};
     size_t len = sizeof(b);
-    rh_saved_t s = {0};
-    if (nvs_get_blob(h, NVS_KEY_RH, b, &len) == ESP_OK) {
-        bool ok = (b[0] == RH_SAVED_VERSION && len == sizeof(s)) || (b[0] == 2 && len == RH_SAVED_V2_LEN) ||
-                  (b[0] == 1 && len == RH_SAVED_V1_LEN);
-        memcpy(&s, b, b[0] == RH_SAVED_VERSION ? sizeof(s) : RH_SAVED_V2_LEN);
-        if (b[0] != RH_SAVED_VERSION) s.filter = LAP_FILTER_MEDIAN;
-        if (ok && rh_saved_valid(&s)) {
-            rh_saved = s;
-            rh_saved.version = RH_SAVED_VERSION;
-        }
+    timer_saved_t s = {0};
+    if (nvs_get_blob(h, NVS_KEY_TIMER, b, &len) == ESP_OK) {
+        memcpy(&s, b, len < sizeof(s) ? len : sizeof(s));
+        if (b[0] == TIMER_SAVED_VERSION && len == sizeof(s) && timer_saved_valid(&s)) timer_saved = s;
     }
     nvs_close(h);
 }
 
-static esp_err_t rh_saved_erase(void) {
+static esp_err_t timer_saved_erase(void) {
     nvs_handle_t h;
     esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
-    e = nvs_erase_key(h, NVS_KEY_RH);
+    e = nvs_erase_key(h, NVS_KEY_TIMER);
     if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     return e;
 }
 
-static esp_err_t rh_saved_store(const rh_saved_t *s) {
+static esp_err_t timer_saved_store(const timer_saved_t *s) {
     nvs_handle_t h;
     esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
-    e = nvs_set_blob(h, NVS_KEY_RH, s, sizeof(*s));
+    e = nvs_set_blob(h, NVS_KEY_TIMER, s, sizeof(*s));
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     return e;
@@ -211,7 +199,7 @@ static void set_proto(proto_t p) {
     }
     if (p == PROTO_RH) {
         uint8_t was = next.metrics_mode;
-        rh_saved_apply(&next, &rh_saved);
+        timer_saved_apply(&next, &timer_saved);
         if (next.metrics_mode != was) rh_reset_levels(); /* RSSI and SNR codes don't compare */
         rh_apply_plan(&next); /* the seats may have changed meanwhile */
         link_set_streaming(false);
@@ -359,17 +347,17 @@ static void handle(char *line) {
     } else if (!strcmp(line, "CONFIG SAVE")) {
         /* Starts with 'C', not 'S': RotorHazard mode reads 'A'..'P' as ours. */
         if (proto != PROTO_RH) { link_text("ERR rh_only\n"); return; }
-        rh_saved_t s;
-        rh_saved_from(&s, &c);
-        esp_err_t e = rh_saved_store(&s);
+        timer_saved_t s;
+        timer_saved_from(&s, &c);
+        esp_err_t e = timer_saved_store(&s);
         if (e != ESP_OK) { link_printf("ERR save %s\n", esp_err_to_name(e)); return; }
-        rh_saved = s;
+        timer_saved = s;
         link_text("OK\n");
     } else if (!strcmp(line, "CONFIG RESET")) {
         if (proto != PROTO_RH) { link_text("ERR rh_only\n"); return; }
-        esp_err_t e = rh_saved_erase();
+        esp_err_t e = timer_saved_erase();
         if (e != ESP_OK) { link_printf("ERR reset %s\n", esp_err_to_name(e)); return; }
-        rh_saved = rh_builtin;
+        timer_saved = timer_builtin;
         set_proto(PROTO_RH); /* apply them now */
         link_text("OK\n");
     } else if (!strcmp(line, "LEVELFILTER MEDIAN") || !strcmp(line, "LEVELFILTER EMA")) {
@@ -669,10 +657,10 @@ void commands_task_start(void) {
     scanner_get_config(&c);
     other_cfg = c;
     rh_defaults(&c);
-    rh_saved_from(&rh_builtin, &c);
-    rh_saved = rh_builtin;
-    rh_saved_load();
-    rh_saved_apply(&c, &rh_saved);
+    timer_saved_from(&timer_builtin, &c);
+    timer_saved = timer_builtin;
+    timer_saved_load();
+    timer_saved_apply(&c, &timer_saved);
     scanner_set_config(&c);
     link_set_streaming(false);
     xTaskCreatePinnedToCore(commands_task, "cmd", 6144, NULL, 6, NULL, portNUM_PROCESSORS - 1);

@@ -427,25 +427,27 @@ main {
 .badge.serious::before { background: var(--serious); }
 .badge.critical::before { background: var(--critical); }
 
-/* RotorHazard page */
+/* Lap timer page */
 main.shared { padding-top: 0; }
 .tile.crossing { outline: 2px solid var(--good); outline-offset: 1px; }
-.rh-bar { position: relative; overflow: visible; height: 8px; }
-.rh-bar .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; }
-.rh-bar .mark.enter { background: var(--good); }
-.rh-bar .mark.exit { background: var(--warning); }
-.rh-th { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 11px; }
-.rh-th label { color: var(--muted); width: 34px; }
-.rh-th input { padding: 2px 4px; }
-.rh-th button { padding: 2px 6px; font-size: 11px; }
-.rh-events { height: 260px; overflow: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
-.rh-event { display: grid; grid-template-columns: 96px 76px 1fr; gap: 6px; padding: 3px 2px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
-.rh-event span { overflow: hidden; text-overflow: ellipsis; }
-.rh-event .key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
-.rh-event.enter, .rh-event.exit { color: var(--muted); }
-.rh-event.pass span:last-child { color: var(--ink); }
-.rh-event.pass.ignored span:last-child { color: var(--muted); }
-.rh-event.fastest span:last-child { color: var(--good); font-weight: 600; }
+.timer-bar { position: relative; overflow: visible; height: 8px; }
+.timer-bar .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; }
+.timer-bar .mark.enter { background: var(--good); }
+.timer-bar .mark.exit { background: var(--warning); }
+.timer-th { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 11px; }
+.timer-th label { color: var(--muted); width: 34px; }
+.timer-th input { padding: 2px 4px; }
+.timer-th button { padding: 2px 6px; font-size: 11px; }
+.timer-events { height: 260px; overflow: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
+.timer-event { display: grid; grid-template-columns: 96px 76px 1fr; gap: 6px; padding: 3px 2px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.timer-event span { overflow: hidden; text-overflow: ellipsis; }
+.timer-event .key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.timer-event.enter, .timer-event.exit { color: var(--muted); }
+.timer-event.pass span:last-child { color: var(--ink); }
+.timer-event.pass.ignored span:last-child { color: var(--muted); }
+.timer-event.fastest span:last-child { color: var(--good); font-weight: 600; }
+.timer-info { margin: 10px 0 6px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); font-size: 12px; }
+.timer-info a { color: var(--accent); }
 
 /* Charts */
 .chart { position: relative; width: 100%; }

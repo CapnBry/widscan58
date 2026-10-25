@@ -1,4 +1,4 @@
-// RotorHazard mode: polls the device as RotorHazard's server does
+// Lap timer mode: polls the device as RotorHazard's server does
 // (RHInterface.update: per seat, select it, read the pass stats and one
 // queued peak/nadir), and turns that into levels, crossings and passes for
 // the views. Seat frequencies come from the shared channel plan; thresholds
@@ -9,15 +9,15 @@
 import type { Device } from "../serial/device";
 import type { RhLink } from "../serial/rhLink";
 import { Series, type Store } from "./store";
-import { RH, RH_API_MARKER, RH_FREQ_OFF, parseExtremums, parsePassStats, u16, validLevel, type RhMetric } from "../proto/rh";
+import { RH, RH_API_MARKER, RH_FREQ_OFF, parseExtremums, parsePassStats, u16, validLevel, type LevelMetric } from "../proto/rh";
 import { channelMhz } from "./channelPlan";
 import { DEFAULT_LAP_RULES, LapTracker, type FastestRun, type LapRules } from "./laps";
 
-export const RH_SEATS = 8;
+export const TIMER_SEATS = 8;
 const POLL_MS = 100; // RotorHazard's RH_UPDATE_INTERVAL
 const HISTORY_SECONDS = 120;
 
-export interface RhSeat {
+export interface TimerSeat {
   index: number;
   channel: string | null; // null: seat off
   mhz: number;
@@ -35,7 +35,7 @@ export interface RhSeat {
   peaks: { t: number; v: number; peak: boolean }[]; // queued extremums from the device
 }
 
-export interface RhEvent {
+export interface TimerEvent {
   t: number; // store.now() seconds
   seat: number;
   kind: "enter" | "exit" | "pass" | "fastest";
@@ -54,40 +54,36 @@ interface Thresholds {
 // The device's own defaults: -32.5 / -37.5 dBFS in RSSI (0.25 dB codes).
 const DEFAULT_ENTER = 125;
 const DEFAULT_EXIT = 105;
-// v2: 0.25 dB codes. Thresholds saved with the 0.5 dB codes are dropped, not
-// converted: they don't record which metric they were set for.
-const KEY = "widscan58.rh.v2";
-const OLD_KEYS = ["widscan58.rh"];
+const KEY = "widscan58.timer";
 
-export class RhModel {
-  seats: RhSeat[] = [];
-  events: RhEvent[] = [];
-  metric: RhMetric = "RSSI";
+export class TimerModel {
+  seats: TimerSeat[] = [];
+  events: TimerEvent[] = [];
+  metric: LevelMetric = "RSSI";
   /** Device configuration in this mode (CONFIG? reply). */
   config: Record<string, unknown> | null = null;
   running = false;
   error: string | null = null;
   cycleMs = 0;
   lapRules: LapRules = { ...DEFAULT_LAP_RULES };
-  private thresholds: Thresholds = { enter: Array(RH_SEATS).fill(DEFAULT_ENTER), exit: Array(RH_SEATS).fill(DEFAULT_EXIT) };
+  private thresholds: Thresholds = { enter: Array(TIMER_SEATS).fill(DEFAULT_ENTER), exit: Array(TIMER_SEATS).fill(DEFAULT_EXIT) };
   private link: RhLink | null = null;
   private loop: Promise<void> | null = null;
   private stopFlag = false;
   private deviceMs = -1;
   private since = 0; // store.now() at start: older extremums were queued before we polled
   /** A seat completed a lap (a counted pass with a lap time). */
-  onLap: (seat: RhSeat, lapS: number) => void = () => {};
+  onLap: (seat: TimerSeat, lapS: number) => void = () => {};
 
   constructor(private store: Store) {
     try {
-      for (const k of OLD_KEYS) localStorage.removeItem(k);
       const saved = JSON.parse(localStorage.getItem(KEY) ?? "null");
       if (Array.isArray(saved?.thresholds?.enter) && Array.isArray(saved?.thresholds?.exit)) this.thresholds = saved.thresholds;
       if (saved?.lapRules) this.lapRules = validLapRules({ ...this.lapRules, ...saved.lapRules });
     } catch {
       /* storage unavailable or corrupt */
     }
-    for (let j = 0; j < RH_SEATS; j++)
+    for (let j = 0; j < TIMER_SEATS; j++)
       this.seats.push({
         index: j, channel: null, mhz: 0, enter: 0, exit: 0, level: null, nodePeak: null, nodeNadir: null,
         passPeak: null, crossing: false, lapId: null, laps: new LapTracker(), loopUs: 0,
@@ -114,7 +110,7 @@ export class RhModel {
   /** Start on a device already switched to PROTOCOL RH. */
   async start(device: Device, channels: string[]) {
     await this.stop();
-    if (!device.rh) throw new Error("device is not in RotorHazard mode");
+    if (!device.rh) throw new Error("device is not in lap timer mode");
     this.link = device.rh;
     this.error = null;
     this.stopFlag = false;
@@ -131,12 +127,12 @@ export class RhModel {
       const rev = await this.link.read(RH.READ_REVISION_CODE, 2);
       if (rev[0] !== RH_API_MARKER) throw new Error(`unexpected revision code ${rev[0]}.${rev[1]}`);
       const count = (await this.link.read(RH.READ_MULTINODE_COUNT, 1))[0];
-      if (count < RH_SEATS) throw new Error(`device reports ${count} seats`);
+      if (count < TIMER_SEATS) throw new Error(`device reports ${count} seats`);
       await this.refreshConfig();
       await this.writeSeats(channels);
     } catch (e) {
       this.error = (e as Error).message;
-      this.store.addLog("error", `RotorHazard start: ${this.error}`);
+      this.store.addLog("error", `lap timer start: ${this.error}`);
       this.store.touch();
       return;
     }
@@ -175,7 +171,7 @@ export class RhModel {
     this.store.touch();
   }
 
-  /** Make the current receiver settings and metric the device's RotorHazard mode defaults. */
+  /** Make the current receiver settings and metric the device's lap timer mode defaults. */
   async saveDefaults() {
     await this.command("CONFIG SAVE");
   }
@@ -242,7 +238,7 @@ export class RhModel {
     return n ? sum / n : null;
   }
 
-  async setMetric(m: RhMetric) {
+  async setMetric(m: LevelMetric) {
     if (m === this.metric || !this.link) return;
     await this.command(`METRICS ${m}`); // the CONFIG? reply switches this.metric
   }
@@ -261,7 +257,7 @@ export class RhModel {
     this.store.touch();
   }
 
-  private addEvent(e: RhEvent) {
+  private addEvent(e: TimerEvent) {
     this.events.push(e);
     if (this.events.length > 500) this.events.splice(0, this.events.length - 500);
   }
@@ -289,7 +285,7 @@ export class RhModel {
     const t = await link.read(RH.READ_TIME_MILLIS, 4);
     const ms = ((t[0] << 24) | (t[1] << 16) | (t[2] << 8) | t[3]) >>> 0;
     if (this.deviceMs >= 0 && ms < this.deviceMs) {
-      this.store.addLog("info", "RotorHazard: device restarted; setting the seats up again");
+      this.store.addLog("info", "lap timer: device restarted; setting the seats up again");
       await this.refreshConfig(); // its saved settings, maybe another metric
       await this.writeSeats(this.seats.map((s) => s.channel ?? ""));
       for (const s of this.seats) {
@@ -309,7 +305,7 @@ export class RhModel {
     }
   }
 
-  private update(s: RhSeat, now: number, ps: ReturnType<typeof parsePassStats>, ex: ReturnType<typeof parseExtremums>) {
+  private update(s: TimerSeat, now: number, ps: ReturnType<typeof parsePassStats>, ex: ReturnType<typeof parseExtremums>) {
     if (validLevel(ps.level)) {
       s.level = ps.level;
       s.history.push(now, ps.level);

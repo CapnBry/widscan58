@@ -219,8 +219,9 @@ const char *radio_phy_version(void);
 esp-sdr sequence: NVS → `esp_wifi_init` → `WIFI_MODE_NULL` → start → promiscuous
 on → `radio_init()` (prepare RX). Logging is muted and debug text goes out as
 framed `LOG` messages. Since 2026-10-10 the device then waits silently in
-RotorHazard mode (no `READY` line); hosts switch it with `PROTOCOL MONITOR`
-(see "RotorHazard mode" in the Status log).
+lap timer mode, on RotorHazard's node protocol (no `READY` line); hosts switch
+it with `PROTOCOL MONITOR` (see "RotorHazard mode" in the Status log; the mode
+was renamed lap timer mode on 2026-10-25).
 
 ### 4.3 LO planner (profile-driven)
 
@@ -362,8 +363,9 @@ v1: event detection and per-channel deltas in the UI (from METRICS). The firmwar
 ### 4.9 Wire protocol (v1)
 
 Host → device: ASCII lines; each replies `OK …` or `ERR <reason>`. This is
-monitor mode; `PROTOCOL RH|MONITOR` switches between it and RotorHazard's binary
-node protocol (`firmware/src/proto/rh.c`), which the device boots in.
+monitor mode; `PROTOCOL RH|MONITOR` switches between it and lap timer mode,
+which speaks RotorHazard's binary node protocol (`firmware/src/proto/rh.c`) and
+which the device boots in.
 
 | Command | Purpose |
 |---|---|
@@ -1250,6 +1252,21 @@ Next steps, in order:
 8. **Bad first calibration after boot on the C5.** In 4 of 8 reboots the first calibration of LO 5677 left ~20 dB image rejection (mostly an I/Q gain error, Q ≈ 1.2 × I); `RECAL` always fixed it (37–40 dB). `CACHE` keeps a bad entry until `RECAL` or a tracking recalibration. `IQCORR` hides it from the scanner, but `RAWIQ` still shows it, and it may be related to the bursts of raised floor seen in the first ~20 calibrations of a session under `ONCE` ("Calibration on the C5"). Find out whether it is the first calibration after boot or the first per LO (log the IQ words at +222 per calibration), then fix it (e.g. a throw-away calibration in `radio_init`, or recalibrate when the IQ words are implausible).
 9. **IQ correction cost.** `IQCORR` adds ~0.17 ms per hop at 1024 points (3 multiplies per sample for the moments in pass 1, 2 in pass 2). Once a hop's estimate has settled, the moments could be updated on every Nth capture only, leaving just the pass-2 multiplies. ~~Per-segment soft-float setup~~ (done 2026-10-13: IQ coefficients once per capture, integer means; see "Per-segment setup in `psd_compute`" above).
 10. **Revisit the IQ part of the PHY calibration.** With `IQCORR`, per-LO IQ calibration (a transmitted loopback tone each time) matters less. Options measured with the VTX: IQ once at the band center then DC-only per LO matched per-LO IQ; startup IQ only (esp-sdr's policy) gave ~20 dB, which `IQCORR` should now fix up as well (untested). Either would also shrink cache entries to the DC tables.
+
+**"RotorHazard mode" renamed lap timer mode (2026-10-25).** As a courtesy to the
+RotorHazard developers: our feature is a lap timer that also works as a
+RotorHazard node, not a copy of their project, so it no longer carries their
+name. The web UI's menu says "Lap timer mode", the seats card "Timer seats",
+and the Receiver card says the device is also a RotorHazard node (linked) that
+supports up to 8 seats in a full lap timer. The web code went from `RhModel`,
+`views/rh.ts` etc. to `TimerModel`, `views/timer.ts`, `uiMode: "timer"`; the
+settings and thresholds saved under the old names are not carried over. In
+the firmware the `CONFIG SAVE` defaults moved from NVS blob `rh` (version 3)
+to blob `timer`, restarting at version 1 (`timer_saved_t`); an old `rh` blob is
+ignored, so a board boots with the built-in defaults until the next save. The
+protocol keeps its name where it is RotorHazard's: `PROTOCOL RH`,
+`proto/rh.ts`, `RhLink`, `firmware/src/proto/rh.c`.
+The entries above keep the old name.
 
 ## 7. Risks and open questions
 

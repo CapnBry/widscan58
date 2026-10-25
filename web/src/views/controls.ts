@@ -95,7 +95,7 @@ export class Controls implements View {
     filter.onchange = () => void this.apply(Number(filter.value) < 0 ? "FILTER AUTO" : `FILTER ${filter.value}`);
     this.ctl("Analog filter code (-1 = PHY auto; 60 ≈ 13 MHz, 0 ≈ 69 MHz)", filter);
     this.syncs.push((st) => (filter.value = String(st.filter)));
-    // FFT size; the device captures 4 FFTs' worth of samples and averages them (Welch), as in RotorHazard mode.
+    // FFT size; the device captures 4 FFTs' worth of samples and averages them (Welch), as in lap timer mode.
     const fftSel = el("select") as HTMLSelectElement;
     const fftOption = (v: number) => new Option(`${v}-pt FFT (${4 * v} samples)`, String(v));
     for (const v of [64, 128, 256, 512, 1024]) fftSel.append(fftOption(v));

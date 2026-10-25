@@ -8,7 +8,7 @@ export interface ProfileDef {
   target: string;
   bandLoKhz: number; // the usual band (PROFILE? band_khz)
   bandHiKhz: number;
-  tuneLoKhz: number; // where CHANNELS and RotorHazard seats may go
+  tuneLoKhz: number; // where CHANNELS and lap timer seats may go
   tuneHiKhz: number;
   baseKhz: number;
   equivBaseKhz: number;

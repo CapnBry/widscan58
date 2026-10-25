@@ -25,8 +25,8 @@ import { GpioDialog } from "./views/gpioDialog";
 import { ScreenWake } from "./util/wakeLock";
 import { registerServiceWorker } from "./util/pwa";
 import { lapCallout, speak } from "./util/speech";
-import { voiceSettings } from "./views/rhEventsDialog";
-import { RhEvents, RhGraph, RhSeats, RhSettings } from "./views/rh";
+import { voiceSettings } from "./views/timerEventsDialog";
+import { TimerEvents, TimerGraph, TimerSeats, TimerSettings } from "./views/timer";
 import { PowerChannels, PowerWarning } from "./views/power";
 import { MONITOR_DEFAULTS, POWER_WIN_HZ, powerCommands } from "./model/power";
 
@@ -71,17 +71,17 @@ const simBtn = el("button", {}, "Simulate");
 const replayInput = el("input", { type: "file", accept: ".widscan58", style: "display:none" }) as HTMLInputElement;
 const replayBtn = el("button", {}, "Replay…");
 const recordBtn = el("button", { title: "Record the raw device stream to a .widscan58 file" }, "● Record");
-// Menu: the page / device protocol (monitor, RotorHazard, or power meter on
+// Menu: the page / device protocol (monitor, lap timer, or power meter on
 // the monitor protocol), GPIO Configure,
 // the theme, and about: the project link and the connected device's firmware
 // version.
 const menuBtn = el("button", { class: "menu-btn", title: "Menu", "aria-haspopup": "true", "aria-expanded": "false" }, "☰");
 const modeItems = {
   monitor: el("button", { class: "menu-item", role: "menuitemradio" }, "Monitor mode"),
-  rh: el("button", { class: "menu-item", role: "menuitemradio" }, "RotorHazard mode"),
+  timer: el("button", { class: "menu-item", role: "menuitemradio" }, "Lap timer mode"),
   power: el("button", { class: "menu-item", role: "menuitemradio" }, "Power meter mode"),
 };
-const rhNote = el("div", { class: "menu-note" });
+const timerNote = el("div", { class: "menu-note" });
 const gpioItem = el("button", { class: "menu-item", role: "menuitem", title: "Pins the device sets at startup" }, "GPIO Configure");
 const darkSwitch = el("input", { type: "checkbox", role: "switch" }) as HTMLInputElement;
 darkSwitch.checked = themeName !== "light";
@@ -92,9 +92,9 @@ const menu = el(
   { class: "menu", role: "menu", hidden: "" },
   el("div", { class: "menu-label" }, "Mode"),
   modeItems.monitor,
-  modeItems.rh,
+  modeItems.timer,
   modeItems.power,
-  rhNote,
+  timerNote,
   el("div", { class: "menu-sep" }),
   gpioItem,
   el("label", { class: "menu-item menu-switch" }, el("span", {}, "Dark mode"), darkSwitch),
@@ -115,7 +115,7 @@ const header = el(
 const sessionRow = el("div", { class: "session-row" }, simBtn, replayBtn, replayInput, recordBtn);
 const banner = el("div", { class: "banner", style: "display:none" });
 
-type Page = "monitor" | "rh" | "power" | "both";
+type Page = "monitor" | "timer" | "power" | "both";
 const views: { view: View; page: Page; minMs: number; last: number; drawn: number }[] = [];
 function addView(page: Page, view: View, minMs = 0) {
   views.push({ view, page, minMs, last: 0, drawn: -1 });
@@ -132,13 +132,13 @@ const monitorMain = el(
   addView("monitor", new Controls(app), 100),
   addView("monitor", new RawIqView(app), 100),
 );
-const rhMain = el(
+const timerMain = el(
   "main",
-  { class: "rh-page" },
-  addView("rh", new RhSeats(app), 100),
-  addView("rh", new RhGraph(app), 50),
-  addView("rh", new RhEvents(app), 200),
-  addView("rh", new RhSettings(app), 300),
+  { class: "timer-page" },
+  addView("timer", new TimerSeats(app), 100),
+  addView("timer", new TimerGraph(app), 50),
+  addView("timer", new TimerEvents(app), 200),
+  addView("timer", new TimerSettings(app), 300),
 );
 const powerMain = el(
   "main",
@@ -147,7 +147,7 @@ const powerMain = el(
   addView("power", new PowerChannels(app), 100),
 );
 const sharedMain = el("main", { class: "shared" }, addView("both", new Console(app, sessionRow), 200));
-document.getElementById("app")!.append(header, banner, monitorMain, rhMain, powerMain, sharedMain);
+document.getElementById("app")!.append(header, banner, monitorMain, timerMain, powerMain, sharedMain);
 
 // ---- Pages and device protocol ---------------------------------------------------
 // Firmware without the PROTOCOL command is always in monitor mode.
@@ -155,17 +155,17 @@ let legacyFirmware = false;
 function showPage() {
   const mode = app.settings.uiMode;
   monitorMain.style.display = mode === "monitor" ? "" : "none";
-  rhMain.style.display = mode === "rh" ? "" : "none";
+  timerMain.style.display = mode === "timer" ? "" : "none";
   powerMain.style.display = mode === "power" ? "" : "none";
   for (const [m, item] of Object.entries(modeItems)) item.setAttribute("aria-checked", String(m === mode));
   const replay = app.readOnly && !!app.device;
-  modeItems.rh.disabled = legacyFirmware || replay;
-  rhNote.textContent = legacyFirmware
-    ? "This firmware has no RotorHazard mode: flash a newer one."
+  modeItems.timer.disabled = legacyFirmware || replay;
+  timerNote.textContent = legacyFirmware
+    ? "This firmware has no lap timer mode: flash a newer one."
     : replay
       ? "Replays are monitor mode only."
       : "";
-  rhNote.hidden = !rhNote.textContent;
+  timerNote.hidden = !timerNote.textContent;
   for (const v of views) v.drawn = -1;
   updateBanner();
 }
@@ -181,15 +181,15 @@ function startMode(device: Device): Promise<void> {
       store.addLog("info", `no protocol switch (${(e as Error).message}); monitor mode only`);
     }
     legacyFirmware = proto === null;
-    if (legacyFirmware && app.settings.uiMode === "rh") app.settings.uiMode = "monitor";
+    if (legacyFirmware && app.settings.uiMode === "timer") app.settings.uiMode = "monitor";
     showPage();
-    if (app.settings.uiMode === "rh") {
+    if (app.settings.uiMode === "timer") {
       await app.send("PROTOCOL RH");
       device.enterRh();
       await app.send("INFO"); // the firmware version (menu, flash dialog); syncDevice has it in monitor mode
-      await app.rh.start(device, app.deviceSettings.channels);
+      await app.timer.start(device, app.deviceSettings.channels);
     } else {
-      await app.rh.stop();
+      await app.timer.stop();
       if (device.rh) {
         await app.send("PROTOCOL MONITOR");
         device.exitRh();
@@ -211,7 +211,7 @@ function startMode(device: Device): Promise<void> {
   return p;
 }
 
-function setMode(mode: "monitor" | "rh" | "power") {
+function setMode(mode: "monitor" | "timer" | "power") {
   closeMenu();
   if (mode === app.settings.uiMode) return;
   app.settings.uiMode = mode;
@@ -220,7 +220,7 @@ function setMode(mode: "monitor" | "rh" | "power") {
   if (app.device && !app.readOnly) void startMode(app.device);
 }
 modeItems.monitor.onclick = () => setMode("monitor");
-modeItems.rh.onclick = () => setMode("rh");
+modeItems.timer.onclick = () => setMode("timer");
 modeItems.power.onclick = () => setMode("power");
 const gpioDialog = new GpioDialog(app);
 document.body.append(gpioDialog.el);
@@ -251,7 +251,7 @@ const screenWake = new ScreenWake((msg) => store.addLog("error", msg));
 const syncWake = () => screenWake.set(app.settings.keepScreenOn && !!app.device);
 store.subscribe(syncWake); // the option changing (app.changed touches the store)
 // Voice callouts (detection events options): each lap's channel and time.
-app.rh.onLap = (seat, lapS) => {
+app.timer.onLap = (seat, lapS) => {
   if (app.settings.voiceOn && seat.channel) speak(lapCallout(seat.channel, lapS), voiceSettings(app.settings));
 };
 
@@ -272,11 +272,6 @@ function updateBanner() {
   const parts: (Node | string)[] = [];
   const add = (strong: string, rest: string) => parts.push(el("strong", {}, strong), ` ${rest} `);
   if (app.device?.transport instanceof MockTransport) add("Simulated device.", "Signals, spurs and IMD products are synthetic.");
-  if (app.settings.uiMode === "rh" && app.device)
-    add(
-      "RotorHazard mode.",
-      "This page polls the device as a RotorHazard server would. Disconnect before a RotorHazard server opens the port.",
-    );
   if (app.readOnly) add("Replay.", "Controls are disabled.");
   if (p && p.scale !== 1)
     add(
@@ -304,7 +299,7 @@ function updateFirmwareText() {
 }
 
 async function syncDevice(device: Device) {
-  if (device.rh) return; /* RotorHazard mode: the page does its own setup */
+  if (device.rh) return; /* lap timer mode: the page does its own setup */
   await app.restoreDevice(device);
   for (const cmd of ["INFO", "PROFILE?", "STATUS?", "SPURS?"]) {
     try {
@@ -378,7 +373,7 @@ async function connect(transport: Transport, readOnly = false) {
   store.addLog("info", `connected via ${transport.name}`);
   if (readOnly) {
     legacyFirmware = false;
-    if (app.settings.uiMode === "rh") app.settings.uiMode = "monitor";
+    if (app.settings.uiMode === "timer") app.settings.uiMode = "monitor";
     showPage();
   } else await startMode(device);
   updateBanner();
@@ -387,7 +382,7 @@ async function connect(transport: Transport, readOnly = false) {
 async function disconnect() {
   userDisconnected = true;
   const d = app.device!;
-  await app.rh.stop();
+  await app.timer.stop();
   // Leave the device silent, as a RotorHazard server expects to find it.
   if (!d.rh && !legacyFirmware && !app.readOnly && d.connected) await d.command("PROTOCOL RH", 500).catch(() => {});
   app.device = null;
@@ -511,13 +506,13 @@ store.subscribe(() => updateBanner());
 setState("off", "Disconnected");
 showPage();
 
-// The firmware boots silent (RotorHazard mode). In monitor mode telemetry
+// The firmware boots silent (lap timer mode). In monitor mode telemetry
 // arrives at 4 Hz even when scanning is stopped, so a quiet link means the
 // board restarted: switch it back.
 let lastData = performance.now();
 setInterval(() => {
   const d = app.device;
-  if (!d || d.rh || app.readOnly || legacyFirmware || starting || flashing || app.settings.uiMode === "rh") return;
+  if (!d || d.rh || app.readOnly || legacyFirmware || starting || flashing || app.settings.uiMode === "timer") return;
   if (performance.now() - lastData > 3000) {
     store.addLog("info", "no data for 3 s: switching the device to monitor mode again");
     lastData = performance.now();

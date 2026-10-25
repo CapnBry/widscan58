@@ -101,37 +101,37 @@ for (const mode of ["SNR", "RSSI"]) {
 await send("METRICS FULL");
 await sleep(1000);
 
-// RotorHazard mode through the menu: the page polls the device as a
+// Lap timer mode through the menu: the page polls the device as a
 // RotorHazard server would; the simulator flies a pass every 5-9 s per seat.
 const menuPick = async (label) => {
   await page.click(".menu-btn");
   const [item] = await page.$$(`xpath/.//button[contains(@class,'menu-item') and contains(., '${label}')]`);
   await item.click();
 };
-await menuPick("RotorHazard mode");
+await menuPick("Lap timer mode");
 await sleep(sim ? 12000 : 6000);
-const rhSnap = () =>
+const timerSnap = () =>
   page.evaluate(() => {
     const { app } = window.widscan58;
-    const rh = app.rh;
+    const timer = app.timer;
     return {
       mode: app.settings.uiMode,
       rhLink: !!app.device?.rh,
-      running: rh.running,
-      error: rh.error,
-      seatsOn: rh.seats.filter((x) => x.channel).length,
-      withLevel: rh.seats.filter((x) => x.channel && x.level !== null).length,
-      passes: rh.events.filter((e) => e.kind === "pass").length,
+      running: timer.running,
+      error: timer.error,
+      seatsOn: timer.seats.filter((x) => x.channel).length,
+      withLevel: timer.seats.filter((x) => x.channel && x.level !== null).length,
+      passes: timer.events.filter((e) => e.kind === "pass").length,
       link: app.device?.rh?.stats,
-      cycleMs: Math.round(rh.cycleMs),
-      pageShown: getComputedStyle(document.querySelector("main.rh-page")).display !== "none",
+      cycleMs: Math.round(timer.cycleMs),
+      pageShown: getComputedStyle(document.querySelector("main.timer-page")).display !== "none",
     };
   });
-let r = await rhSnap();
-check("RotorHazard mode polls all seats", r.mode === "rh" && r.rhLink && r.running && r.pageShown && r.seatsOn === 8 && r.withLevel === 8, JSON.stringify(r));
-check("RotorHazard link without failed reads", r.link && r.link.reads > 100 && r.link.errors === 0, JSON.stringify(r.link));
-if (sim) check("RotorHazard passes detected", r.passes >= 1, `${r.passes} passes`);
-const enterInput = await page.$(".rh-seat input");
+let r = await timerSnap();
+check("Lap timer mode polls all seats", r.mode === "timer" && r.rhLink && r.running && r.pageShown && r.seatsOn === 8 && r.withLevel === 8, JSON.stringify(r));
+check("Lap timer link without failed reads", r.link && r.link.reads > 100 && r.link.errors === 0, JSON.stringify(r.link));
+if (sim) check("Lap timer passes detected", r.passes >= 1, `${r.passes} passes`);
+const enterInput = await page.$(".timer-seat input");
 await enterInput.click();
 await page.keyboard.down("Control");
 await page.keyboard.press("a");
@@ -139,31 +139,31 @@ await page.keyboard.up("Control");
 await enterInput.type("201");
 await page.keyboard.press("Tab");
 await sleep(500);
-const enter0 = await page.evaluate(() => window.widscan58.app.rh.seats[0].enter);
+const enter0 = await page.evaluate(() => window.widscan58.app.timer.seats[0].enter);
 check("EnterAt edit reaches the seat", enter0 === 201, `seat 1 enter ${enter0}`);
-await page.evaluate(() => window.widscan58.app.rh.setThreshold(0, "enter", 125));
-await page.screenshot({ path: path.join(out, "rotorhazard.png"), fullPage: true });
+await page.evaluate(() => window.widscan58.app.timer.setThreshold(0, "enter", 125));
+await page.screenshot({ path: path.join(out, "laptimer.png"), fullPage: true });
 // Saved defaults: the device applies them on every PROTOCOL RH, and METRICS
 // FULL on PROTOCOL MONITOR. The device's own saved values are put back after.
-const rhCmd = (c) => page.evaluate((c) => window.widscan58.app.rh.command(c), c);
-const rhCfg = () => page.evaluate(() => ({ ...window.widscan58.app.rh.config, metric: window.widscan58.app.rh.metric }));
-const saved0 = await rhCfg();
-await rhCmd("FFT 256");
-await page.evaluate(() => window.widscan58.app.rh.setMetric("SNR"));
+const timerCmd = (c) => page.evaluate((c) => window.widscan58.app.timer.command(c), c);
+const timerCfg = () => page.evaluate(() => ({ ...window.widscan58.app.timer.config, metric: window.widscan58.app.timer.metric }));
+const saved0 = await timerCfg();
+await timerCmd("FFT 256");
+await page.evaluate(() => window.widscan58.app.timer.setMetric("SNR"));
 const [emaBtn] = await page.$$("xpath/.//button[normalize-space()='EMA']");
 await emaBtn.click();
 await sleep(500);
 const [saveBtn] = await page.$$("xpath/.//button[@title='Save these settings as default']");
 await saveBtn.click();
 await sleep(500);
-await rhCmd("FFT 512"); // not saved: gone after the next switch
+await timerCmd("FFT 512"); // not saved: gone after the next switch
 await menuPick("Monitor mode");
 await sleep(3000);
 const monMetrics = await page.evaluate(() => window.widscan58.store.status?.metrics);
 check("PROTOCOL MONITOR applies METRICS FULL", monMetrics === "FULL", `${monMetrics}`);
-await menuPick("RotorHazard mode");
+await menuPick("Lap timer mode");
 await sleep(3000);
-const reapplied = await rhCfg();
+const reapplied = await timerCfg();
 check(
   "PROTOCOL RH applies the saved settings",
   reapplied.nfft === 256 && reapplied.capture_samples === 1024 && reapplied.metrics === "SNR" && reapplied.metric === "SNR" &&
@@ -173,7 +173,7 @@ check(
 const [resetBtn] = await page.$$("xpath/.//button[normalize-space()='Reset']");
 await resetBtn.click();
 await sleep(500);
-const reset = await rhCfg();
+const reset = await timerCfg();
 check(
   "Reset applies the built-in defaults",
   reset.nfft === 64 && reset.capture_samples === 256 && reset.metrics === "RSSI" && reset.metric === "RSSI" && reset.mode === "GROUP" &&
@@ -186,9 +186,9 @@ for (const c of [
   saved0.gain_mode === "MANUAL" ? `GAIN MANUAL ${saved0.gain}` : "GAIN HARDWARE",
   `LEVELFILTER ${saved0.level_filter}`,
 ])
-  await rhCmd(c);
-await page.evaluate((m) => window.widscan58.app.rh.setMetric(m), saved0.metrics);
-await page.evaluate(() => window.widscan58.app.rh.saveDefaults());
+  await timerCmd(c);
+await page.evaluate((m) => window.widscan58.app.timer.setMetric(m), saved0.metrics);
+await page.evaluate(() => window.widscan58.app.timer.saveDefaults());
 await menuPick("Monitor mode");
 await sleep(3000);
 s = await snap();
@@ -198,7 +198,7 @@ const backOk = [
   `protocol ${proto}, ${s.channelsWithData}/${s.nch} channels`,
 ];
 check("back to monitor mode", backOk[0], backOk[1]);
-// A restart boots the device silent (RotorHazard mode); the page notices the
+// A restart boots the device silent (lap timer mode); the page notices the
 // missing telemetry and switches it back to monitor mode.
 await page.evaluate(() => window.widscan58.app.send("REBOOT"));
 await sleep(9000);

@@ -85,8 +85,8 @@ export function parseExtremums(p: Uint8Array): Extremums {
 /** Levels the server treats as valid (0 and 255 are "none"). */
 export const validLevel = (v: number) => v > 0 && v < 255;
 
-export type RhMetric = "RSSI" | "SNR";
+export type LevelMetric = "RSSI" | "SNR";
 /** A level code in display units: dBFS for RSSI, dB for SNR (metrics.h codes). */
-export function levelDb(code: number, metric: RhMetric): number {
+export function levelDb(code: number, metric: LevelMetric): number {
   return metric === "RSSI" ? code / 4 - 63.75 : code / 4;
 }

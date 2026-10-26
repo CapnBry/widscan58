@@ -1291,6 +1291,16 @@ alone); one frequency unchanged. Polling faster than the UI's 100 ms slows
 the scan itself (the command and link tasks preempt it): every 1 ms,
 ~2040 µs; as fast as possible (~10 kHz), ~2.7 ms.
 
+**Telemetry rotation rate (2026-10-26).** Monitor mode's rotation rate (the
+web UI's Rotation rate) bounced between 59.0 and 64.0 /s with R1–R8, against
+a true 61.0 /s: it counted the rotations ended in each telemetry window (15 or
+16 of 16.2 ms) over the window's length, 250–254 ms (the check runs between
+hops). It is now the window's whole rotations over the time from the first's
+start to the next one's (`w_rot_from`, `rotation_start`); a window that ends
+no rotation keeps the last rate, a stopped scan reads 0. R1–R8: 60.8–61.1 /s;
+one channel (`FFT 1024`): 265.6–266.5 /s; `FFTTYPE R4` (one rotation per
+~271 ms window): 3.7 /s.
+
 ## 7. Risks and open questions
 
 | Risk | Mitigation |

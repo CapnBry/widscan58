@@ -74,6 +74,9 @@ typedef struct {
     bool psd_error_reported;
     /* Rotation rate cap: when the current rotation was due to start. */
     int64_t rotation_start;
+    /* Telemetry's rotation rate: the window's first rotation start, and the last rate. */
+    int64_t w_rot_from;
+    uint32_t rot_mhz;
     esp_timer_handle_t throttle_timer;
     TaskHandle_t task;
     /* Radio power-downs in the throttle's waits (phy_idle) */
@@ -478,13 +481,22 @@ static IRAM_ATTR void do_hop(void) {
 }
 
 static void emit_telemetry(int64_t now) {
-    uint32_t window_us = (uint32_t)(now - sp->window_start);
     uint32_t n = sp->w_hops ? sp->w_hops : 1;
+    /* Whole rotations over the time they took, start to start: over the
+     * window itself (250 ms plus up to a hop), 15 or 16 rotations of 16 ms
+     * read 59-64 /s. A window that ends no rotation keeps the last rate. */
+    if (sp->w_rotations) {
+        int64_t span = sp->rotation_start - sp->w_rot_from;
+        sp->rot_mhz = span > 0 ? (uint32_t)((uint64_t)sp->w_rotations * 1000000000ull / (uint64_t)span) : 0;
+        sp->w_rot_from = sp->rotation_start;
+    } else if (!sp->cfg.running) {
+        sp->rot_mhz = 0;
+    }
     frame_telemetry_t t = {
         .t_ms = (uint32_t)(now / 1000),
         .rotations = sp->rotations,
         .hops_total = sp->hops_total,
-        .rotation_mhz = window_us ? (uint32_t)((uint64_t)sp->w_rotations * 1000000000ull / window_us) : 0,
+        .rotation_mhz = sp->rot_mhz,
         .hop_us_avg = (uint32_t)(sp->w_hop_sum / n), .hop_us_max = sp->w_hop_max,
         .tune_us_avg = (uint32_t)(sp->w_tune_sum / n), .tune_us_max = sp->w_tune_max,
         .capture_us_avg = (uint32_t)(sp->w_cap_sum / n),
@@ -666,7 +678,7 @@ static void scanner_task(void *arg) {
     (void)arg;
     apply_config();
     sp->window_start = esp_timer_get_time();
-    sp->rotation_start = sp->window_start;
+    sp->rotation_start = sp->w_rot_from = sp->window_start;
     int64_t last_yield = sp->window_start;
     TaskHandle_t timer_task = xTimerGetTimerDaemonTaskHandle();
     for (;;) {
@@ -685,6 +697,7 @@ static void scanner_task(void *arg) {
         int64_t now = esp_timer_get_time();
         if (now - sp->window_start >= TELEMETRY_US) emit_telemetry(now);
         if (!sp->cfg.running || !sp->plan.nhops) {
+            sp->w_rot_from = now; /* a restart's first rate leaves the stop out */
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }

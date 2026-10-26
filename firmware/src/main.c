@@ -85,4 +85,5 @@ void app_main(void) {
     BOOT_CHECK(rh_init()); /* before the scanner can feed seats */
     BOOT_CHECK(scanner_init());
     commands_task_start(); /* silent from here on until a host speaks (commands.c) */
+    BOOT_CHECK(scanner_start()); /* last: the scan task starves main (scanner_start) */
 }

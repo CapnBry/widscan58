@@ -52,6 +52,9 @@ typedef struct {
 
 void scanner_defaults(const profile_t *p, scan_config_t *c);
 esp_err_t scanner_init(void);
+/* Start the scan task. Last in the boot: it rarely yields to lower
+ * priorities (main included), so everything else must be set up first. */
+esp_err_t scanner_start(void);
 void scanner_get_config(scan_config_t *c);
 void scanner_set_config(const scan_config_t *c);
 void scanner_get_plan(plan_t *plan);

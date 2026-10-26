@@ -747,7 +747,9 @@ esp_err_t scanner_init(void) {
     if (err != ESP_OK) return err;
     /* Core 0: the PHY and Wi-Fi driver live there. */
     const esp_timer_create_args_t ta = {.callback = throttle_wake, .name = "scan_throttle"};
-    err = esp_timer_create(&ta, &sp->throttle_timer);
-    if (err != ESP_OK) return err;
+    return esp_timer_create(&ta, &sp->throttle_timer);
+}
+
+esp_err_t scanner_start(void) {
     return xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, &sp->task, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }

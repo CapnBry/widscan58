@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "frames.h"
 #include "link.h"
 #include "metrics.h"
@@ -27,6 +28,11 @@
  * shorter ones spin. A blocked wait wakes ~WAKE_US early and spins the rest. */
 #define THROTTLE_SLEEP_MIN_US 100
 #define THROTTLE_WAKE_US 30
+/* A scan that never blocks in the throttle (e.g. 4 LOs) still sleeps this
+ * long once per YIELD_US, so the tasks below it on the core get to run: the
+ * idle task (freeing deleted tasks) and the FreeRTOS timer task. */
+#define YIELD_US 1000000
+#define YIELD_SLEEP_US 100
 
 static SemaphoreHandle_t lock;
 static QueueHandle_t requests;
@@ -649,12 +655,20 @@ static bool throttle_until(int64_t due) {
     return slept;
 }
 
+/* A short block on the throttle's timer: vTaskDelay(1) waited for the next
+ * tick, ~0.45 ms late in the rotation it landed in. */
+static void yield_lower(void) {
+    if (esp_timer_start_once(sp->throttle_timer, YIELD_SLEEP_US) == ESP_OK) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    else vTaskDelay(1);
+}
+
 static void scanner_task(void *arg) {
     (void)arg;
     apply_config();
     sp->window_start = esp_timer_get_time();
     sp->rotation_start = sp->window_start;
     int64_t last_yield = sp->window_start;
+    TaskHandle_t timer_task = xTimerGetTimerDaemonTaskHandle();
     for (;;) {
         if (dirty) apply_config();
         scan_request_t req;
@@ -675,6 +689,7 @@ static void scanner_task(void *arg) {
             continue;
         }
         do_hop();
+        bool lower_ready = false; /* a task below this one has work */
         if (++sp->hop >= sp->plan.nhops) {
             sp->hop = 0;
             sp->rotations++;
@@ -683,16 +698,21 @@ static void scanner_task(void *arg) {
              * lower the rate; a slow rotation starts the next one afresh. */
             uint32_t hz = sp->cfg.max_rotation_hz;
             int64_t due = sp->rotation_start + (hz ? 1000000 / hz : 0), end = esp_timer_get_time();
+            bool blocked = false;
             if (hz && end < due) {
-                if (throttle_until(due)) last_yield = due;
+                blocked = throttle_until(due);
+                if (blocked) last_yield = due;
                 sp->rotation_start = due;
             } else {
                 sp->rotation_start = end;
             }
+            /* Once per rotation: ~2 us, too much for every hop. */
+            lower_ready = !blocked && timer_task && eTaskGetState(timer_task) == eReady;
         }
-        /* Let lower-priority work on this core run occasionally. */
-        if (now - last_yield > 20000) {
-            vTaskDelay(1);
+        /* Let lower-priority work on this core run: once a second when the
+         * throttle hasn't blocked, at once when the timer task has work. */
+        if (lower_ready || now - last_yield > YIELD_US) {
+            yield_lower();
             last_yield = esp_timer_get_time();
         }
     }

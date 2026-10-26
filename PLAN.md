@@ -1268,6 +1268,29 @@ protocol keeps its name where it is RotorHazard's: `PROTOCOL RH`,
 `proto/rh.ts`, `RhLink`, `firmware/src/proto/rh.c`.
 The entries above keep the old name.
 
+**Scanner yield (2026-10-26).** In lap timer mode with R1–R8 (4 LOs) the web
+UI's updates/s (one seat's `loop_us`, the last update interval) read ~510 /s
+and sometimes 400–430 /s. A rotation (~1.95 ms) is longer than the throttle's
+slot (952 µs), so the scan task never blocked there, and every 20 ms it ran
+`vTaskDelay(1)` to let lower-priority tasks run; that waited for the next
+1 ms tick, ~0.25–0.5 ms late (up to 1 ms) in the rotation it landed in.
+Sampling seat 1's `loop_us` every 5 ms: 8.8 % of intervals late (the shown
+rate up to −107 /s, −21 %; one −175 /s), repeating every 20.2 ms; the mean
+rate 504 /s against the 515 /s usually shown. `THROTTLE 480` (the task blocks
+every rotation, which counts as its yield) removed them. With 8 seats on one
+frequency (1 LO) the scan blocks in the throttle every rotation: 947–960 µs,
+the rate within ±0.8 % of 1050 /s. Now the task yields once a second when the
+throttle hasn't blocked, sleeping 100 µs on the throttle's `esp_timer`
+instead of waiting for a tick, and at once when the FreeRTOS timer task is
+ready (`eTaskGetState`, once per rotation: ~2 µs; every hop cost ~8 µs per
+rotation). The only tasks below the scanner (priority 4) are the idle task,
+the timer task and `app_main`'s; the command (6) and link (5) tasks are above
+it. After: R1–R8 1962–2088 µs at 5 ms sampling (2088: the yield, +113 µs),
+none late, median 1975 µs (1967 before, 1970 with the once-a-second yield
+alone); one frequency unchanged. Polling faster than the UI's 100 ms slows
+the scan itself (the command and link tasks preempt it): every 1 ms,
+~2040 µs; as fast as possible (~10 kHz), ~2.7 ms.
+
 ## 7. Risks and open questions
 
 | Risk | Mitigation |

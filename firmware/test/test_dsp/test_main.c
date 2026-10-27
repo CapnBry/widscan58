@@ -297,6 +297,78 @@ static void test_lap_pass(void) {
     TEST_ASSERT_EQUAL(5000, s.loop_us);
 }
 
+/* A broad top: like feed_pass, but 400 ms at the top (updates 130..209),
+ * its first 150 ms at 221 and the rest at 220. At plateau 0 the pass
+ * follows the 221 stretch, ~125 ms early; with a 4-code tolerance it is the
+ * middle of the whole top. A tolerance change mid-crossing keeps what the
+ * crossing has so far. */
+static void feed_broad(lap_seat_t *s, uint32_t t) {
+    static const uint8_t up[] = {170, 180, 190, 200, 210};
+    for (int k = 0; k < 80; k++, t += 5) lap_feed(s, t, 160, 5000);
+    for (unsigned a = 0; a < 5; a++)
+        for (int k = 0; k < 10; k++, t += 5) lap_feed(s, t, up[a], 5000);
+    for (int k = 0; k < 80; k++, t += 5) lap_feed(s, t, k < 30 ? 221 : 220, 5000);
+    for (int a = 4; a >= 0; a--)
+        for (int k = 0; k < 10; k++, t += 5) lap_feed(s, t, up[a], 5000);
+    for (int k = 0; k < 80; k++, t += 5) lap_feed(s, t, 160, 5000);
+}
+
+/* A bounce: two humps (211, then 210) 200 ms each with a 200 ms dip to 195
+ * between them; the first hump is updates 120..159, the second 200..239. */
+static void feed_bounce(lap_seat_t *s, uint32_t t) {
+    static const uint8_t up[] = {170, 180, 190, 200};
+    for (int k = 0; k < 80; k++, t += 5) lap_feed(s, t, 160, 5000);
+    for (unsigned a = 0; a < 4; a++)
+        for (int k = 0; k < 10; k++, t += 5) lap_feed(s, t, up[a], 5000);
+    for (int k = 0; k < 120; k++, t += 5) lap_feed(s, t, k < 40 ? 211 : k < 80 ? 195 : 210, 5000);
+    for (int a = 3; a >= 0; a--)
+        for (int k = 0; k < 10; k++, t += 5) lap_feed(s, t, up[a], 5000);
+    for (int k = 0; k < 80; k++, t += 5) lap_feed(s, t, 160, 5000);
+}
+
+static void test_lap_plateau(void) {
+    lap_seat_t s;
+    lap_init(&s, 190, 180);
+    TEST_ASSERT_EQUAL(LAP_PLATEAU_DEFAULT, s.plateau);
+    lap_set_plateau(&s, 0);
+    feed_broad(&s, 1000);
+    TEST_ASSERT_EQUAL(1, s.lap);
+    TEST_ASSERT_EQUAL(221, s.pass_peak);
+    TEST_ASSERT_INT_WITHIN(10, 1000 + 5 * 130 + 5 * 29 / 2, s.pass_ms);
+    lap_init(&s, 190, 180);
+    lap_set_plateau(&s, 4);
+    feed_broad(&s, 1000);
+    TEST_ASSERT_EQUAL(1, s.lap);
+    TEST_ASSERT_EQUAL(221, s.pass_peak);
+    TEST_ASSERT_INT_WITHIN(5, 1000 + 5 * 130 + 5 * 79 / 2, s.pass_ms);
+    /* The plateau bridges dips, as RotorHazard's nodes do at the peak
+     * level: at 0 the second hump (one code lower) is left out and the pass
+     * is the first hump's middle; within the tolerance, the pass is the
+     * middle of both humps. */
+    lap_init(&s, 190, 180);
+    lap_set_plateau(&s, 0);
+    feed_bounce(&s, 1000);
+    TEST_ASSERT_EQUAL(1, s.lap);
+    TEST_ASSERT_EQUAL(211, s.pass_peak);
+    TEST_ASSERT_INT_WITHIN(10, 1000 + 5 * 120 + 5 * 39 / 2, s.pass_ms);
+    lap_init(&s, 190, 180);
+    feed_bounce(&s, 1000);
+    TEST_ASSERT_EQUAL(211, s.pass_peak);
+    TEST_ASSERT_INT_WITHIN(10, 1000 + 5 * 120 + 5 * 119 / 2, s.pass_ms);
+    /* The symmetric pass is unchanged by any tolerance below its steps. */
+    lap_init(&s, 190, 180);
+    lap_set_plateau(&s, 9);
+    feed_pass(&s, 1000, -1);
+    TEST_ASSERT_INT_WITHIN(5, PASS_PLATEAU_MID(1000), s.pass_ms);
+    /* Clamped to LAP_PLATEAU_MAX: the plateau then spans from the start of
+     * the crossing (190) to its end, still centred. */
+    lap_set_plateau(&s, 200);
+    TEST_ASSERT_EQUAL(LAP_PLATEAU_MAX, s.plateau);
+    feed_pass(&s, 5000, -1);
+    TEST_ASSERT_EQUAL(2, s.lap);
+    TEST_ASSERT_INT_WITHIN(5, PASS_PLATEAU_MID(5000), s.pass_ms);
+}
+
 /* A 50 ms dropout below exit_at mid-crossing (on the way up, at 200) is
  * filtered out: one pass, not two, peak 220. So is a 100 ms spike above
  * enter_at (under half the window): no pass. */
@@ -533,6 +605,7 @@ int main(void) {
     RUN_TEST(test_metrics_level);
     RUN_TEST(test_lap_pass);
     RUN_TEST(test_lap_filter);
+    RUN_TEST(test_lap_plateau);
     RUN_TEST(test_lap_window);
     RUN_TEST(test_lap_history);
     RUN_TEST(test_lap_reset_and_force);

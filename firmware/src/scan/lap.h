@@ -9,8 +9,12 @@
  * Behaviour (written for Widscan58 from RotorHazard's documented node
  * protocol, not from its code): a crossing starts when the filtered level
  * reaches enter_at and ends when it drops below exit_at; the pass time is
- * the middle of the crossing's highest plateau (first to last update at
- * the peak level). The filter is a running median over the last
+ * the middle of the crossing's highest plateau: first to last update within
+ * `plateau` codes of its peak (lap_set_plateau), across any dips in
+ * between, as RotorHazard's nodes do at the peak level itself (plateau 0).
+ * At 0.25 dB per code the peak level alone is often a few ms wide, so a
+ * tolerance keeps the pass from following whichever update of a broad top
+ * reads highest. The filter is a running median over the last
  * LAP_WINDOW_MS (at most LAP_MAX_SAMPLES updates, so above 1000 updates/s
  * the window is shorter), as RotorHazard's nodes use: it removes dropouts
  * and spikes shorter than about half the window, and its output carries the
@@ -35,6 +39,8 @@
 #define LAP_WINDOW_MS 255  /* median window */
 #define LAP_MAX_SAMPLES 255 /* window cap: one byte per histogram bin */
 #define LAP_TS_EVERY 8     /* updates per stored timestamp */
+#define LAP_PLATEAU_MAX 31  /* plateau tolerance limit, level codes (7.75 dB) */
+#define LAP_PLATEAU_DEFAULT 4 /* 1 dB */
 #define LAP_EMA_TAU_US 2750 /* LAP_FILTER_EMA time constant: alpha 0.3 at 1030 updates/s = 2750 */
 /* Enough timestamps for the oldest update's preceding one to survive. */
 #define LAP_TS_SLOTS ((LAP_MAX_SAMPLES + 1) / LAP_TS_EVERY + 2)
@@ -56,6 +62,7 @@ typedef struct {
     /* Settings */
     uint8_t enter_at, exit_at;
     uint8_t filter;        /* lap_filter_t */
+    uint8_t plateau;       /* pass plateau tolerance, level codes (0..LAP_PLATEAU_MAX) */
     /* Median window: updates first .. seq - 1 (update k is ring[k & 255]),
      * a histogram of their levels, and the median: the lower middle level,
      * with `below` updates under it. LAP_FILTER_EMA uses only the ring and
@@ -80,6 +87,11 @@ typedef struct {
     uint8_t pass_nadir;    /* lowest level since the last pass ended */
     uint8_t cur_peak;      /* current crossing's highest level and its plateau */
     uint32_t cur_first_ms, cur_last_ms;
+    /* With a plateau tolerance: plat_first[k], the crossing's first update
+     * at cur_peak - k or above (k = 0..plateau), and the last update within
+     * the tolerance of cur_peak. */
+    uint32_t plat_first[LAP_PLATEAU_MAX + 1];
+    uint32_t plat_last_ms;
     /* Peak/nadir history: dir is +1 while rising (ext is the highest so
      * far), -1 while falling (ext is the lowest). */
     int8_t dir;
@@ -91,8 +103,14 @@ typedef struct {
     uint16_t loop_us;
 } lap_seat_t;
 
-/* Power-on state: thresholds as given, LAP_FILTER_MEDIAN, lap count 0. */
+/* Power-on state: thresholds as given, LAP_FILTER_MEDIAN, plateau
+ * LAP_PLATEAU_DEFAULT, lap count 0. */
 void lap_init(lap_seat_t *s, uint8_t enter_at, uint8_t exit_at);
+/* The pass plateau tolerance in level codes, at most LAP_PLATEAU_MAX; 0
+ * times the pass at the peak level only (the plateau code does not run). A
+ * crossing in progress restarts its plateau from its peak's first to last
+ * update. */
+void lap_set_plateau(lap_seat_t *s, unsigned codes);
 /* Change the filter; on a change, as lap_reset. */
 void lap_set_filter(lap_seat_t *s, lap_filter_t f);
 /* After a frequency change: forget levels, peaks and any crossing; keep

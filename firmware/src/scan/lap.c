@@ -27,7 +27,16 @@ void lap_init(lap_seat_t *s, uint8_t enter_at, uint8_t exit_at) {
     memset(s, 0, sizeof(*s));
     s->enter_at = enter_at;
     s->exit_at = exit_at;
+    s->plateau = LAP_PLATEAU_DEFAULT;
     lap_reset(s);
+}
+
+void lap_set_plateau(lap_seat_t *s, unsigned codes) {
+    if (codes > LAP_PLATEAU_MAX) codes = LAP_PLATEAU_MAX;
+    if (s->plateau == codes) return;
+    s->plateau = (uint8_t)codes;
+    for (unsigned k = 0; k <= codes; k++) s->plat_first[k] = s->cur_first_ms;
+    s->plat_last_ms = s->cur_last_ms;
 }
 
 void lap_reset(lap_seat_t *s) {
@@ -57,7 +66,12 @@ void lap_set_filter(lap_seat_t *s, lap_filter_t f) {
 static void end_crossing(lap_seat_t *s) {
     s->crossing = false;
     s->lap++;
-    s->pass_ms = s->cur_first_ms + (s->cur_last_ms - s->cur_first_ms) / 2;
+    uint32_t first = s->cur_first_ms, last = s->cur_last_ms;
+    if (s->plateau) {
+        first = s->plat_first[s->plateau];
+        last = s->plat_last_ms;
+    }
+    s->pass_ms = first + (last - first) / 2;
     s->pass_peak = s->cur_peak;
     s->pass_nadir = s->level;
 }
@@ -93,17 +107,27 @@ static IRAM_ATTR void filtered(lap_seat_t *s, uint32_t t, uint8_t v) {
     s->valid = true;
 
     /* Crossing and pass. */
+    unsigned n = s->plateau;
     if (!s->crossing && v >= s->enter_at) {
         s->crossing = true;
         s->cur_peak = v;
         s->cur_first_ms = s->cur_last_ms = t;
+        if (n) {
+            for (unsigned k = 0; k <= n; k++) s->plat_first[k] = t;
+            s->plat_last_ms = t;
+        }
     } else if (s->crossing) {
         if (v > s->cur_peak) {
+            if (n) { /* the levels above the old peak are first reached now */
+                unsigned d = v - s->cur_peak;
+                for (unsigned k = n + 1; k-- > 0;) s->plat_first[k] = k >= d ? s->plat_first[k - d] : t;
+            }
             s->cur_peak = v;
             s->cur_first_ms = s->cur_last_ms = t;
         } else if (v == s->cur_peak) {
             s->cur_last_ms = t;
         }
+        if (n && v + n >= s->cur_peak) s->plat_last_ms = t;
         if (v < s->exit_at) end_crossing(s);
     }
     if (!s->crossing && v < s->pass_nadir) s->pass_nadir = v;

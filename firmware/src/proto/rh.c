@@ -120,6 +120,14 @@ void rh_set_filter(lap_filter_t f) {
 
 lap_filter_t rh_get_filter(void) { return (lap_filter_t)seat[0].lap.filter; }
 
+void rh_set_plateau(unsigned codes) {
+    portENTER_CRITICAL(&mux);
+    for (unsigned j = 0; j < RH_SEATS; j++) lap_set_plateau(&seat[j].lap, codes);
+    portEXIT_CRITICAL(&mux);
+}
+
+unsigned rh_get_plateau(void) { return seat[0].lap.plateau; }
+
 void rh_plan_applied(void) {
     portENTER_CRITICAL(&mux);
     for (unsigned j = 0; j < RH_SEATS; j++) {

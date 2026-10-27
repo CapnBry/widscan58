@@ -235,8 +235,9 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
 | `CONFIG SAVE` | Lap timer mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the lap timer mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
 | `CONFIG RESET` | Lap timer mode only: erase the saved lap timer mode defaults and apply the built-in ones |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in lap timer mode. In lap timer mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in lap timer mode. In lap timer mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `PLATEAU…`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
 | `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | Lap timer mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
+| `PLATEAU <codes>`, `PLATEAU?` | Debug, both modes: the lap timer's pass plateau tolerance, 0–31 level codes (0.25 dB each; default 4, 1 dB). A pass is timed at the middle of the crossing's first to last update within that many codes of its peak, across dips (RotorHazard's node rule at 0; the plateau code does not run then). Not saved by `CONFIG SAVE`; kept across mode switches until a restart. A change mid-crossing restarts that crossing's plateau from its peak. Reported as `plateau` in `STATUS?`/`CONFIG?` |
 | `GPIO <n> NONE\|LOW\|HIGH`, `GPIO SAVE`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `GPIO SAVE` makes the settings in effect the boot ones (NVS, base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; `src/gpio_out.c`), applied right after `nvs_flash_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `x` not available (USB, and the flash pins IDF reserves). Works in both modes |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in lap timer mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
@@ -279,10 +280,21 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   so shorter above 1000 updates/s), as RotorHazard's own nodes use (255
   samples at ~1 kHz); nothing is reported for the first 255 ms after a reset.
   It comes from a histogram of the level codes, with a timestamp every 8th
-  update; the seats are on the heap (~7.6 KB for 8), since the C5's static RAM
+  update; the seats are on the heap (~8.7 KB for 8), since the C5's static RAM
   below the RF dump bank is nearly full (scan loop in IRAM). Then a crossing from EnterAt
   until below ExitAt, and the pass at the middle of the crossing's highest
-  plateau. Peaks
+  plateau: from its first to its last update within `PLATEAU` codes of the
+  peak (default 4, 1 dB), across any dips in between. That is RotorHazard's
+  node rule (`RssiNode.cpp`: first to last reading at the peak value until
+  ExitAt) widened by the tolerance; `PLATEAU 0` is that rule exactly. At
+  0.25 dB codes the exact peak level alone is often a few ms wide, so the
+  pass followed whichever update of a broad top read highest (the suspected
+  cause of >100 ms outliers against a camera, 2026-10-26; unconfirmed).
+  Like RotorHazard's nodes, it bridges two humps that reach the plateau (a
+  bounce off the gate, or a close approach away from the gate) and times the
+  pass between them. Streaming, any crossing length: the first time at each
+  level from peak − N up (`plat_first`, N + 1 timestamps per seat, shifted
+  up as the peak rises) and the last update within N. Peaks
   and nadirs (4-code, 1 dB hysteresis, 8 queued each) feed the server's RSSI graph.
   A frequency change keeps the lap count (the server counts passes by its
   change), and resets the seat, with every seat already on that frequency,

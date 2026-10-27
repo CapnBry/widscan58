@@ -33,6 +33,10 @@ void rh_reset_levels(void);
 /* Every seat's level filter (lap.h); a change resets the seats' levels. */
 void rh_set_filter(lap_filter_t f);
 lap_filter_t rh_get_filter(void);
+/* Every seat's pass plateau tolerance in level codes (lap_set_plateau);
+ * not saved, kept until a restart. */
+void rh_set_plateau(unsigned codes);
+unsigned rh_get_plateau(void);
 /* The scanner switched to a new plan (scanner task, before its first
  * update): reset the seats a frequency change marked, together. */
 void rh_plan_applied(void);

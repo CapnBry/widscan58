@@ -224,8 +224,8 @@ static bool rh_allowed(const char *line) {
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
                                         "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE",
                                         "CONFIG RESET", "RECAL", "LEVELFILTER MEDIAN", "LEVELFILTER EMA",
-                                        "LEVELFILTER?", "PHYIDLE?", "GPIO?"};
-    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR ", "PHYIDLE ", "THROTTLE ", "GPIO "};
+                                        "LEVELFILTER?", "PLATEAU?", "PHYIDLE?", "GPIO?"};
+    static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR ", "PLATEAU ", "PHYIDLE ", "THROTTLE ", "GPIO "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;
     for (unsigned j = 0; j < sizeof(prefix) / sizeof(prefix[0]); j++)
@@ -243,7 +243,7 @@ static void send_status(const char *keyword) {
               "\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"tskip\":%u,\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema_ms\":%u,\"clear_ms\":%u,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
-              "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"throttle_hz\":%" PRIu32 ","
+              "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"plateau\":%u,\"throttle_hz\":%" PRIu32 ","
               "\"phy_idle\":%u,\"phy_idle_min_us\":%" PRIu32 ",\"plan\":[",
               keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.iq_corr, c.settle_us, radio_get_tune_skip(),
@@ -252,7 +252,7 @@ static void send_status(const char *keyword) {
               metrics_mode_name(c.metrics_mode), c.rssi_hz, c.search_hz, c.dc_guard,
               c.ema_ms, c.clear_ms, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type),
-              level_filter_name(rh_get_filter()), c.max_rotation_hz, c.phy_idle, c.phy_idle_min_us);
+              level_filter_name(rh_get_filter()), rh_get_plateau(), c.max_rotation_hz, c.phy_idle, c.phy_idle_min_us);
     for (unsigned j = 0; j < plan.nhops; j++) {
         const plan_hop_t *h = &plan.hop[j];
         reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[", j ? "," : "", h->lo_khz);
@@ -367,6 +367,12 @@ static void handle(char *line) {
         link_text("OK\n");
     } else if (!strcmp(line, "LEVELFILTER?")) {
         link_printf("LEVELFILTER %s\n", level_filter_name(rh_get_filter()));
+    } else if (sscanf(line, "PLATEAU %" SCNu32 " %c", &a, &extra) == 1 && a <= LAP_PLATEAU_MAX) {
+        /* Both modes; not saved (CONFIG SAVE leaves it out). */
+        rh_set_plateau(a);
+        link_text("OK\n");
+    } else if (!strcmp(line, "PLATEAU?")) {
+        link_printf("PLATEAU %u\n", rh_get_plateau());
     } else if (!strcmp(line, "PROTOCOL?")) {
         link_printf("PROTOCOL %s\n", proto == PROTO_RH ? "RH" : "MONITOR");
     } else if (!strcmp(line, "PROTOCOL RH") || !strcmp(line, "PROTOCOL MONITOR")) {

@@ -40,7 +40,7 @@
 #define LAP_MAX_SAMPLES 255 /* window cap: one byte per histogram bin */
 #define LAP_TS_EVERY 8     /* updates per stored timestamp */
 #define LAP_PLATEAU_MAX 31  /* plateau tolerance limit, level codes (7.75 dB) */
-#define LAP_PLATEAU_DEFAULT 4 /* 1 dB */
+#define LAP_PLATEAU_DEFAULT 2 /* 0.5 dB */
 #define LAP_EMA_TAU_US 2750 /* LAP_FILTER_EMA time constant: alpha 0.3 at 1030 updates/s = 2750 */
 /* Enough timestamps for the oldest update's preceding one to survive. */
 #define LAP_TS_SLOTS ((LAP_MAX_SAMPLES + 1) / LAP_TS_EVERY + 2)

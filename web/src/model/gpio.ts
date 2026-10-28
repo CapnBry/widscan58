@@ -1,8 +1,8 @@
-// GPIO outputs set at startup (firmware src/gpio_out.c): the GPIO? reply.
-// GPL-3.0-or-later.
+// GPIO outputs set at startup and the host UART's pins (firmware
+// src/gpio_out.c): the GPIO? reply. GPL-3.0-or-later.
 
-/** Per pin: not used, low, high, or not available (flash, USB). */
-export type GpioSetting = "NONE" | "LOW" | "HIGH" | "RESERVED";
+/** Per pin: not used, low, high, the UART's TX or RX, or not available (flash, USB). */
+export type GpioSetting = "NONE" | "LOW" | "HIGH" | "TX" | "RX" | "RESERVED";
 
 export interface GpioPin {
   n: number;
@@ -12,7 +12,7 @@ export interface GpioPin {
   saved: GpioSetting;
 }
 
-const SETTING: Record<string, GpioSetting> = { "-": "NONE", L: "LOW", H: "HIGH", x: "RESERVED" };
+const SETTING: Record<string, GpioSetting> = { "-": "NONE", L: "LOW", H: "HIGH", T: "TX", R: "RX", x: "RESERVED" };
 
 /** `GPIO {"count":29,"active":"--H…","saved":"--L…"}`, one character per GPIO number. */
 export function parseGpio(line: string): GpioPin[] {

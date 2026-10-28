@@ -1,6 +1,5 @@
 /* Widscan58: ESP32 FPV channel scanner using the esp-sdr raw I/Q path.
  * GPL-3.0-or-later. Boot sequence follows esp-sdr's receivers. */
-#include "driver/usb_serial_jtag.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -37,9 +36,9 @@ static void boot_failed(const char *what, esp_err_t err) {
     /* Boot is silent (commands.c), so report only once a host speaks. */
     bool host = false;
     for (;;) {
-        /* Nothing else reads the port; drain it so host writes don't stall. */
+        /* Nothing else reads the ports; drain them so host writes don't stall. */
         uint8_t sink[64];
-        while (usb_serial_jtag_read_bytes(sink, sizeof(sink), 0) > 0) host = true;
+        while (link_read(sink, sizeof(sink), 0) > 0) host = true;
         if (host)
             link_printf("ERR boot %s %s heap=%u largest=%u\n", what, esp_err_to_name(err),
                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
@@ -70,8 +69,10 @@ void app_main(void) {
         e = nvs_flash_init();
     }
     ESP_ERROR_CHECK(e);
-    gpio_out_init(); /* the saved board outputs (e.g. an antenna switch), before the radio */
     link_init();
+    /* The saved board outputs (e.g. an antenna switch), before the radio; and
+     * the UART's pins, once its driver has the line idle. */
+    gpio_out_init();
     BOOT_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     BOOT_CHECK(esp_wifi_init(&cfg));

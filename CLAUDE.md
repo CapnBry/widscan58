@@ -124,6 +124,29 @@ skirt"). The analog filter code (`FILTER`) does not change the ADC rate. The
 web UI's power calibration was made at rate 0; R1–R5 are lowered 0.5 dB for
 it (`CALIBRATION`), an estimate until it is redone.
 
+**Host UART (C5 default TX GPIO11, RX GPIO12: UART0's own pins, D6/D7
+on the XIAO; not strapping pins):** UART0 at 921600 baud 8N1 mirrors the USB
+port's protocol, both modes, so a host such as a Raspberry Pi reaches the
+ROM's download mode and our firmware on the same wires (the ROM's boot
+banner goes out on TX at 115200 first). Never `uart_driver_delete` it: that
+gates UART0's clock, the C5 rev 1.0 USB-reset bug above. Wiring and
+Raspberry Pi setup for users: docs/uart-notes.md. `widscan58cli.py` and
+`serial_bridge.py` open ports at 921600 (USB ignores the rate). One port is active at a time
+(`link.c`): input on the other one makes it active, drops the output queued
+for the old one, and the command task drops its partial line and RotorHazard
+write (`STATUS?` `link`: `usb` or `uart`). The 16 KB output queue is the only
+output buffer for both: the USB driver keeps a 2 KB TX ring (feeding the
+endpoint) and 512 B RX, the UART driver 512 B RX and no TX ring
+(`uart_write_bytes` goes straight to the FIFO from `link_task`), ~1.4 KB of
+heap. The pins go through the GPIO matrix in `gpio_out.c`, not
+`uart_set_pin`, which reserves the TX pin (it would read as `x`); RX with no
+pin reads a constant idle line. The UART's interrupt handler is in flash
+(`CONFIG_UART_ISR_IN_IRAM` would take ~2.3 KB of static RAM), and so is the
+ring buffer and FreeRTOS setup code only its driver uses (`hot_iram.lf`,
+`widscan58_ringbuf_cold`): the UART costs ~330 B of static RAM below the RF
+dump bank (~1.1 KB left, 2026-10-28). Untested on hardware with a UART host
+so far.
+
 **Firmware version:** `INFO` (and RotorHazard's firmware version) reports
 `PROJECT_VER`, the `git describe --tags --always --dirty` that
 `firmware/CMakeLists.txt` takes at CMake configure time. PlatformIO only
@@ -239,7 +262,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in lap timer mode. In lap timer mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `PLATEAU…`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
 | `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | Lap timer mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
 | `PLATEAU <codes>`, `PLATEAU?` | Debug, both modes: the lap timer's pass plateau tolerance, 0–31 level codes (0.25 dB each; default 2, 0.5 dB). A pass is timed at the middle of the crossing's first to last update within that many codes of its peak, across dips (RotorHazard's node rule at 0; the plateau code does not run then). Not saved by `CONFIG SAVE`; kept across mode switches until a restart. A change mid-crossing restarts that crossing's plateau from its peak. Reported as `plateau` in `STATUS?`/`CONFIG?` |
-| `GPIO <n> NONE\|LOW\|HIGH`, `GPIO SAVE`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `GPIO SAVE` makes the settings in effect the boot ones (NVS, base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; `src/gpio_out.c`), applied right after `nvs_flash_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `x` not available (USB, and the flash pins IDF reserves). Works in both modes |
+| `GPIO <n> NONE\|LOW\|HIGH\|TX\|RX`, `GPIO SAVE`, `GPIO RESET`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26), and the host UART's pins (see "Host UART"). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `TX`/`RX` moves that UART role to the pin, and the pin that had it goes back to `NONE`. `GPIO SAVE` makes the settings in effect the boot ones (NVS: outputs in base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; the UART pins as `u16` key `uart`, erased while they are the defaults; `src/gpio_out.c`), applied right after `link_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `T` and `R` the UART's TX and RX, `x` not available (USB, and the flash pins IDF reserves). `GPIO RESET`: the built-in settings at once (no outputs, the UART on its default pins) and every key erased. Works in both modes |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in lap timer mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
 ## Lap timer mode
@@ -340,11 +363,14 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   and the dark-mode switch. The choice is remembered and applied on every
   connect (`PROTOCOL?`, then `PROTOCOL MONITOR|RH`; firmware without
   `PROTOCOL` is monitor only; power meter mode runs the monitor protocol). GPIO Configure (`views/gpioDialog.ts`,
-  `model/gpio.ts`) shows each GPIO's setting (not its live level) as Not
-  used / Low / High; a click sends `GPIO <n> …` (in effect at once) and
-  reads `GPIO?` back. Pins whose setting differs from the saved one show
-  "saved: …", with a note that they need Save (`GPIO SAVE`) to survive a
-  restart; Revert puts the saved ones back.
+  `model/gpio.ts`) shows each GPIO's setting (not its live level) as
+  Unused / Low / High / TX / RX, the UART's pins outlined (TX `--s2`, RX
+  `--s3`); a click sends `GPIO <n> …` (in effect at once) and
+  reads `GPIO?` back. Pins whose setting differs from the saved one have
+  the name and the saved option's text in `--warning`,
+  with a note that they need Save
+  (`GPIO SAVE`) to survive a restart; Revert puts the saved ones back,
+  Defaults (`GPIO RESET`, no confirmation) the built-in ones.
   An About section below them links to the GitHub project and shows the
   connected device's firmware version (from `INFO`; over Web Serial also a
   newer version the page can flash).

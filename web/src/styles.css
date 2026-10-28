@@ -235,14 +235,27 @@ header.top .actions button { white-space: nowrap; }
 .gpio-dialog { width: min(700px, calc(100vw - 32px)); }
 .gpio-dialog p { margin: 0 0 8px; color: var(--ink-2); }
 .gpio-dialog .flash-buttons .spacer { flex: 1; }
-.gpio-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px 18px; }
-.gpio-row { display: grid; grid-template-columns: 62px max-content 1fr; align-items: center; gap: 8px; min-height: 28px; }
+.gpio-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 4px 12px; }
+.gpio-row { display: grid; grid-template-columns: 56px max-content; align-items: center; gap: 8px; min-height: 28px;
+  padding: 1px 5px; border: 2px solid transparent; border-radius: 8px; }
+/* The UART's pins: outlined, TX and RX in their own colours. */
+.gpio-row.uart-tx { border-color: var(--s2); }
+.gpio-row.uart-rx { border-color: var(--s3); }
+.gpio-row.uart-tx .gpio-name { color: var(--s2); font-weight: 600; }
+.gpio-row.uart-rx .gpio-name { color: var(--s3); font-weight: 600; }
 .gpio-row .seg button { padding: 3px 8px; font-size: 12px; white-space: nowrap; }
+@media (max-width: 420px) {
+  .gpio-row { grid-template-columns: 52px max-content; gap: 6px; }
+  .gpio-row .seg button { padding: 3px 6px; }
+}
+@media (max-width: 360px) {
+  .gpio-dialog .flash-buttons { flex-wrap: wrap; }
+}
 .gpio-name { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
 .gpio-row.reserved .gpio-name, .gpio-reserved { color: var(--muted); }
 .gpio-reserved { font-size: 12px; }
 .gpio-row.changed .gpio-name { color: var(--warning); }
-.gpio-saved { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.gpio-row .seg button.was { color: var(--warning); }
 .gpio-unsaved { margin-top: 10px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); color: var(--warning); font-size: 12px; }
 .gpio-unsaved[hidden], .gpio-status[hidden] { display: none; }
 .gpio-status { margin: 0 0 8px; color: var(--ink-2); }

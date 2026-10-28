@@ -244,7 +244,7 @@ static void send_status(const char *keyword) {
               "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema_ms\":%u,\"clear_ms\":%u,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"plateau\":%u,\"throttle_hz\":%" PRIu32 ","
-              "\"phy_idle\":%u,\"phy_idle_min_us\":%" PRIu32 ",\"plan\":[",
+              "\"phy_idle\":%u,\"phy_idle_min_us\":%" PRIu32 ",\"link\":\"%s\",\"plan\":[",
               keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.iq_corr, c.settle_us, radio_get_tune_skip(),
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, (unsigned)radio_caps()->max_samples,
@@ -252,7 +252,8 @@ static void send_status(const char *keyword) {
               metrics_mode_name(c.metrics_mode), c.rssi_hz, c.search_hz, c.dc_guard,
               c.ema_ms, c.clear_ms, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type),
-              level_filter_name(rh_get_filter()), rh_get_plateau(), c.max_rotation_hz, c.phy_idle, c.phy_idle_min_us);
+              level_filter_name(rh_get_filter()), rh_get_plateau(), c.max_rotation_hz, c.phy_idle, c.phy_idle_min_us,
+              link_port() == LINK_UART ? "uart" : "usb");
     for (unsigned j = 0; j < plan.nhops; j++) {
         const plan_hop_t *h = &plan.hop[j];
         reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[", j ? "," : "", h->lo_khz);
@@ -265,15 +266,16 @@ static void send_status(const char *keyword) {
     reply_send();
 }
 
-/* GPIO?: per GPIO number, '-' unused, 'L' low, 'H' high, 'x' not available
- * (flash, USB); "active" is what is set now, "saved" what boot applies. */
+/* GPIO?: per GPIO number, '-' unused, 'L' low, 'H' high, 'T' and 'R' the
+ * host UART's TX and RX, 'x' not available (flash, USB); "active" is what is
+ * set now, "saved" what boot applies. */
 static void send_gpio(void) {
     char s[2][65];
     unsigned n = gpio_out_count();
     if (n > 64) n = 64;
     for (unsigned k = 0; k < 2; k++) {
         for (unsigned j = 0; j < n; j++)
-            s[k][j] = !gpio_out_allowed(j) ? 'x' : "-LH"[gpio_out_get(j, k)];
+            s[k][j] = !gpio_out_allowed(j) ? 'x' : "-LHTR"[gpio_out_get(j, k)];
         s[k][n] = 0;
     }
     reply_add("GPIO {\"count\":%u,\"active\":\"%s\",\"saved\":\"%s\"}\n", n, s[0], s[1]);
@@ -558,13 +560,21 @@ static void handle(char *line) {
         link_text("OK\n");
     } else if (!strcmp(line, "GPIO?")) {
         send_gpio();
+    } else if (!strcmp(line, "GPIO RESET")) {
+        esp_err_t e = gpio_out_reset();
+        if (e != ESP_OK) { link_printf("ERR reset %s\n", esp_err_to_name(e)); return; }
+        link_text("OK\n");
     } else if (!strcmp(line, "GPIO SAVE")) {
         esp_err_t e = gpio_out_save();
         if (e != ESP_OK) { link_printf("ERR save %s\n", esp_err_to_name(e)); return; }
         link_text("OK\n");
     } else if (sscanf(line, "GPIO %" SCNu32 " %31s %c", &a, arg, &extra) == 2) {
-        /* GPIO <n> NONE|LOW|HIGH: at once; GPIO SAVE keeps it for boot. */
-        gpio_out_t s = !strcmp(arg, "LOW") ? GPIO_OUT_LOW : !strcmp(arg, "HIGH") ? GPIO_OUT_HIGH : GPIO_OUT_NONE;
+        /* GPIO <n> NONE|LOW|HIGH|TX|RX: at once; GPIO SAVE keeps it for boot. */
+        gpio_out_t s = !strcmp(arg, "LOW")    ? GPIO_OUT_LOW
+                       : !strcmp(arg, "HIGH") ? GPIO_OUT_HIGH
+                       : !strcmp(arg, "TX")   ? GPIO_OUT_TX
+                       : !strcmp(arg, "RX")   ? GPIO_OUT_RX
+                                              : GPIO_OUT_NONE;
         if (s == GPIO_OUT_NONE && strcmp(arg, "NONE")) { link_text("ERR gpio_state\n"); return; }
         if (!gpio_out_allowed(a)) { link_text("ERR gpio_pin\n"); return; }
         gpio_out_set(a, s);
@@ -612,9 +622,16 @@ static void commands_task(void *arg) {
     int64_t last_rx = 0, text_start = 0;
     bool probe = false; /* monitor mode: a lone RotorHazard probe, waiting to see nothing follows */
     bool text = false;  /* RotorHazard mode: one of our command lines in progress */
+    link_port_t port = link_port();
     for (;;) {
         int n = link_read(buf, sizeof(buf), probe ? PROBE_QUIET_MS : 20);
         int64_t now = esp_timer_get_time();
+        if (link_port() != port) { /* another host took over: drop the old one's partial input */
+            port = link_port();
+            probe = text = overflow = false;
+            used = 0;
+            rh_poll(INT64_MAX); /* and a RotorHazard write in progress */
+        }
         if (n <= 0) {
             if (probe) {
                 probe = false;

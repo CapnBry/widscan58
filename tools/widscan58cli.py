@@ -40,7 +40,8 @@ class Link:
     """Splits the device stream into text lines and CRC-checked frames."""
 
     def __init__(self, port, timeout=0.05):
-        self.ser = serial.Serial(port, 115200, timeout=timeout)
+        # The host UART's rate (docs/uart-notes.md); USB ignores it.
+        self.ser = serial.Serial(port, 921600, timeout=timeout)
         keep_vmin1(self.ser)
         self.buf = bytearray()
         self.crc_errors = 0

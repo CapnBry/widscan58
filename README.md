@@ -48,6 +48,7 @@ second.*
 - **Power meter mode:** to estimate VTX output power.
 - **Deep diagnostics** for the curious: hop timing, raw I/Q snapshots with a
   constellation view, scanner settings and a command console.
+- **USB or UART wiring:** either the USB-CDC or direct GPIO UART wiring supported (only one at a time).
 - **Channel editor:** pick your channels on a frequency chart that looks like
   the usual FPV band charts, or select a whole band with one click.
 

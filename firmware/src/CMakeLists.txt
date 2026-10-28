@@ -33,7 +33,7 @@ endif()
 idf_component_register(SRCS ${sources}
     INCLUDE_DIRS ${includes}
     LDFRAGMENTS ${ldfragments}
-    REQUIRES esp_app_format esp_driver_gpio esp_driver_usb_serial_jtag esp_wifi esp_phy esp_timer esp_hw_support
+    REQUIRES esp_app_format esp_driver_gpio esp_driver_uart esp_driver_usb_serial_jtag esp_wifi esp_phy esp_timer esp_hw_support
              nvs_flash esp_rom espressif__esp-dsp)
 
 # For INFO only, so a new commit recompiles just commands.c (FW_COMMIT_DATE is

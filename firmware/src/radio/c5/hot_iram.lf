@@ -75,3 +75,20 @@ entries:
 archive: libesp_phy.a
 entries:
     phy_init:phy_get_lock (noflash)
+
+# The other way: setup code IDF keeps in IRAM (all of the ring buffer and
+# FreeRTOS code is there) that only the UART driver's install and interrupt
+# use. Static RAM below the RF dump bank is nearly full, and the UART's
+# interrupt handler runs from flash anyway.
+[mapping:widscan58_ringbuf_cold]
+archive: libesp_ringbuf.a
+entries:
+    ringbuf:xRingbufferCreateStatic (default)
+    ringbuf:xRingbufferCreateWithCaps (default)
+    ringbuf:vRingbufferDeleteWithCaps (default)
+    ringbuf:xRingbufferReceiveFromISR (default)
+
+[mapping:widscan58_freertos_cold]
+archive: libfreertos.a
+entries:
+    queue:xQueueCreateCountingSemaphoreStatic (default)

@@ -1,13 +1,24 @@
 // GPIO Configure (menu): pins the device drives at startup, low or high, such
-// as an antenna switch. A change takes effect at once (GPIO <n> ...); Save
-// (GPIO SAVE) makes the settings in effect the ones the device starts with.
-// Each pin shows its setting, not its live level. GPL-3.0-or-later.
+// as an antenna switch, and the pins of its UART host port (TX and RX, one
+// pin each: choosing one moves it there). A change takes effect at once
+// (GPIO <n> ...); Save (GPIO SAVE) makes the settings in effect the ones the
+// device starts with; Defaults (GPIO RESET) puts back the built-in ones, now
+// and at startup. Each pin shows its setting, not its live level.
+// GPL-3.0-or-later.
 import type { App } from "../model/app";
 import { gpioUnsaved, parseGpio, type GpioPin, type GpioSetting } from "../model/gpio";
 import { el } from "../util/canvas";
 
-const LABEL: Record<GpioSetting, string> = { NONE: "Not used", LOW: "Low", HIGH: "High", RESERVED: "Reserved" };
-const CHOICES: GpioSetting[] = ["NONE", "LOW", "HIGH"];
+const LABEL: Record<GpioSetting, string> = {
+  NONE: "Unused",
+  LOW: "Low",
+  HIGH: "High",
+  TX: "TX",
+  RX: "RX",
+  RESERVED: "Reserved",
+};
+const CHOICES: GpioSetting[] = ["NONE", "LOW", "HIGH", "TX", "RX"];
+const TITLE: Partial<Record<GpioSetting, string>> = { TX: "UART transmit (to the host's RX)", RX: "UART receive (from the host's TX)" };
 
 export class GpioDialog {
   readonly el: HTMLDialogElement;
@@ -16,10 +27,15 @@ export class GpioDialog {
   private unsavedNote = el(
     "div",
     { class: "gpio-unsaved", hidden: "" },
-    "Unsaved changes: in effect now, but the device goes back to its saved settings when it restarts. Save to keep them.",
+    "Unsaved changes: in effect now, but the device goes back to its saved settings (highlighted) when it restarts. Save to keep them.",
   );
   private saveBtn = el("button", { class: "primary" }, "Save") as HTMLButtonElement;
   private revertBtn = el("button", { title: "Put the saved settings back in effect" }, "Revert") as HTMLButtonElement;
+  private defaultsBtn = el(
+    "button",
+    { title: "Clear the saved settings: no outputs, the UART on its default pins" },
+    "Defaults",
+  ) as HTMLButtonElement;
   private pins: GpioPin[] = [];
   private busy = false;
 
@@ -28,6 +44,7 @@ export class GpioDialog {
     closeBtn.onclick = () => this.el.close();
     this.saveBtn.onclick = () => void this.run(["GPIO SAVE"]);
     this.revertBtn.onclick = () => void this.run(gpioUnsaved(this.pins).map((p) => `GPIO ${p.n} ${p.saved}`));
+    this.defaultsBtn.onclick = () => void this.run(["GPIO RESET"]);
     this.el = el(
       "dialog",
       { class: "options-dialog gpio-dialog" },
@@ -38,10 +55,24 @@ export class GpioDialog {
         "Pins the device sets as outputs when it starts, low or high, such as an antenna switch. " +
           "A change takes effect immediately.",
       ),
+      el(
+        "p",
+        {},
+        "TX and RX are a serial port for a host wired to the pins instead of USB (921600 baud). " +
+          "The device answers whichever port last received data.",
+      ),
       this.status,
       this.list,
       this.unsavedNote,
-      el("div", { class: "flash-buttons" }, this.revertBtn, el("span", { class: "spacer" }), this.saveBtn, closeBtn),
+      el(
+        "div",
+        { class: "flash-buttons" },
+        this.defaultsBtn,
+        this.revertBtn,
+        el("span", { class: "spacer" }),
+        this.saveBtn,
+        closeBtn,
+      ),
     );
   }
 
@@ -85,6 +116,7 @@ export class GpioDialog {
     this.unsavedNote.hidden = !unsaved;
     this.saveBtn.disabled = this.busy || !unsaved;
     this.revertBtn.disabled = this.busy || !unsaved;
+    this.defaultsBtn.disabled = this.busy || this.pins.length === 0;
     this.list.replaceChildren(...this.pins.map((p) => this.row(p)));
   }
 
@@ -94,8 +126,13 @@ export class GpioDialog {
       return el("div", { class: "gpio-row reserved", title: "Used by the flash or USB" }, name, el("span", { class: "gpio-reserved" }, "Flash / USB"));
     const seg = el("span", { class: "seg" });
     for (const s of CHOICES) {
-      const b = el("button", {}, LABEL[s]) as HTMLButtonElement;
+      const b = el("button", TITLE[s] ? { title: TITLE[s] } : {}, LABEL[s]) as HTMLButtonElement;
       b.classList.toggle("on", s === p.active);
+      // The saved setting of a changed pin, in the unsaved note's colour.
+      if (s === p.saved && s !== p.active) {
+        b.classList.add("was");
+        b.title = "Saved setting";
+      }
       b.disabled = this.busy;
       b.onclick = () => {
         if (s !== p.active) void this.run([`GPIO ${p.n} ${s}`]);
@@ -105,10 +142,9 @@ export class GpioDialog {
     const changed = p.active !== p.saved;
     return el(
       "div",
-      { class: `gpio-row${changed ? " changed" : ""}` },
+      { class: `gpio-row${changed ? " changed" : ""}${p.active === "TX" || p.active === "RX" ? ` uart-${p.active.toLowerCase()}` : ""}` },
       name,
       seg,
-      el("span", { class: "gpio-saved" }, changed ? `saved: ${LABEL[p.saved]}` : ""),
     );
   }
 }

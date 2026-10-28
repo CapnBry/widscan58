@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_attr.h"
 #include "esp_rom_crc.h"
@@ -14,16 +15,26 @@
 #if RX_TARGET_C5
 /* The C5 heap is ~125 KB once the 128 KiB capture bank is reserved, and Wi-Fi
  * needs much of what's left. RAWIQ goes out in chunks, so the queue only has
- * to hold a reply (3 KB) and ride out short host stalls. */
+ * to hold a reply (3 KB) and ride out short host stalls. The queue is the one
+ * output buffer for both ports: the USB driver's ring only keeps the endpoint
+ * fed, and the UART writes straight to its FIFO. */
 #define LINK_QUEUE_BYTES (16 * 1024)
-#define LINK_USB_TX_BYTES 4096
+#define LINK_USB_TX_BYTES 2048
 #else
 #define LINK_QUEUE_BYTES (72 * 1024)
 #define LINK_USB_TX_BYTES 16384
 #endif
+#define LINK_RX_BYTES 512
+/* The host UART: UART0, whose pins are GPIO settings (gpio_out.c,
+ * GPIO <n> TX|RX; on the C5 11 and 12, the ROM's). Never uart_driver_delete
+ * it: that gates UART0's clock, which wedges a rev 1.0 C5 on a USB reset
+ * (main.c). */
+#define HOST_UART UART_NUM_0
+#define HOST_UART_BAUD 921600
 static RingbufHandle_t queue;
 static volatile uint32_t drops;
 static volatile bool streaming; /* frames allowed (link_set_streaming); off at boot */
+static volatile link_port_t port; /* the host that last sent something gets the output */
 
 static void link_task(void *arg) {
     (void)arg;
@@ -31,14 +42,20 @@ static void link_task(void *arg) {
         size_t size;
         uint8_t *item = xRingbufferReceive(queue, &size, portMAX_DELAY);
         if (!item) continue;
-        /* With no host attached the USB FIFO never drains; drop quickly. */
         size_t done = 0;
-        while (done < size) {
-            /* The driver cannot accept a write larger than its TX buffer. */
-            size_t chunk = size - done > 4096 ? 4096 : size - done;
-            int n = usb_serial_jtag_write_bytes(item + done, chunk, pdMS_TO_TICKS(50));
-            if (n <= 0) break;
-            done += (size_t)n;
+        if (port == LINK_UART) {
+            /* Blocks until all of it is in the FIFO: the line always drains. */
+            int n = uart_write_bytes(HOST_UART, item, size);
+            if (n > 0) done = (size_t)n;
+        } else {
+            /* With no host attached the USB FIFO never drains; drop quickly. */
+            while (done < size) {
+                /* The driver cannot accept a write larger than its TX buffer. */
+                size_t chunk = size - done > LINK_USB_TX_BYTES ? LINK_USB_TX_BYTES : size - done;
+                int n = usb_serial_jtag_write_bytes(item + done, chunk, pdMS_TO_TICKS(50));
+                if (n <= 0) break;
+                done += (size_t)n;
+            }
         }
         if (done < size) drops++;
         vRingbufferReturnItem(queue, item);
@@ -46,8 +63,13 @@ static void link_task(void *arg) {
 }
 
 void link_init(void) {
-    usb_serial_jtag_driver_config_t cfg = {.tx_buffer_size = LINK_USB_TX_BYTES, .rx_buffer_size = 1024};
+    usb_serial_jtag_driver_config_t cfg = {.tx_buffer_size = LINK_USB_TX_BYTES, .rx_buffer_size = LINK_RX_BYTES};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&cfg));
+    /* 8N1, no TX ring (the queue is the buffer), no event queue. */
+    uart_config_t u = {.baud_rate = HOST_UART_BAUD, .data_bits = UART_DATA_8_BITS, .parity = UART_PARITY_DISABLE,
+                       .stop_bits = UART_STOP_BITS_1, .flow_ctrl = UART_HW_FLOWCTRL_DISABLE, .source_clk = UART_SCLK_DEFAULT};
+    ESP_ERROR_CHECK(uart_driver_install(HOST_UART, LINK_RX_BYTES, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(HOST_UART, &u));
     queue = xRingbufferCreate(LINK_QUEUE_BYTES, RINGBUF_TYPE_NOSPLIT);
     xTaskCreatePinnedToCore(link_task, "link", 4096, NULL, 5, NULL, portNUM_PROCESSORS - 1);
 }
@@ -121,6 +143,23 @@ bool link_printf(const char *fmt, ...) {
     return link_text(buffer);
 }
 
+link_port_t link_port(void) { return port; }
+
+static int port_read(link_port_t p, uint8_t *buf, size_t capacity, TickType_t wait) {
+    if (p == LINK_UART) return uart_read_bytes(HOST_UART, buf, capacity, wait);
+    return usb_serial_jtag_read_bytes(buf, capacity, wait);
+}
+
 int link_read(uint8_t *buf, size_t capacity, uint32_t timeout_ms) {
-    return usb_serial_jtag_read_bytes(buf, capacity, timeout_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms));
+    /* Input on the other port makes it the host: what was queued for the old
+     * one is dropped. It waits on the active port, so the switch takes up to
+     * one call's timeout. */
+    link_port_t other = port == LINK_UART ? LINK_USB : LINK_UART;
+    int n = port_read(other, buf, capacity, 0);
+    if (n > 0) {
+        port = other;
+        link_flush();
+        return n;
+    }
+    return port_read(port, buf, capacity, timeout_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms));
 }

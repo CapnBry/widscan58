@@ -25,7 +25,7 @@ async def main():
     ap.add_argument("--ws-port", type=int, default=5809)
     args = ap.parse_args()
 
-    ser = serial.Serial(args.port, 115200, timeout=0)
+    ser = serial.Serial(args.port, 921600, timeout=0)  # the host UART's rate; USB ignores it
     keep_vmin1(ser)
     loop = asyncio.get_running_loop()
     clients: set = set()

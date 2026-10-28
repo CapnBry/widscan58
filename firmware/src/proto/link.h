@@ -1,8 +1,11 @@
-/* Non-blocking output queue to USB Serial/JTAG. GPL-3.0-or-later. */
+/* Non-blocking output queue to the host: USB Serial/JTAG or a UART, whichever
+ * last sent something. GPL-3.0-or-later. */
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+typedef enum { LINK_USB, LINK_UART } link_port_t;
 
 void link_init(void);
 /* Queue a complete frame; returns false (and counts a drop) if it doesn't fit.
@@ -26,5 +29,7 @@ uint32_t link_drops(void);
 unsigned link_fill_permille(void);
 size_t link_capacity(void);
 /* Read up to capacity bytes, waiting up to timeout_ms for the first
- * (UINT32_MAX: forever). Returns the count. */
+ * (UINT32_MAX: forever). Returns the count. Bytes from the other port make
+ * it the active one (link_port), and drop the queued output. */
 int link_read(uint8_t *buf, size_t capacity, uint32_t timeout_ms);
+link_port_t link_port(void);

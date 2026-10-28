@@ -676,6 +676,9 @@ static void yield_lower(void) {
 
 static void scanner_task(void *arg) {
     (void)arg;
+    /* Until scanner_start. A notification, not vTaskSuspend: FreeRTOS is in
+     * IRAM, and suspend/resume would add ~550 B of it (CLAUDE.md, static RAM). */
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     apply_config();
     sp->window_start = esp_timer_get_time();
     sp->rotation_start = sp->w_rot_from = sp->window_start;
@@ -745,11 +748,16 @@ esp_err_t scanner_init(void) {
     sp->cfg.profile = NULL; /* force a full apply */
     esp_err_t err = psd_init();
     if (err != ESP_OK) return err;
-    /* Core 0: the PHY and Wi-Fi driver live there. */
     const esp_timer_create_args_t ta = {.callback = throttle_wake, .name = "scan_throttle"};
-    return esp_timer_create(&ta, &sp->throttle_timer);
+    err = esp_timer_create(&ta, &sp->throttle_timer);
+    if (err != ESP_OK) return err;
+    /* Core 0: the PHY and Wi-Fi driver live there. Created here, waiting
+     * for scanner_start: the stack's place in the heap sets the hop time
+     * (DSP ~0.45 ms slower with it allocated after the command task). */
+    return xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, &sp->task, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 esp_err_t scanner_start(void) {
-    return xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, &sp->task, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+    xTaskNotifyGive(sp->task);
+    return ESP_OK;
 }

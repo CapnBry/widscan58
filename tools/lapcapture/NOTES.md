@@ -70,10 +70,27 @@ python3 plot.py $OUT --enter 90 --exit 75 --n 2 --ref $OUT/cam.txt --ref-offset 
   (false passes).
 - Compare N and N=0 over all clean passes and over the passes where they
   differ by ≥ 20 ms: most of the error is common to both (2026-10-27: the
-  two errors correlated 0.88; the camera often fired on the rising edge, up to
+  two errors correlated 0.87; the camera often fired on the rising edge, up to
   −110 ms). On the passes where N=0 and N=2 differed, N=2 was closer on 7 of 10
   (median 19.5 ms against 55 ms), the broad flat tops most clearly; over all
-  48, median 29 ms against 35 ms.
+  48, median 29 ms against 34 ms.
+- Split the comparison by flight direction when the camera notes it (left
+  to right, right to left): a direction-dependent error moves the two
+  directions' means apart. Match the direction list to the passes by
+  correlating any per-pass values it carries with the errors at shifts of
+  0, ±1, ±2 (a start offset or a missed pass shows as a better shift).
+  2026-10-27, first flight (`laps-1`), 30 clean passes: the tester's list
+  matched at shift 0 (correlation −0.85 with our N=2 errors, opposite sign;
+  ±1, ±2: −0.35 to +0.24). Camera − N=2 pass: LTR mean +12.6 ms (SD 30, n 14),
+  RTL −29.9 ms (SD 49, n 16), 42.6 ms apart (Welch p 0.008; N=0 the same
+  42.6 ms, p 0.013; the tester's own values 36.6 ms, p 0.054). The large
+  errors (−67 … −110 ms) were all RTL. Removing each direction's mean
+  lowers the N=2 SD from 46 to 41.5 ms (N=0 49 to 45 ms); N=2 stays the
+  tighter rule in each direction. A shifted mean fits the board's antenna
+  sitting off the gate plane (the RF peak early one way, late the other:
+  43 ms at ~15 m/s is ~0.3 m each side) or the camera's view of the gate;
+  the wider RTL scatter points at the camera or the RTL flight path. Note
+  where the board sits against the gate line with the next camera flight.
 
 ## USB mode
 

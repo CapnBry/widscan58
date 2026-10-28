@@ -34,7 +34,7 @@ keep that for anything new that is copied or derived from it.
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
 | `tools/ttyfix.py` | Leaves a serial port at VMIN=1 after pyserial use (see the Web UI "device has been lost" note). |
 | `tools/rh_check.py` | Runs RotorHazard's own node interface code (from `ref/RotorHazard`) against the board: discovery, seats, polling, passes, comm errors. |
-| `tools/lapcapture/` | Flight captures for lap detection: records one channel's raw levels (on this machine's USB port, or on the RotorHazard host over ssh), replays them through `lap.c` at two plateau tolerances and plots each pass. Usage in its `NOTES.md`. |
+| `tools/lapcapture/` | Flight captures for lap detection: records one channel's raw levels (on this machine's USB port, or on the RotorHazard host over ssh), replays them through `lap.c` at two plateau tolerances and plots each pass, optionally against reference (camera) pass times. Usage in its `NOTES.md`. |
 | `tools/powercal.py` | Power calibration (dBFS → dBm): sweeps a VTX (Betaflight MSP) over channels and power levels on an ImmersionRC RF Power Meter v2 and on the C5 at each gain, then fits the offset per gain and channel. |
 | `tools/gen_twiddle.py` | Generates `firmware/src/dsp/fft_twiddle_q15.h` for the radix-4 FFT. |
 | `.github/workflows/` | Builds firmware + web UI and publishes to GitHub Pages (https://capnbry.github.io/widscan58/). Only `esp32c5` firmware is published (`FW_ENVS`). |

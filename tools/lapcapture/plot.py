@@ -4,9 +4,12 @@
 passes, and a zoom on each with the reported pass (plateau N), its plateau
 span, and the N=0 pass and span for comparison. GPL-3.0-or-later.
 
-Usage: plot.py DIR --enter E --exit X [--n N] [--title T]
+Usage: plot.py DIR --enter E --exit X [--n N] [--title T] [--ref FILE --ref-offset S]
 Reads DIR/laps.csv, DIR/rep.txt (replay ... 0 N), DIR/trace.csv; writes
-DIR/timeline.png and DIR/pass_detail.png, and prints a table of the passes."""
+DIR/timeline.png and DIR/pass_detail.png, and prints a table of the passes.
+--ref: reference pass times (e.g. a camera), one per line in seconds with an
+optional ", note"; capture time = ref - S. Drawn in black on each pass, dotted
+when noted."""
 import argparse
 import csv
 import os
@@ -23,8 +26,16 @@ ap.add_argument("--enter", type=int, required=True)
 ap.add_argument("--exit", type=int, required=True)
 ap.add_argument("--n", type=int, default=2)
 ap.add_argument("--title", default="")
+ap.add_argument("--ref")
+ap.add_argument("--ref-offset", type=float, default=0.0)
 args = ap.parse_args()
 ENTER, EXIT, N = args.enter, args.exit, args.n
+REF = []  # (capture ms, solid, ref time as given)
+if args.ref:
+    for line in open(args.ref):
+        t, _, note = line.strip().partition(",")
+        if t:
+            REF.append((round((float(t) - args.ref_offset) * 1000), not note.strip(), t))
 os.chdir(args.dir)
 SURF, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 BLUE, ORANGE, AQUA, RAW = "#2a78d6", "#eb6834", "#1baf7a", "#c9c8c2"
@@ -85,7 +96,7 @@ W = 600
 cols = 4
 rws = (NP + cols - 1) // cols
 fig, axs = plt.subplots(rws, cols, figsize=(18, 3.3 * rws + 2.0), sharex=True)
-fig.subplots_adjust(hspace=0.5, wspace=0.16, top=1 - 1.75 / (3.3 * rws + 2.0))
+fig.subplots_adjust(hspace=0.62, wspace=0.16, top=1 - 1.75 / (3.3 * rws + 2.0))
 for i, ax in enumerate(axs.flat):
     if i >= NP:
         ax.set_visible(False)
@@ -103,10 +114,18 @@ for i, ax in enumerate(axs.flat):
     ax.axhline(pk - N, color=AQUA, linewidth=0.8, linestyle=":")
     ax.axvline(p0 - p4, color=ORANGE, linewidth=1.4, linestyle="--")
     ax.axvline(0, color=AQUA, linewidth=1.8)
+    ref = [(t - (p4 - t0), ok, rt) for t, ok, rt in REF if abs(t - (p4 - t0)) <= W]
+    for x, ok, rt in ref:
+        ax.axvline(x, color=INK, linewidth=1.4, linestyle="-" if ok else ":")
+        ax.annotate(f"{float(rt):.3f} s", (x, 1), xycoords=("data", "axes fraction"), xytext=(3, -3),
+                    textcoords="offset points", ha="left", va="top", fontsize=8, color=INK,
+                    bbox={"boxstyle": "square,pad=0.15", "facecolor": SURF, "edgecolor": "none", "alpha": 0.85})
     ax.set_xlim(-W, W)
     ax.set_ylim(pk - 30, pk + 12)
-    ax.set_title(f"Pass {i + 1} ({(p4 - t0) / 1000:.1f} s): peak {pk}, N=0 at {p0 - p4:+d} ms\n"
-                 f"N={N} span {pl - pf} ms, N=0 span {l0 - f0} ms", loc="left", fontsize=9, fontweight="bold")
+    ax.set_title(f"Pass {i + 1} ({(p4 - t0) / 1000:.3f} s): peak {pk}, N=0 at {p0 - p4:+d} ms\n"
+                 f"N={N} span {pl - pf} ms, N=0 span {l0 - f0} ms"
+                 + ("".join(f"\nref {float(rt):.3f} s{'' if ok else '?'}: N={N} {x:+d} ms, N=0 {x - (p0 - p4):+d} ms"
+                            for x, ok, rt in ref) if REF else ""), loc="left", fontsize=9, fontweight="bold")
     if i // cols == rws - 1 or i + cols >= NP:
         ax.set_xlabel(f"ms from the reported pass (N={N})")
         ax.xaxis.set_tick_params(labelbottom=True)
@@ -122,14 +141,17 @@ handles = [plt.Line2D([], [], color=RAW, linewidth=1.2, label="Raw level"),
            plt.Rectangle((0, 0), 1, 1, color=ORANGE, alpha=0.3, label="N=0 span: first..last update at the peak"),
            plt.Line2D([], [], color=ORANGE, linestyle=":", linewidth=1, label="Peak level"),
            plt.Line2D([], [], color=AQUA, linestyle=":", linewidth=1, label=f"Peak - {N} ({N / 4:g} dB)")]
+if REF:
+    handles += [plt.Line2D([], [], color=INK, linewidth=1.4, label=f"Reference ({args.ref_offset:+.3f} s offset)"),
+                plt.Line2D([], [], color=INK, linestyle=":", linewidth=1.4, label="Reference with a note")]
 fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.125, 1 - 0.4 / (3.3 * rws + 2.0)), ncol=4,
            frameon=False)
 fig.savefig("pass_detail.png", dpi=100, bbox_inches="tight")
 
-print(f"pass  t_s    peak  N0-N{N}_ms  N{N}_span  N0_span  lap_N{N}  lap_N0")
+print(f"pass     t_s    peak  N0-N{N}_ms  N{N}_span  N0_span  lap_N{N}  lap_N0")
 for i in range(NP):
     p4, pk, _, _, pf, pl = P4[i]
     p0, _, f0, l0, _, _ = P0[i]
     l4 = f"{(p4 - P4[i - 1][0]) / 1000:.3f}" if i else "-"
     lz = f"{(p0 - P0[i - 1][0]) / 1000:.3f}" if i else "-"
-    print(f"{i + 1:4d} {(p4 - t0) / 1000:6.1f} {pk:5d} {p0 - p4:+9d} {pl - pf:8d} {l0 - f0:8d} {l4:>7} {lz:>7}")
+    print(f"{i + 1:4d} {(p4 - t0) / 1000:8.3f} {pk:5d} {p0 - p4:+9d} {pl - pf:8d} {l0 - f0:8d} {l4:>7} {lz:>7}")

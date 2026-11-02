@@ -75,6 +75,10 @@ quad in the gate) and watch the seat's level graph on the lap timer mode page:
   raise it.
 - After a change, set EnterAt and ExitAt again: every step moves the levels.
 
+**Recommended 25mW:** Gain of 45 with no antenna connected. Using no antenna is better
+than using an antenna as an antenna adds more directionality to the reception pattern
+and can swamp the C5. If using an antenna then a gain of 40 or lower is suggested.
+
 ## Performance
 
 Each update of a seat needs one capture at its LO (local oscillator). In GROUP

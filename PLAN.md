@@ -956,7 +956,38 @@ wandered ±10 dB with people moving). Data and scripts: `tmp/gain-sweep/`,
   (25 mW at 0.9 m, no antenna: code 151, −26 dBFS at 50). The missing
   antenna likely accounts for much of that, so with an antenna fitted 45's
   headroom is smaller than measured here. Repeat the sweep with the antenna
-  on before relying on it.
+  on before relying on it. Done: 45 still holds with the antenna fitted
+  (below).
+
+**Gain sweep with the antenna on (2026-11-02).** The same question with an
+antenna on the C5: 25 mW VTX (Betaflight MSP) 0.9 m away, stepped R1–R8;
+per channel `GAIN MANUAL` 20–78 (steps of 4–5), ~0.4 s each, monitor mode
+with lap timer settings (`MODE GROUP`, `FFT 64`, `METRICS SNR`, `SPEC 0`),
+level codes as lap timer mode. Floor per channel = the hops with the VTX
+two or more channels away. Then 400 mW on R1 and R6 at 40–54. Data and
+scripts were in the session scratchpad (not kept).
+- The antenna adds ~13 dB: R1 at 50 reads 202 (151 without).
+- Weakest channel's margin over its floor, and R1's (strongest) level:
+  40: 22 dB, 145; 45: 26 dB, 179 (19 dB below code 254); 50: 27.5 dB,
+  202; 54: 28 dB, 218; 58: 29.5 dB, 235; R1 clips the ADC from 62. Margin
+  is flat at ~30 dB from 58 up. From 45 up the floor (codes ~28–31 at 45,
+  ~42 at 50, ~70 at 58) rises nearly as fast as the signal.
+- Per channel: R1/R2 read ~10 dB above R6/R8 at every gain (VTX output or
+  antenna response). The strongest channel sets the headroom, the weakest
+  the margin.
+- 400 mW (+12 dB): R1 rose 11.5 dB at 40, ~9 at 45 (214, no clipping),
+  ~7 at 50 (229): the front end compresses before the ADC clips. R1 pins
+  at 254 with ADC saturation at 54. R6 read 166 at 45.
+- Wi-Fi (ch 149 area) shows only on R3/R4 (one LO): bursts in <1 % of
+  hops, up to about the VTX's level at 0.9 m; from 45 up they clip the ADC
+  on 0.2–0.7 % of that LO's hops. The empty floor's 99th percentile stays
+  ~10 codes above its median, so the 255 ms median removes them;
+  `LEVELFILTER EMA` (median of 3) is more exposed to a run of bursts.
+- Keep 45. At the gate corner (+9.5 dB at 0.3 m, −7.6 dB at 2.15 m) that is
+  ~9.5 dB headroom on the strongest channel and ~18 dB margin on the
+  weakest, before median-filter losses. 40 trades ~4 dB of margin for
+  ~8 dB more headroom (pilots at 200 mW and up passing close); above ~55
+  a strong close pass clips.
 
 **Power calibration (2026-10-18).** dBFS → dBm for the web UI's power meter
 mode, with `tools/powercal.py`: a SmartAudio VTX set over Betaflight MSP,

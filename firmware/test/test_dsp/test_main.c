@@ -493,6 +493,31 @@ static void test_lap_reset_and_force(void) {
     TEST_ASSERT_EQUAL(200, s.pass_peak);
 }
 
+/* A crossing that starts and ends between two takes still shows, once; one
+ * still in progress shows at every take. */
+static void test_lap_take_crossing(void) {
+    lap_seat_t s;
+    lap_init(&s, 190, 180);
+    lap_set_filter(&s, LAP_FILTER_EMA);
+    TEST_ASSERT_FALSE(lap_take_crossing(&s));
+    uint32_t t = 0;
+    for (; t < 50; t += 5) lap_feed(&s, t, 100, 5000);
+    TEST_ASSERT_FALSE(lap_take_crossing(&s));
+    for (int i = 0; i < 3; i++, t += 5) lap_feed(&s, t, 250, 5000);
+    for (int i = 0; i < 3; i++, t += 5) lap_feed(&s, t, 100, 5000);
+    TEST_ASSERT_EQUAL(1, s.lap); /* entered and left */
+    TEST_ASSERT_FALSE(s.crossing);
+    TEST_ASSERT_TRUE(lap_take_crossing(&s));
+    TEST_ASSERT_FALSE(lap_take_crossing(&s));
+
+    for (int i = 0; i < 3; i++, t += 5) lap_feed(&s, t, 250, 5000);
+    TEST_ASSERT_TRUE(s.crossing);
+    TEST_ASSERT_TRUE(lap_take_crossing(&s));
+    TEST_ASSERT_TRUE(lap_take_crossing(&s));
+    lap_reset(&s); /* forgets it */
+    TEST_ASSERT_FALSE(lap_take_crossing(&s));
+}
+
 /* LAP_FILTER_EMA: levels from the first update; one-update spikes removed;
  * the average's weight follows the update interval (time constant
  * LAP_EMA_TAU_US); a pass is detected and timed near its plateau's middle. */
@@ -646,6 +671,7 @@ int main(void) {
     RUN_TEST(test_lap_window);
     RUN_TEST(test_lap_history);
     RUN_TEST(test_lap_reset_and_force);
+    RUN_TEST(test_lap_take_crossing);
     RUN_TEST(test_lap_ema);
     RUN_TEST(test_plan_default_raceband);
     RUN_TEST(test_plan_groups);

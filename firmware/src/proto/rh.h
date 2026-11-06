@@ -40,7 +40,8 @@ unsigned rh_get_plateau(void);
 /* The scanner switched to a new plan (scanner task, before its first
  * update): reset the seats a frequency change marked, together. */
 void rh_plan_applied(void);
-/* A seat is in a crossing: above EnterAt, not yet below ExitAt. */
-bool rh_any_crossing(void);
+/* A seat is in a crossing (above EnterAt, not yet below ExitAt) or started one
+ * since the last call, however short it was. For one caller: the status LED. */
+bool rh_take_crossing(void);
 /* One level update for a seat (scanner task). */
 void rh_feed(unsigned seat, int64_t t_us, uint8_t level);

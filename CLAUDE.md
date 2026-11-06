@@ -151,15 +151,19 @@ is low) and `GPIO <n> WS2812` (one WS2812), one pin each. The LED is on while
 scanning and blinks at 1 Hz otherwise. The WS2812 (`scan/led_color.h`,
 host-tested) does the same in green, and in lap timer mode is red while any seat
 is in a crossing (EnterAt reached, not yet below ExitAt), fading back to green
-over 500 ms. Scanning means the scan loop is hopping
-(`scanner_scanning`): not before `scanner_start`, not after `SCAN STOP`, and not
-in lap timer mode until a server or the web UI sets a seat's frequency, so a
-board with no host blinks. A 20 ms `esp_timer` does the work, only while a pin is
-assigned; nothing is allocated before that (~840 B of heap with a WS2812). With
-one assigned, a seat's update interval in lap timer mode (8 seats, 2026-11-06, 6
-runs each) went from 1963.5 to 1964.7 µs idle and 1965.5 µs with the red fade
-running (~35 frames/s), +0.06 % and +0.10 %; boot-to-boot differences are larger
-(up to ~1 %). The WS2812 goes out through the RMT, one frame per colour change;
+over 500 ms. `lap.c` latches each crossing's start (`entered`) and the tick takes
+it (`rh_take_crossing`), so a crossing shorter than the tick still shows. Scanning
+means the scan loop is hopping (`scanner_scanning`): not before `scanner_start`,
+not after `SCAN STOP`, and not in lap timer mode until a server or the web UI sets
+a seat's frequency, so a board with no host blinks. A 25 ms `esp_timer` does the
+work, only while a pin is assigned; nothing is allocated before that (~840 B of
+heap with a WS2812). Its cost on a seat's update interval is below the run-to-run
+spread (lap timer mode, 8 seats, 2026-11-06, 6 runs of 400 `loop_time` samples
+each, sd of the runs' means 7–14 µs): mean 2037.8 µs with no LED, 2035.2 with a
+WS2812 idle, 2031.6 with noise crossings fading it (~4 passes/s); medians 1978.0,
+1978.2, 1979.0. A 20 ms tick measured the same. A handful of samples per run is
+too few: the tick lands in about 1 rotation of 13, and 24 samples per run showed
+a false +1.5 %. The WS2812 goes out through the RMT, one frame per colour change;
 brightness is `LED_LEVEL` (40 of 255), and the bytes are in WS2812's GRB order. A board
 whose LED is wired as RGB would show red and green swapped. The driver's IRAM
 options are off in `sdkconfig.defaults`, for the static RAM below the RF dump bank

@@ -49,6 +49,7 @@ void lap_reset(lap_seat_t *s) {
     s->node_peak = 0;
     s->node_nadir = 255;
     s->crossing = false;
+    s->entered = false;
     s->pass_nadir = 255;
     s->dir = +1;
     s->ext.level = 0;
@@ -110,6 +111,7 @@ static IRAM_ATTR void filtered(lap_seat_t *s, uint32_t t, uint8_t v) {
     unsigned n = s->plateau;
     if (!s->crossing && v >= s->enter_at) {
         s->crossing = true;
+        s->entered = true;
         s->cur_peak = v;
         s->cur_first_ms = s->cur_last_ms = t;
         if (n) {
@@ -225,6 +227,12 @@ IRAM_ATTR void lap_feed(lap_seat_t *s, uint32_t t_ms, uint8_t level, uint32_t lo
 
 void lap_end_crossing(lap_seat_t *s) {
     if (s->crossing) end_crossing(s);
+}
+
+bool lap_take_crossing(lap_seat_t *s) {
+    bool entered = s->entered;
+    if (entered) s->entered = false;
+    return entered || s->crossing;
 }
 
 bool lap_next_is_peak(const lap_seat_t *s) {

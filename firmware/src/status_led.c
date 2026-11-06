@@ -1,6 +1,6 @@
 /* Status LEDs. GPL-3.0-or-later.
  *
- * A 20 ms esp_timer does the work, in its task (above the scan task's
+ * A 25 ms esp_timer does the work, in its task (above the scan task's
  * priority), and only while a pin is assigned; nothing is allocated before
  * that. The WS2812 goes out through the RMT, so its timing is hardware's: 24
  * bits fit the channel's 48 symbols, without a refill interrupt, and a frame is
@@ -19,7 +19,7 @@
 #include "scanner.h"
 #include "status_led.h"
 
-#define TICK_US 20000
+#define TICK_US 25000
 #define RMT_HZ 10000000 /* 100 ns ticks */
 #define WS_DONE_TIMEOUT_MS 50
 
@@ -47,7 +47,10 @@ static void tick(void *arg) {
     if (led_pin >= 0) gpio_set_level((gpio_num_t)led_pin, !(scanning || led_blink_on(now)));
     if (ws_chan) {
         uint8_t r, g;
-        led_color(now, scanning, scanning && rh && rh_any_crossing(), &red_end, &r, &g);
+        /* Taken in any state, so a crossing from before a scan stop or mode
+         * switch does not show after it. */
+        bool crossing = rh_take_crossing();
+        led_color(now, scanning, scanning && rh && crossing, &red_end, &r, &g);
         if (!ws_valid || ws_grb[0] != g || ws_grb[1] != r) ws_send(r, g);
     }
     xSemaphoreGive(lock);

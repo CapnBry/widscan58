@@ -81,6 +81,7 @@ typedef struct {
     uint32_t level_ms;
     uint8_t node_peak, node_nadir; /* since the reset */
     bool crossing;
+    volatile bool entered; /* a crossing started since lap_take_crossing (status LED) */
     uint8_t lap;           /* passes so far (wraps); kept across resets */
     uint32_t pass_ms;      /* time of the last pass */
     uint8_t pass_peak;     /* peak level of the last pass */
@@ -121,6 +122,10 @@ void lap_reset(lap_seat_t *s);
 void lap_feed(lap_seat_t *s, uint32_t t_ms, uint8_t level, uint32_t loop_us);
 /* End a crossing in progress now, recording its pass (FORCE_END_CROSSING). */
 void lap_end_crossing(lap_seat_t *s);
+/* A crossing is in progress or started since the last call, however short it
+ * was; clears the latter. From another task than lap_feed's: a crossing that
+ * starts during the call counts for this call or the next. */
+bool lap_take_crossing(lap_seat_t *s);
 /* The oldest queued peak or nadir; false if none. */
 bool lap_pop_extremum(lap_seat_t *s, bool *is_peak, lap_extremum_t *out);
 /* Whether the oldest queued extremum is a peak (for the flags byte). */

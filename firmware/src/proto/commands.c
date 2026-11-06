@@ -201,6 +201,7 @@ static void set_proto(proto_t p) {
         uint8_t was = next.metrics_mode;
         timer_saved_apply(&next, &timer_saved);
         if (next.metrics_mode != was) rh_reset_levels(); /* RSSI and SNR codes don't compare */
+        rh_host_reset(esp_timer_get_time());
         rh_apply_plan(&next); /* the seats may have changed meanwhile */
         link_set_streaming(false);
         link_flush();
@@ -635,6 +636,7 @@ static void commands_task(void *arg) {
             used = 0;
             rh_poll(INT64_MAX); /* and a RotorHazard write in progress */
         }
+        if (proto == PROTO_RH) rh_host_check(now);
         if (n <= 0) {
             if (probe) {
                 probe = false;

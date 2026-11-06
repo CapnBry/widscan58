@@ -154,8 +154,9 @@ is in a crossing (EnterAt reached, not yet below ExitAt), fading back to green
 over 500 ms. `lap.c` latches each crossing's start (`entered`) and the tick takes
 it (`rh_take_crossing`), so a crossing shorter than the tick still shows. Scanning
 means the scan loop is hopping (`scanner_scanning`): not before `scanner_start`,
-not after `SCAN STOP`, and not in lap timer mode until a server or the web UI sets
-a seat's frequency, so a board with no host blinks. A 25 ms `esp_timer` does the
+not after `SCAN STOP`, and in lap timer mode not until a server or the web UI sets
+a seat's frequency or once it has stopped polling (`HOST_TIMEOUT_US`), so a board
+with no host blinks. A 25 ms `esp_timer` does the
 work, only while a pin is assigned; nothing is allocated before that (~840 B of
 heap with a WS2812). Its cost on a seat's update interval is below the run-to-run
 spread (lap timer mode, 8 seats, 2026-11-06, 6 runs of 400 `loop_time` samples
@@ -355,6 +356,15 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   1 − exp(−dt/τ) per update from its interval, as an integer Padé
   approximant), reported from the first update with the middle update's time
   less ~3 ms of average delay.
+- **Host timeout:** with no RotorHazard command for 5 s (`HOST_TIMEOUT_US`,
+  `rh.c`; our text commands don't count) the scan stops (`running` 0 in
+  `CONFIG?`) and the status LED blinks. The next RotorHazard command restarts it,
+  with the seats' levels reset (no levels for 255 ms, the lap count and last
+  pass kept), and so does `PROTOCOL RH`, which starts a new 5 s wait. Not shorter:
+  a server's poll loop shares a process with its web server, a stall is harmless
+  while the scan runs (the pass waits for the next poll) and loses passes once it
+  stops, and a hidden web UI tab polls about once a second. Monitor mode has no
+  timeout. A lap timer mode test needs a host polling to keep the scan running.
 - **Check:** `tools/rh_check.py` runs RotorHazard's own interface code against
   the board (no VTX: thresholds inside the filtered noise make noise
   crossings; at manual gain 60 the seats sit at codes ~79–83, drifting with

@@ -19,7 +19,8 @@
 
 esp_err_t rh_init(void);
 /* The RotorHazard scan setup: channels and enabled seats from the seat
- * frequencies, scanning only once the server has set one. */
+ * frequencies, scanning only once the server has set one, and not after the
+ * host stopped polling (rh_host_check). */
 void rh_apply_plan(scan_config_t *c);
 /* Command bytes from the host. rh_idle: no write payload pending (a byte
  * may then start one of our text lines instead, see commands.c). */
@@ -27,6 +28,13 @@ bool rh_idle(void);
 void rh_rx(uint8_t b, int64_t now_us);
 /* Abandon a write whose payload stopped arriving. */
 void rh_poll(int64_t now_us);
+/* In RotorHazard mode, regularly: stop the scan when the host has sent no
+ * RotorHazard command for a while. Its next one restarts the scan, with the
+ * seats' levels reset. */
+void rh_host_check(int64_t now_us);
+/* Switching to RotorHazard mode: the wait for the host starts now. The caller
+ * applies rh_apply_plan. */
+void rh_host_reset(int64_t now_us);
 /* Forget every seat's levels, peaks and crossing (lap_reset), e.g. when
  * the level metric changes. */
 void rh_reset_levels(void);

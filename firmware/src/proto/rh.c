@@ -47,6 +47,10 @@ enum {
 #define MIN_FREQ 100
 #define MAX_FREQ 9999
 #define WRITE_TIMEOUT_US 100000
+/* A server polls every 100 ms, but its poll loop shares a process with its web
+ * server, and a hidden web UI tab polls about once a second. A stall this short
+ * must not stop the scan: passes are kept for the next poll, and stopping loses them. */
+#define HOST_TIMEOUT_US 5000000
 /* Before the server sets thresholds: RSSI codes (0.25 dB), -32.5 / -37.5 dBFS. */
 #define DEFAULT_ENTER 125
 #define DEFAULT_EXIT 105
@@ -66,6 +70,8 @@ static unsigned cur;
 /* Write in progress. */
 static uint8_t wcmd, wbuf[4], wneed, wgot;
 static int64_t wstart;
+static int64_t host_us;   /* the host's last RotorHazard command */
+static bool host_gone;    /* no command for HOST_TIMEOUT_US: not scanning */
 
 bool rh_take_crossing(void) {
     if (!seat) return false;
@@ -103,7 +109,7 @@ void rh_apply_plan(scan_config_t *c) {
             c->ch[j].khz = p->ch[j < p->nch ? j : 0].khz; /* placeholder, not scanned */
         }
     }
-    c->running = c->enabled != 0;
+    c->running = c->enabled != 0 && !host_gone;
 }
 
 void rh_reset_levels(void) {
@@ -304,6 +310,34 @@ static unsigned write_size(uint8_t cmd) {
     }
 }
 
+void rh_host_reset(int64_t now_us) {
+    host_us = now_us;
+    if (!host_gone) return;
+    host_gone = false;
+    rh_reset_levels(); /* levels from before the stop don't belong in the median */
+}
+
+/* A command from the host; the first one after a timeout restarts the scan. */
+static void host_active(int64_t now_us) {
+    bool was_gone = host_gone;
+    rh_host_reset(now_us);
+    if (!was_gone) return;
+    scan_config_t c;
+    scanner_get_config(&c);
+    rh_apply_plan(&c);
+    scanner_set_config(&c);
+}
+
+void rh_host_check(int64_t now_us) {
+    if (host_gone || now_us - host_us <= HOST_TIMEOUT_US) return;
+    host_gone = true;
+    scan_config_t c;
+    scanner_get_config(&c);
+    if (!c.running) return;
+    c.running = false;
+    scanner_set_config(&c);
+}
+
 bool rh_idle(void) { return !wneed; }
 
 void rh_rx(uint8_t b, int64_t now_us) {
@@ -314,10 +348,14 @@ void rh_rx(uint8_t b, int64_t now_us) {
         for (unsigned j = 0; j + 1 < wneed; j++) sum += wbuf[j];
         bool ok = sum == wbuf[wneed - 1];
         wneed = 0;
-        if (ok) write_cmd(wcmd, wbuf);
+        if (ok) {
+            host_active(now_us);
+            write_cmd(wcmd, wbuf);
+        }
         return;
     }
     if (b <= 0x50) {
+        host_active(now_us); /* first: the reply shows the reset levels */
         read_cmd(b);
         return;
     }

@@ -1,6 +1,8 @@
-// "Flash device" dialog: a short walkthrough and the flash progress. GPL-3.0-or-later.
+// "Flash device" dialog: a short walkthrough, the config preset and the flash
+// progress. GPL-3.0-or-later.
 import { el } from "../util/canvas";
-import { OfflineError, flashFirmware, loadManifest, type Manifest } from "../serial/flasher";
+import { OfflineError, applyPreset, flashFirmware, flashedBoardPorts, loadManifest, type FlashEvents, type Manifest } from "../serial/flasher";
+import { FLASH_PRESETS, presetWarning, type FlashPreset } from "../model/flashPresets";
 import { isInstalledApp, offlineStatus, setOfflineFirmware, type OfflineStatus } from "../util/pwa";
 import type { Port } from "../serial/device";
 import type { DeviceInfo } from "../model/store";
@@ -8,7 +10,7 @@ import type { DeviceInfo } from "../model/store";
 export interface FlashHost {
   /** The port to flash: the connected board (closed first) or one the user picks. */
   takePort(): Promise<Port>;
-  /** Called when flashing ends; ok means the board is booting the new firmware. */
+  /** Called when flashing and the config preset end; ok means the board has the new firmware. */
   finished(ok: boolean): void;
   /** The connected board's INFO, or null when no board is connected over Web Serial. */
   device(): DeviceInfo | null;
@@ -34,6 +36,8 @@ export class FlashDialog {
     this.offlineBox,
     el("span", {}, "Make firmware available offline", this.offlineHint),
   );
+  private presetSelect = el("select", { id: "flash-preset" }) as HTMLSelectElement;
+  private presetWarning = el("div", { class: "flash-warning", hidden: "" });
   private manifest: Promise<Manifest> | null = null;
   private busy = false;
   /** Offline, and the firmware is not on this device. */
@@ -69,11 +73,22 @@ export class FlashDialog {
         ),
         el("li", {}, "Click Flash and pick the board (“USB JTAG/serial debug unit”) in the browser’s list."),
       ),
+      el("label", { class: "flash-preset", for: "flash-preset" }, "Config preset", this.presetSelect),
+      this.presetWarning,
       this.offlineRow,
       el("div", { class: "flash-progress" }, this.bar, this.status),
       el("details", {}, el("summary", {}, "Details"), this.logPre),
       el("div", { class: "flash-buttons" }, this.closeBtn, this.flashBtn),
     );
+    let group: HTMLElement | null = null;
+    FLASH_PRESETS.forEach((p, i) => {
+      if (group?.getAttribute("label") !== p.group) {
+        group = el("optgroup", { label: p.group });
+        this.presetSelect.append(group);
+      }
+      group.append(el("option", { value: String(i) }, p.name));
+    });
+    this.presetSelect.onchange = () => this.showPresetWarning();
     this.flashBtn.onclick = () => void this.flash();
     this.closeBtn.onclick = () => this.el.close();
     this.offlineBox.onchange = () => void this.toggleOffline();
@@ -109,10 +124,22 @@ export class FlashDialog {
       this.bar.value = 0;
       this.setStatus("");
       this.logPre.textContent = "";
+      this.presetSelect.value = "0";
+      this.showPresetWarning();
     }
     this.el.showModal();
     this.refreshDevice(); // after showModal: it skips a closed dialog
     if (!this.busy) void this.refreshOffline();
+  }
+
+  private preset(): FlashPreset {
+    return FLASH_PRESETS[Number(this.presetSelect.value)];
+  }
+
+  private showPresetWarning() {
+    const w = presetWarning(this.preset());
+    this.presetWarning.textContent = w ?? "";
+    this.presetWarning.hidden = !w;
   }
 
   private offlineText(): string {
@@ -212,26 +239,38 @@ export class FlashDialog {
       return;
     }
     this.busy = true;
-    this.flashBtn.disabled = this.closeBtn.disabled = true;
+    this.flashBtn.disabled = this.closeBtn.disabled = this.presetSelect.disabled = true;
     this.bar.value = 0;
     this.logPre.textContent = "";
+    const preset = this.preset();
+    const events: FlashEvents = {
+      stage: (t) => {
+        this.setStatus(t);
+        this.log(`-- ${t}`);
+      },
+      progress: (f) => (this.bar.value = f),
+      log: (l) => this.log(l),
+    };
     let ok = false;
     try {
       const manifest = await fresh;
       this.showManifest(manifest);
-      await flashFirmware(port, manifest, {
-        stage: (t) => {
-          this.setStatus(t);
-          this.log(`-- ${t}`);
-        },
-        progress: (f) => (this.bar.value = f),
-        log: (l) => this.log(l),
-      });
+      const boardPorts = await flashedBoardPorts(port);
+      await flashFirmware(port, manifest, events, { eraseFlash: preset.eraseFlash });
       ok = true;
-      this.setStatus(`Done: ${manifest.version} is installed and the board is restarting. The scanner reconnects on its own.`, "ok");
+      if (preset.commands.length) {
+        await applyPreset(boardPorts, preset.commands, events);
+        this.setStatus(`Done: ${manifest.version} is installed with the ${preset.name} preset.`, "ok");
+      } else {
+        this.setStatus(`Done: ${manifest.version} is installed and the board is restarting.`, "ok");
+      }
     } catch (e) {
       const msg = (e as Error).message;
       this.log(`!! ${msg}`);
+      if (ok) {
+        this.setStatus(`The firmware is installed, but the ${preset.name} preset was not applied: ${msg}. Click Flash to try again.`, "err");
+        return;
+      }
       // esptool-js loads its chip code when it connects, which fails offline too.
       if (e instanceof OfflineError || (e instanceof TypeError && /fetch|import/i.test(msg))) {
         this.setStatus(
@@ -244,7 +283,7 @@ export class FlashDialog {
       }
     } finally {
       this.busy = false;
-      this.flashBtn.disabled = this.closeBtn.disabled = false;
+      this.flashBtn.disabled = this.closeBtn.disabled = this.presetSelect.disabled = false;
       this.host.finished(ok);
     }
   }

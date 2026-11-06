@@ -35,3 +35,8 @@ CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
 # CONFIG_ESP_WIFI_SOFTAP_SUPPORT is not set
 # CONFIG_ESP_WIFI_ENABLE_WPA3_SAE is not set
 # CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set
+# The WS2812 (status_led.c) sends single frames that fit the RMT's memory; its
+# code stays in flash, for the C5's static RAM below the RF dump bank.
+# CONFIG_RMT_ENCODER_FUNC_IN_IRAM is not set
+# CONFIG_RMT_TX_ISR_HANDLER_IN_IRAM is not set
+# CONFIG_RMT_RX_ISR_HANDLER_IN_IRAM is not set

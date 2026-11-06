@@ -2,14 +2,16 @@
  * ESP32-C5-Zero selects its internal or external antenna with GPIO26).
  * GPL-3.0-or-later.
  *
- * Each pin is unused (left alone), low or high, or the host UART's TX or RX
- * (UART0, link.c). GPIO <n> ... (commands.c) changes a pin at once; GPIO SAVE
+ * Each pin is unused (left alone), low or high, the host UART's TX or RX
+ * (UART0, link.c), or a status LED (status_led.c): LED, driven low to light, or
+ * WS2812. GPIO <n> ... (commands.c) changes a pin at once; GPIO SAVE
  * stores the settings, which boot applies. NVS holds the outputs in base 3,
  * one digit per GPIO number (0 unused, 1 low, 2 high), 40 digits per u64
  * (3^40 < 2^64): key "gpio0" for GPIO 0-39, "gpio1" for 40-79. A u64 is one
  * NVS entry, the least NVS can store; a word with no pin in use is erased.
  * The UART pins are key "uart", a u16 (TX << 8 | RX, 0xff none), erased while
- * they are the defaults. */
+ * they are the defaults. The LED pins are key "leds", the same way (LED << 8 |
+ * WS2812), erased while there are none. */
 #include <stdio.h>
 #include "driver/gpio.h"
 #include "esp_private/esp_gpio_reserve.h"
@@ -18,6 +20,7 @@
 #include "soc/gpio_sig_map.h"
 #include "soc/soc_caps.h"
 #include "gpio_out.h"
+#include "status_led.h"
 
 #define NVS_NAMESPACE "widscan58"
 #define DIGITS_PER_WORD 40
@@ -45,15 +48,17 @@
 #define UART_RX_DEFAULT PIN_NONE
 #endif
 #define UART_KEY "uart"
+#define LEDS_KEY "leds"
 
 /* Outputs: bit n is GPIO n in use, and if so high. Masks, not per-pin bytes:
  * the C5's static RAM is nearly full (CLAUDE.md, scan loop in IRAM). */
 typedef struct {
     uint64_t used, high;
-    uint8_t tx, rx; /* UART pins, PIN_NONE if unset */
+    uint8_t tx, rx;   /* UART pins, PIN_NONE if unset */
+    uint8_t led, ws;  /* status LED pins, likewise */
 } pins_t;
-static pins_t active = {.tx = PIN_NONE, .rx = PIN_NONE};
-static pins_t saved = {.tx = UART_TX_DEFAULT, .rx = UART_RX_DEFAULT};
+static pins_t active = {.tx = PIN_NONE, .rx = PIN_NONE, .led = PIN_NONE, .ws = PIN_NONE};
+static pins_t saved = {.tx = UART_TX_DEFAULT, .rx = UART_RX_DEFAULT, .led = PIN_NONE, .ws = PIN_NONE};
 
 unsigned gpio_out_count(void) { return SOC_GPIO_PIN_COUNT; }
 
@@ -65,6 +70,8 @@ bool gpio_out_allowed(unsigned n) {
 static gpio_out_t pin_get(const pins_t *p, unsigned n) {
     if (n == p->tx) return GPIO_OUT_TX;
     if (n == p->rx) return GPIO_OUT_RX;
+    if (n == p->led) return GPIO_OUT_LED;
+    if (n == p->ws) return GPIO_OUT_WS2812;
     if (!(p->used & BIT64(n))) return GPIO_OUT_NONE;
     return p->high & BIT64(n) ? GPIO_OUT_HIGH : GPIO_OUT_LOW;
 }
@@ -74,8 +81,12 @@ static void pin_put(pins_t *p, unsigned n, gpio_out_t s) {
     p->high &= ~BIT64(n);
     if (p->tx == n) p->tx = PIN_NONE;
     if (p->rx == n) p->rx = PIN_NONE;
+    if (p->led == n) p->led = PIN_NONE;
+    if (p->ws == n) p->ws = PIN_NONE;
     if (s == GPIO_OUT_TX) p->tx = (uint8_t)n;
     else if (s == GPIO_OUT_RX) p->rx = (uint8_t)n;
+    else if (s == GPIO_OUT_LED) p->led = (uint8_t)n;
+    else if (s == GPIO_OUT_WS2812) p->ws = (uint8_t)n;
     else if (s != GPIO_OUT_NONE) p->used |= BIT64(n);
     if (s == GPIO_OUT_HIGH) p->high |= BIT64(n);
 }
@@ -93,13 +104,14 @@ static void drive(unsigned n, gpio_out_t s) {
         gpio_reset_pin((gpio_num_t)n);
         return;
     }
+    if (s == GPIO_OUT_WS2812) return; /* the RMT sets it up (status_led.c) */
     if (s == GPIO_OUT_RX) {
         gpio_config_t c = {.pin_bit_mask = BIT64(n), .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE};
         gpio_config(&c);
         esp_rom_gpio_connect_in_signal(n, U0RXD_IN_IDX, false);
         return;
     }
-    gpio_set_level((gpio_num_t)n, s != GPIO_OUT_LOW); /* TX idles high */
+    gpio_set_level((gpio_num_t)n, s != GPIO_OUT_LOW); /* TX idles high, the LED starts off */
     gpio_config_t c = {.pin_bit_mask = BIT64(n), .mode = GPIO_MODE_OUTPUT};
     gpio_config(&c);
     if (s == GPIO_OUT_TX) esp_rom_gpio_connect_out_signal(n, U0TXD_OUT_IDX, false, false);
@@ -109,13 +121,27 @@ esp_err_t gpio_out_set(unsigned n, gpio_out_t s) {
     if (!gpio_out_allowed(n)) return ESP_ERR_INVALID_ARG;
     gpio_out_t was = pin_get(&active, n);
     if (s == was) return ESP_OK;
-    /* One pin per UART role: the one it moves from goes back to unused. */
+    /* The LEDs let go of their pins first. */
+    if (s == GPIO_OUT_LED || was == GPIO_OUT_LED) status_led_set_led(-1);
+    if (s == GPIO_OUT_WS2812 || was == GPIO_OUT_WS2812) status_led_set_ws2812(-1);
+    /* One pin per role: the one it moves from goes back to unused. */
     if (s == GPIO_OUT_TX && active.tx != PIN_NONE) drive(active.tx, GPIO_OUT_NONE);
     if (s == GPIO_OUT_RX && active.rx != PIN_NONE) drive(active.rx, GPIO_OUT_NONE);
+    if (s == GPIO_OUT_LED && active.led != PIN_NONE) drive(active.led, GPIO_OUT_NONE);
+    if (s == GPIO_OUT_WS2812 && active.ws != PIN_NONE) drive(active.ws, GPIO_OUT_NONE);
     /* No RX pin: an idle line, not whatever the matrix input had. */
     if (was == GPIO_OUT_RX) esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, U0RXD_IN_IDX, false);
+    if (s == GPIO_OUT_WS2812 && was != GPIO_OUT_NONE) drive(n, GPIO_OUT_NONE);
     drive(n, s);
     pin_put(&active, n, s);
+    if (s == GPIO_OUT_LED) status_led_set_led((int)n);
+    if (s == GPIO_OUT_WS2812) {
+        esp_err_t e = status_led_set_ws2812((int)n);
+        if (e != ESP_OK) {
+            pin_put(&active, n, GPIO_OUT_NONE);
+            return e;
+        }
+    }
     return ESP_OK;
 }
 
@@ -138,8 +164,15 @@ void gpio_out_init(void) {
         saved.tx = (uint8_t)(u >> 8);
         saved.rx = (uint8_t)u;
     }
+    if (nvs_get_u16(h, LEDS_KEY, &u) == ESP_OK) {
+        saved.led = (uint8_t)(u >> 8);
+        saved.ws = (uint8_t)u;
+    }
     if (saved.tx != PIN_NONE && !gpio_out_allowed(saved.tx)) saved.tx = PIN_NONE;
     if (saved.rx != PIN_NONE && (!gpio_out_allowed(saved.rx) || saved.rx == saved.tx)) saved.rx = PIN_NONE;
+    if (saved.led != PIN_NONE && (!gpio_out_allowed(saved.led) || saved.led == saved.tx || saved.led == saved.rx)) saved.led = PIN_NONE;
+    if (saved.ws != PIN_NONE && (!gpio_out_allowed(saved.ws) || saved.ws == saved.tx || saved.ws == saved.rx || saved.ws == saved.led))
+        saved.ws = PIN_NONE;
     for (unsigned w = 0; w < NWORDS; w++) {
         char key[8];
         uint64_t v;
@@ -148,7 +181,7 @@ void gpio_out_init(void) {
         for (unsigned k = 0; k < DIGITS_PER_WORD; k++, v /= 3) {
             unsigned n = w * DIGITS_PER_WORD + k;
             unsigned d = (unsigned)(v % 3);
-            if (d && gpio_out_allowed(n) && n != saved.tx && n != saved.rx) pin_put(&saved, n, (gpio_out_t)d);
+            if (d && gpio_out_allowed(n) && n != saved.tx && n != saved.rx && n != saved.led && n != saved.ws) pin_put(&saved, n, (gpio_out_t)d);
         }
     }
     nvs_close(h);
@@ -181,6 +214,14 @@ esp_err_t gpio_out_save(void) {
             if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
         } else {
             e = nvs_set_u16(h, UART_KEY, (uint16_t)(active.tx << 8 | active.rx));
+        }
+    }
+    if (e == ESP_OK) {
+        if (active.led == PIN_NONE && active.ws == PIN_NONE) {
+            e = nvs_erase_key(h, LEDS_KEY);
+            if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
+        } else {
+            e = nvs_set_u16(h, LEDS_KEY, (uint16_t)(active.led << 8 | active.ws));
         }
     }
     if (e == ESP_OK) e = nvs_commit(h);

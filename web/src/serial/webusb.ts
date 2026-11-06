@@ -95,10 +95,18 @@ export class UsbCdcPort {
   }
 }
 
+// One port object per device, so a port can be recognised (as Web Serial's can).
+const ports = new WeakMap<USBDevice, UsbCdcPort>();
+function portOf(d: USBDevice): UsbCdcPort {
+  let p = ports.get(d);
+  if (!p) ports.set(d, (p = new UsbCdcPort(d)));
+  return p;
+}
+
 export async function requestUsbCdcPort(vendorId: number): Promise<UsbCdcPort> {
-  return new UsbCdcPort(await navigator.usb.requestDevice({ filters: [{ vendorId, classCode: CDC_CONTROL_CLASS }] }));
+  return portOf(await navigator.usb.requestDevice({ filters: [{ vendorId, classCode: CDC_CONTROL_CLASS }] }));
 }
 
 export async function grantedUsbCdcPorts(): Promise<UsbCdcPort[]> {
-  return (await navigator.usb.getDevices()).map((d) => new UsbCdcPort(d));
+  return (await navigator.usb.getDevices()).map(portOf);
 }

@@ -227,6 +227,68 @@ const sizes = await page.evaluate(() => {
 check("raw I/Q sizes respect rawiq_max", sizes.n > 0 && sizes.bad.length === 0, JSON.stringify(sizes));
 await send("GAIN MANUAL 60");
 await sleep(3000);
+
+// GPIO Configure: tabs of 8 pins, one column, LED and WS2812 one pin each. The
+// simulator only: on a board these would change its outputs.
+if (sim) {
+  const gpio = await page.evaluate(async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const dlg = document.querySelector(".gpio-dialog");
+    [...document.querySelectorAll(".menu-item")].find((b) => b.textContent === "GPIO Configure").click();
+    await wait(400);
+    const rows = () => [...dlg.querySelectorAll(".gpio-row")];
+    const seg = async (n, label) => {
+      const row = rows().find((r) => r.querySelector(".gpio-name").textContent === `GPIO ${n}`);
+      [...row.querySelectorAll("button")].find((b) => b.textContent === label).click();
+      await wait(200);
+    };
+    const tab = async (i) => {
+      dlg.querySelectorAll(".gpio-tab")[i].click();
+      await wait(100);
+    };
+    const tabs = [...dlg.querySelectorAll(".gpio-tab")].map((t) => t.textContent);
+    const firstTabRows = rows().length;
+    const oneColumn = new Set(rows().map((r) => r.getBoundingClientRect().left)).size === 1;
+    await tab(3);
+    await seg(27, "WS2812");
+    await seg(26, "WS2812"); // moves it
+    await seg(25, "LED");
+    const roles = rows().map((r) => r.className.replace("gpio-row", "").replace("changed", "").trim());
+    const marked = dlg.querySelectorAll(".gpio-tab")[3].classList.contains("changed");
+    [...dlg.querySelectorAll("button")].find((b) => b.textContent === "Revert").click();
+    await wait(300);
+    dlg.close();
+    return { tabs, firstTabRows, oneColumn, roles, marked };
+  });
+  check(
+    "GPIO tabs",
+    gpio.tabs.length === 4 && gpio.tabs[3] === "24–28" && gpio.firstTabRows === 8 && gpio.oneColumn && gpio.marked,
+    JSON.stringify(gpio),
+  );
+  check("GPIO LED and WS2812 one pin each", gpio.roles.join() === ",led,ws2812,,", gpio.roles.join());
+}
+
+// Flash dialog: the config presets, grouped, with the warning for all but None.
+const flash = await page.evaluate(async () => {
+  const dlg = document.querySelector(".flash-dialog");
+  [...document.querySelectorAll("button")].find((b) => b.textContent === "Flash device").click();
+  await new Promise((r) => setTimeout(r, 200));
+  const sel = dlg.querySelector("#flash-preset");
+  const warn = dlg.querySelector(".flash-warning");
+  const groups = [...sel.querySelectorAll("optgroup")].map((g) => `${g.label}:${g.querySelectorAll("option").length}`);
+  const warnings = [...sel.options].map((o) => {
+    sel.value = o.value;
+    sel.dispatchEvent(new Event("change"));
+    return warn.hidden ? "" : warn.textContent;
+  });
+  dlg.close();
+  return { groups, warnings };
+});
+check(
+  "flash presets",
+  flash.groups.join() === "Basic:2,Hardware:4" && flash.warnings[0] === "" && flash.warnings.slice(1).every((w) => w),
+  JSON.stringify(flash.groups),
+);
 s = await snap();
 check("no command errors", s.errors.length === 0, s.errors.join(" | "));
 check("no console errors", consoleErrors.length === 0, consoleErrors.slice(0, 5).join(" | "));

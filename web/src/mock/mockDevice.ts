@@ -424,10 +424,10 @@ export class MockTransport implements Transport {
         this.gpioSaved = [...this.gpioDefault];
         return ok();
       case parts[0] === "GPIO" && parts.length === 3 && /^\d+$/.test(parts[1]): {
-        const s = { NONE: "-", LOW: "L", HIGH: "H", TX: "T", RX: "R" }[parts[2]];
+        const s = { NONE: "-", LOW: "L", HIGH: "H", TX: "T", RX: "R", LED: "D", WS2812: "W" }[parts[2]];
         if (!s) return this.text("ERR gpio_state\n");
         if (this.gpioActive[num(1)] === undefined || this.gpioActive[num(1)] === "x") return this.text("ERR gpio_pin\n");
-        if (s === "T" || s === "R") this.gpioActive = this.gpioActive.map((c) => (c === s ? "-" : c));
+        if ("TRDW".includes(s)) this.gpioActive = this.gpioActive.map((c) => (c === s ? "-" : c));
         this.gpioActive[num(1)] = s;
         return ok();
       }

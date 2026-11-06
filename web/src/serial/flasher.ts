@@ -3,7 +3,8 @@
 // GPL-3.0-or-later.
 import SparkMD5 from "spark-md5";
 import type { ESPLoader } from "esptool-js";
-import type { Port } from "./device";
+import { Device, WebSerialTransport, grantedEspressifPorts, type Port } from "./device";
+import { parseInfo } from "../model/store";
 
 export interface ManifestPart {
   path: string;
@@ -101,10 +102,15 @@ export interface FlashEvents {
   log(line: string): void;
 }
 
+export interface FlashOptions {
+  /** Erase the whole flash first (esptool's erase_flash). */
+  eraseFlash?: boolean;
+}
+
 /** Flash `port` (closed; it is opened here and closed again). The board may
  *  already be in download mode (BOOT + RESET); otherwise it is reset into it
  *  over USB Serial/JTAG. Ends with a watchdog reset into the new firmware. */
-export async function flashFirmware(port: Port, manifest: Manifest, ev: FlashEvents): Promise<void> {
+export async function flashFirmware(port: Port, manifest: Manifest, ev: FlashEvents, opts: FlashOptions = {}): Promise<void> {
   const { ESPLoader, Transport } = await import("esptool-js").catch(offline);
   // esptool-js writes "Connecting..." and its dots without a newline.
   let pending = "";
@@ -139,6 +145,11 @@ export async function flashFirmware(port: Port, manifest: Manifest, ev: FlashEve
     ev.stage("Downloading firmware…");
     const files = await Promise.all(build.parts.map(fetchPart));
 
+    if (opts.eraseFlash) {
+      ev.stage("Erasing the flash…");
+      await loader.eraseFlash();
+    }
+
     ev.stage(`Writing ${manifest.version}…`);
     const total = build.parts.reduce((s, p) => s + p.size, 0);
     const before = build.parts.map((_, i) => build.parts.slice(0, i).reduce((s, p) => s + p.size, 0));
@@ -159,6 +170,80 @@ export async function flashFirmware(port: Port, manifest: Manifest, ev: FlashEve
     await watchdogReset(loader, wdt);
   } finally {
     await transport.disconnect().catch(() => {});
+  }
+}
+
+// The board restarts after flashing: first the USB device goes away and comes
+// back, possibly as another port; then the firmware needs a while to answer
+// (it calibrates the radio, longer on an erased flash).
+const BOOT_TIMEOUT_MS = 30000;
+const INFO_TIMEOUT_MS = 1000;
+const INFO_TRIES_PER_PORT = 5;
+const RETRY_MS = 500;
+// INFOs sent during the restart may be answered late, or a first one cut short.
+const SETTLE_MS = 200;
+const COMMAND_TIMEOUT_MS = 3000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** A write can wait for as long as the board isn't reading, past the command's own timeout. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("no answer")), ms);
+  });
+  p.catch(() => {});
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/** The ports the flashed board can come back as: `port` itself, or a port it
+ *  was not before. Call before flashing, so another board that was granted to
+ *  this page is never taken for it. */
+export async function flashedBoardPorts(port: Port): Promise<() => Promise<Port[]>> {
+  const others = (await grantedEspressifPorts()).filter((p) => p !== port);
+  return async () => [port, ...(await grantedEspressifPorts()).filter((p) => p !== port && !others.includes(p))];
+}
+
+/** The first port whose device answers INFO as our firmware, left open. */
+async function findBoard(ports: () => Promise<Port[]>, ev: FlashEvents): Promise<Device> {
+  const deadline = Date.now() + BOOT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    for (const port of await ports()) {
+      const device = new Device(new WebSerialTransport(port));
+      try {
+        await device.open();
+      } catch {
+        continue; // gone, or not back yet
+      }
+      for (let i = 0; i < INFO_TRIES_PER_PORT && device.connected && Date.now() < deadline; i++) {
+        const reply = await withTimeout(device.text("INFO", INFO_TIMEOUT_MS), INFO_TIMEOUT_MS + 100).catch(() => "");
+        if (parseInfo(reply.slice("INFO ".length))) {
+          ev.log(reply);
+          return device;
+        }
+      }
+      await device.close().catch(() => {});
+    }
+    await sleep(RETRY_MS);
+  }
+  throw new Error("the board did not answer after restarting");
+}
+
+/** After flashing: find the board once it answers, send it `commands` (each
+ *  must answer OK), and close the port again. */
+export async function applyPreset(ports: () => Promise<Port[]>, commands: string[], ev: FlashEvents): Promise<void> {
+  ev.stage("Waiting for the board to restart…");
+  const device = await findBoard(ports, ev);
+  try {
+    await sleep(SETTLE_MS);
+    ev.stage("Applying the config preset…");
+    for (const c of commands) {
+      ev.log(`> ${c}`);
+      // Device.command rejects on ERR, with the command and reply in the message.
+      ev.log(await withTimeout(device.text(c, COMMAND_TIMEOUT_MS), COMMAND_TIMEOUT_MS + 100));
+    }
+  } finally {
+    await device.close().catch(() => {});
   }
 }
 

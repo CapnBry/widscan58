@@ -67,6 +67,13 @@ static unsigned cur;
 static uint8_t wcmd, wbuf[4], wneed, wgot;
 static int64_t wstart;
 
+bool rh_any_crossing(void) {
+    if (!seat) return false;
+    for (unsigned j = 0; j < RH_SEATS; j++)
+        if (seat[j].lap.crossing) return true;
+    return false;
+}
+
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 esp_err_t rh_init(void) {

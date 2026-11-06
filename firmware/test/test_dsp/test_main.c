@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unity.h>
 #include "fft_r4_sc16.h"
+#include "led_color.h"
 #include "metrics.h"
 #include "../../src/scan/metrics.c"
 #include "../../src/scan/lap.c"
@@ -17,6 +18,42 @@
 
 void setUp(void) {}
 void tearDown(void) {}
+
+static void test_led_color(void) {
+    int64_t red_end = LED_RED_END_INIT;
+    uint8_t r, g;
+    /* Not scanning: 1 Hz green, no red left over from before boot. */
+    led_color(0, false, false, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(0, r);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL, g);
+    led_color(600000, false, false, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(0, g);
+    led_color(1100000, false, false, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL, g);
+    /* Scanning: solid. */
+    led_color(1600000, true, false, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(0, r);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL, g);
+    /* Red while in a crossing, however long. */
+    led_color(2000000, true, true, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL, r);
+    TEST_ASSERT_EQUAL_UINT8(0, g);
+    led_color(3000000, true, true, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL, r);
+    /* Then halfway at 250 ms, all green at 500 ms. */
+    led_color(3250000, true, false, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL / 2, r);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL / 2, g);
+    led_color(3500000, true, false, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(0, r);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL, g);
+    /* A new crossing during a fade is red at once. */
+    led_color(4000000, true, true, &red_end, &r, &g);
+    led_color(4100000, true, false, &red_end, &r, &g);
+    TEST_ASSERT_TRUE(r > 0);
+    led_color(4110000, true, true, &red_end, &r, &g);
+    TEST_ASSERT_EQUAL_UINT8(LED_LEVEL, r);
+}
 
 static double gauss(void) {
     double u = (rand() + 1.0) / (RAND_MAX + 2.0), v = rand() / (double)RAND_MAX;
@@ -613,5 +650,6 @@ int main(void) {
     RUN_TEST(test_plan_default_raceband);
     RUN_TEST(test_plan_groups);
     RUN_TEST(test_profile_equiv);
+    RUN_TEST(test_led_color);
     return UNITY_END();
 }

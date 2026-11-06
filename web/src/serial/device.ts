@@ -347,9 +347,13 @@ export class Device {
   }
 }
 
-/** A port this origin was already granted, if any (no chooser needed). */
-export async function grantedEspressifPort(): Promise<Port | null> {
-  if (!WebSerialTransport.supported()) return null;
+/** The ports this origin was already granted (no chooser needed). */
+export async function grantedEspressifPorts(): Promise<Port[]> {
+  if (!WebSerialTransport.supported()) return [];
   const ports: Port[] = viaWebUsb() ? await grantedUsbCdcPorts() : await navigator.serial.getPorts();
-  return ports.find((p) => p.getInfo().usbVendorId === ESPRESSIF_VID) ?? null;
+  return ports.filter((p) => p.getInfo().usbVendorId === ESPRESSIF_VID);
+}
+
+export async function grantedEspressifPort(): Promise<Port | null> {
+  return (await grantedEspressifPorts())[0] ?? null;
 }

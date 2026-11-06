@@ -58,6 +58,9 @@ esp_err_t scanner_start(void);
 void scanner_get_config(scan_config_t *c);
 void scanner_set_config(const scan_config_t *c);
 void scanner_get_plan(plan_t *plan);
+/* The scan loop is hopping (false before scanner_start, when stopped, or with
+ * no channels); *rh: and it is in RotorHazard mode. For the status LEDs. */
+bool scanner_scanning(bool *rh);
 
 typedef enum { SCAN_REQ_RAWIQ, SCAN_REQ_RECAL, SCAN_REQ_FFTEVAL_SYNTH, SCAN_REQ_FFTEVAL_LIVE } scan_req_type_t;
 typedef struct {

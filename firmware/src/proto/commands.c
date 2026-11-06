@@ -267,15 +267,15 @@ static void send_status(const char *keyword) {
 }
 
 /* GPIO?: per GPIO number, '-' unused, 'L' low, 'H' high, 'T' and 'R' the
- * host UART's TX and RX, 'x' not available (flash, USB); "active" is what is
- * set now, "saved" what boot applies. */
+ * host UART's TX and RX, 'D' the LED, 'W' the WS2812, 'x' not available
+ * (flash, USB); "active" is what is set now, "saved" what boot applies. */
 static void send_gpio(void) {
     char s[2][65];
     unsigned n = gpio_out_count();
     if (n > 64) n = 64;
     for (unsigned k = 0; k < 2; k++) {
         for (unsigned j = 0; j < n; j++)
-            s[k][j] = !gpio_out_allowed(j) ? 'x' : "-LHTR"[gpio_out_get(j, k)];
+            s[k][j] = !gpio_out_allowed(j) ? 'x' : "-LHTRDW"[gpio_out_get(j, k)];
         s[k][n] = 0;
     }
     reply_add("GPIO {\"count\":%u,\"active\":\"%s\",\"saved\":\"%s\"}\n", n, s[0], s[1]);
@@ -569,15 +569,18 @@ static void handle(char *line) {
         if (e != ESP_OK) { link_printf("ERR save %s\n", esp_err_to_name(e)); return; }
         link_text("OK\n");
     } else if (sscanf(line, "GPIO %" SCNu32 " %31s %c", &a, arg, &extra) == 2) {
-        /* GPIO <n> NONE|LOW|HIGH|TX|RX: at once; GPIO SAVE keeps it for boot. */
+        /* GPIO <n> NONE|LOW|HIGH|TX|RX|LED|WS2812: at once; GPIO SAVE keeps it for boot. */
         gpio_out_t s = !strcmp(arg, "LOW")    ? GPIO_OUT_LOW
                        : !strcmp(arg, "HIGH") ? GPIO_OUT_HIGH
                        : !strcmp(arg, "TX")   ? GPIO_OUT_TX
                        : !strcmp(arg, "RX")   ? GPIO_OUT_RX
+                       : !strcmp(arg, "LED")  ? GPIO_OUT_LED
+                       : !strcmp(arg, "WS2812") ? GPIO_OUT_WS2812
                                               : GPIO_OUT_NONE;
         if (s == GPIO_OUT_NONE && strcmp(arg, "NONE")) { link_text("ERR gpio_state\n"); return; }
         if (!gpio_out_allowed(a)) { link_text("ERR gpio_pin\n"); return; }
-        gpio_out_set(a, s);
+        esp_err_t e = gpio_out_set(a, s);
+        if (e != ESP_OK) { link_printf("ERR gpio %s\n", esp_err_to_name(e)); return; }
         link_text("OK\n");
     } else if (!strcmp(line, "BOOTLOADER")) {
         link_text("OK BOOTLOADER\n");

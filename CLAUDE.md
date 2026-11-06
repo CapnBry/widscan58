@@ -144,8 +144,27 @@ pin reads a constant idle line. The UART's interrupt handler is in flash
 (`CONFIG_UART_ISR_IN_IRAM` would take ~2.3 KB of static RAM), and so is the
 ring buffer and FreeRTOS setup code only its driver uses (`hot_iram.lf`,
 `widscan58_ringbuf_cold`): the UART costs ~330 B of static RAM below the RF
-dump bank (~1.1 KB left, 2026-10-28). Untested on hardware with a UART host
-so far.
+dump bank. Untested on hardware with a UART host so far.
+
+**Status LEDs (`src/status_led.c`):** `GPIO <n> LED` (one LED, lit when the pin
+is low) and `GPIO <n> WS2812` (one WS2812), one pin each. The LED is on while
+scanning and blinks at 1 Hz otherwise. The WS2812 (`scan/led_color.h`,
+host-tested) does the same in green, and in lap timer mode is red while any seat
+is in a crossing (EnterAt reached, not yet below ExitAt), fading back to green
+over 500 ms. Scanning means the scan loop is hopping
+(`scanner_scanning`): not before `scanner_start`, not after `SCAN STOP`, and not
+in lap timer mode until a server or the web UI sets a seat's frequency, so a
+board with no host blinks. A 20 ms `esp_timer` does the work, only while a pin is
+assigned; nothing is allocated before that (~840 B of heap with a WS2812). With
+one assigned, a seat's update interval in lap timer mode (8 seats, 2026-11-06, 6
+runs each) went from 1963.5 to 1964.7 µs idle and 1965.5 µs with the red fade
+running (~35 frames/s), +0.06 % and +0.10 %; boot-to-boot differences are larger
+(up to ~1 %). The WS2812 goes out through the RMT, one frame per colour change;
+brightness is `LED_LEVEL` (40 of 255), and the bytes are in WS2812's GRB order. A board
+whose LED is wired as RGB would show red and green swapped. The driver's IRAM
+options are off in `sdkconfig.defaults`, for the static RAM below the RF dump bank
+(568 B left, 2026-11-06). The driver reserves the pin; `status_led.c` revokes
+that, or `GPIO?` would show it as not available.
 
 **Firmware version:** `INFO` (and RotorHazard's firmware version) reports
 `PROJECT_VER`, the `git describe --tags --always --dirty` that
@@ -262,7 +281,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in lap timer mode. In lap timer mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `PLATEAU…`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
 | `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | Lap timer mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
 | `PLATEAU <codes>`, `PLATEAU?` | Debug, both modes: the lap timer's pass plateau tolerance, 0–31 level codes (0.25 dB each; default 2, 0.5 dB). A pass is timed at the middle of the crossing's first to last update within that many codes of its peak, across dips (RotorHazard's node rule at 0; the plateau code does not run then). Not saved by `CONFIG SAVE`; kept across mode switches until a restart. A change mid-crossing restarts that crossing's plateau from its peak. Reported as `plateau` in `STATUS?`/`CONFIG?` |
-| `GPIO <n> NONE\|LOW\|HIGH\|TX\|RX`, `GPIO SAVE`, `GPIO RESET`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26), and the host UART's pins (see "Host UART"). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `TX`/`RX` moves that UART role to the pin, and the pin that had it goes back to `NONE`. `GPIO SAVE` makes the settings in effect the boot ones (NVS: outputs in base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; the UART pins as `u16` key `uart`, erased while they are the defaults; `src/gpio_out.c`), applied right after `link_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `T` and `R` the UART's TX and RX, `x` not available (USB, and the flash pins IDF reserves). `GPIO RESET`: the built-in settings at once (no outputs, the UART on its default pins) and every key erased. Works in both modes |
+| `GPIO <n> NONE\|LOW\|HIGH\|TX\|RX\|LED\|WS2812`, `GPIO SAVE`, `GPIO RESET`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26), the host UART's pins (see "Host UART") and the status LEDs (see "Status LEDs"). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `TX`, `RX`, `LED` and `WS2812` move that role to the pin, and the pin that had it goes back to `NONE`. `GPIO SAVE` makes the settings in effect the boot ones (NVS: outputs in base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; the UART pins as `u16` key `uart`, erased while they are the defaults; the LED pins as `u16` key `leds`, erased while there are none; `src/gpio_out.c`), applied right after `link_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `T` and `R` the UART's TX and RX, `D` the LED, `W` the WS2812, `x` not available (USB, and the flash pins IDF reserves). `GPIO RESET`: the built-in settings at once (no outputs or LEDs, the UART on its default pins) and every key erased. Works in both modes |
 | `REBOOT` | Restart (USB stays connected). The board comes back silent in lap timer mode; the web UI notices the missing telemetry and switches it back to monitor mode |
 
 ## Lap timer mode
@@ -364,8 +383,9 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   connect (`PROTOCOL?`, then `PROTOCOL MONITOR|RH`; firmware without
   `PROTOCOL` is monitor only; power meter mode runs the monitor protocol). GPIO Configure (`views/gpioDialog.ts`,
   `model/gpio.ts`) shows each GPIO's setting (not its live level) as
-  Unused / Low / High / TX / RX, the UART's pins outlined (TX `--s2`, RX
-  `--s3`); a click sends `GPIO <n> …` (in effect at once) and
+  Unused / Low / High / TX / RX / LED / WS2812, on tabs of 8 pins in one column
+  (a tab with unsaved pins is in `--warning`), the single-pin roles outlined (TX
+  `--s2`, RX `--s3`, LED `--s4`, WS2812 `--s5`); a click sends `GPIO <n> …` (in effect at once) and
   reads `GPIO?` back. Pins whose setting differs from the saved one have
   the name and the saved option's text in `--warning`,
   with a note that they need Save
@@ -452,7 +472,19 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   board resets reconnect automatically.
 - **Flash device**: flashes the firmware the page was deployed with
   (`web/src/serial/flasher.ts`; binaries come from `web/public/firmware`, staged
-  by CI, never committed).
+  by CI, never committed). The Config preset dropdown (`model/flashPresets.ts`,
+  one list, grouped by `group`; keep the "Hardware" group sorted by name in the
+  source) picks what happens around it, always starting at None: `eraseFlash`
+  runs esptool's erase_flash before writing, and `commands` go to the board after
+  it. A preset's own commands must save what they set (`GPIO SAVE`, `CONFIG
+  SAVE`); they run in lap timer mode, the mode the board boots in, so only
+  `rh_allowed` commands work. After the watchdog reset the USB device
+  re-enumerates, often as another port: `applyPreset` tries the flashed port and
+  any Espressif port granted since before flashing (`flashedBoardPorts`; never
+  another board that was already granted), sends `INFO` until the firmware answers
+  (up to 30 s), sends the commands, stops at the first `ERR` and closes the port;
+  only then `finished` lets auto-reconnect take the port. With no commands nothing is
+  sent, as before.
 - **Simulate**, or open `http://localhost:5173/?sim`: synthetic VTXs, Wi-Fi
   bursts, board spurs and IMD3 products. It simulates the C5 (`c5-race`:
   80 MS/s, whole-MHz LOs, the C5's measured spurs); `?sim=s3` simulates the

@@ -200,6 +200,10 @@ header.top .actions button { white-space: nowrap; }
   .flash-versions td { grid-column: 2; }
   .flash-versions td + td { padding-bottom: 6px; }
 }
+.flash-preset { display: flex; align-items: center; gap: 8px; color: var(--ink-2); margin-bottom: 6px; }
+.flash-preset select { flex: 1; min-width: 0; }
+.flash-warning { margin-bottom: 8px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); color: var(--warning); font-size: 12px; }
+.flash-warning[hidden] { display: none; }
 .flash-progress progress { width: 100%; accent-color: var(--accent); }
 .flash-status { min-height: 1.4em; margin: 4px 0 8px; color: var(--ink-2); }
 .flash-status.ok { color: var(--good); }
@@ -232,21 +236,31 @@ header.top .actions button { white-space: nowrap; }
 .options-dialog .rule { display: flex; align-items: flex-start; gap: 8px; }
 .options-dialog .rule .option { flex: 1; }
 .options-dialog .rule-value { padding-top: 4px; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
-.gpio-dialog { width: min(700px, calc(100vw - 32px)); }
+.gpio-dialog { width: min(480px, calc(100vw - 32px)); }
 .gpio-dialog p { margin: 0 0 8px; color: var(--ink-2); }
 .gpio-dialog .flash-buttons .spacer { flex: 1; }
-.gpio-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 4px 12px; }
+.gpio-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+.gpio-tab { border: 0; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0; background: none; padding: 4px 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gpio-tab.on { background: none; border-bottom-color: var(--accent); color: var(--ink); font-weight: 600; }
+.gpio-tab.changed, .gpio-tab.on.changed { color: var(--warning); }
+.gpio-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .gpio-row { display: grid; grid-template-columns: 56px max-content; align-items: center; gap: 8px; min-height: 28px;
   padding: 1px 5px; border: 2px solid transparent; border-radius: 8px; }
-/* The UART's pins: outlined, TX and RX in their own colours. */
+/* The pins with a single-pin role: outlined, each role in its own colour. */
 .gpio-row.uart-tx { border-color: var(--s2); }
 .gpio-row.uart-rx { border-color: var(--s3); }
 .gpio-row.uart-tx .gpio-name { color: var(--s2); font-weight: 600; }
 .gpio-row.uart-rx .gpio-name { color: var(--s3); font-weight: 600; }
+.gpio-row.led { border-color: var(--s4); }
+.gpio-row.ws2812 { border-color: var(--s5); }
+.gpio-row.led .gpio-name { color: var(--s4); font-weight: 600; }
+.gpio-row.ws2812 .gpio-name { color: var(--s5); font-weight: 600; }
 .gpio-row .seg button { padding: 3px 8px; font-size: 12px; white-space: nowrap; }
 @media (max-width: 420px) {
-  .gpio-row { grid-template-columns: 52px max-content; gap: 6px; }
-  .gpio-row .seg button { padding: 3px 6px; }
+  .gpio-dialog { padding: 12px; }
+  .gpio-row { grid-template-columns: 20px max-content; gap: 4px; padding: 1px 2px; }
+  .gpio-prefix { display: none; }
+  .gpio-row .seg button { padding: 3px 4px; font-size: 11px; }
 }
 @media (max-width: 360px) {
   .gpio-dialog .flash-buttons { flex-wrap: wrap; }

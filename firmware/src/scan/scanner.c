@@ -53,6 +53,7 @@ typedef struct {
     scan_config_t cfg;
     plan_t plan;
     unsigned hop;
+    bool scanning;
     uint32_t tuned_lo_khz; /* LO the radio was last tuned to by do_hop; 0 = unknown */
     channel_state_t ch[PROFILE_MAX_CHANNELS];
     psd_iq_t iq[PROFILE_MAX_CHANNELS]; /* per plan hop (one LO each) */
@@ -700,10 +701,12 @@ static void scanner_task(void *arg) {
         int64_t now = esp_timer_get_time();
         if (now - sp->window_start >= TELEMETRY_US) emit_telemetry(now);
         if (!sp->cfg.running || !sp->plan.nhops) {
+            sp->scanning = false;
             sp->w_rot_from = now; /* a restart's first rate leaves the stop out */
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
+        sp->scanning = true;
         do_hop();
         bool lower_ready = false; /* a task below this one has work */
         if (++sp->hop >= sp->plan.nhops) {
@@ -755,6 +758,12 @@ esp_err_t scanner_init(void) {
      * for scanner_start: the stack's place in the heap sets the hop time
      * (DSP ~0.45 ms slower with it allocated after the command task). */
     return xTaskCreatePinnedToCore(scanner_task, "scan", 8192, NULL, 4, &sp->task, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+bool scanner_scanning(bool *rh) {
+    if (!sp) return false;
+    *rh = sp->cfg.rh;
+    return sp->scanning;
 }
 
 esp_err_t scanner_start(void) {

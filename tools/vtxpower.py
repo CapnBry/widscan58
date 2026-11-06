@@ -4,12 +4,17 @@
 GPL-3.0-or-later.
 
 The VTX is set over Betaflight MSP and measured on an ImmersionRC RF Power
-Meter v2 (both over USB; classes shared with powercal.py). The result is a
-table (Markdown and CSV), a graph (PNG) and the raw records (JSON lines).
+Meter v2, or with --widscan58 on a widscan58 ESP32-C5 board (all over USB). The
+result is a table (Markdown and CSV), a graph (PNG) and the raw records (JSON
+lines).
 
   vtxpower.py check [--attn dB] [--partial]   FC, VTX table and meter; changes nothing
   vtxpower.py sweep [--attn dB] [--partial]   start with the VTX off, power it up when asked
+  vtxpower.py sweep --widscan58 --attn dB     the same, on a widscan58 instead of the meter
   vtxpower.py report <run>.jsonl              redo the table and graph from a run's records
+
+--title replaces the table's and graph's title (a sweep keeps it for report);
+--output-w sets the graph's width in pixels (default 800).
 
 --attn is the attenuator between the VTX and the meter's input, in dB (default
 0: the meter straight on the VTX, its internal 30 dB already in the reading).
@@ -52,8 +57,18 @@ stay on. The readings are noisier, and the VTX heats on a different schedule, so
 compare quick runs with quick runs. An explicit --step, --measure-at, --reads or
 --settle overrides it.
 
+--widscan58 measures as the web UI's power meter mode does, with its calibration
+(R1-R8 only, about +/- 1 dB): one LO per channel, gain 0, a +/- 15 MHz window.
+The board has no attenuator of its own and reads up to -5 dBm at its input, so
+--attn is required, --max-mw defaults to that -5 dBm (0.316 mW) and can only go
+lower. 25 mW needs 19 dB, 400 mW 31 dB, 1 W 35 dB and 2 W 38 dB; the first
+attenuator takes nearly all the power, so rate it at least twice the VTX. A
+capture that clips counts as over the limit. Afterwards the board goes back to
+its default scan and its boot mode (lap timer). --widscan58-port overrides the
+port.
+
 Before the sweep, with the VTX off, the meter's floor is measured (~-24 dBm at
-5.8 GHz) and subtracted linearly from the readings. Each channel goes from low
+5.8 GHz; ~-28 dBm on a widscan58) and subtracted linearly from the readings. Each channel goes from low
 to high power, on a fixed --step schedule; the VTX heats up during a sweep, and
 later channels read up to ~0.8 dB low (PLAN.md, "Power calibration, repeat").
 """
@@ -62,15 +77,25 @@ import csv
 import json
 import math
 import re
+import queue
 import signal
+import statistics
 import sys
+import threading
 import time
 from pathlib import Path
 
+import widscan58cli as w
 from powercal import METER_FREQS, RACEBAND, Meter, Msp, find_port, mean_db
 
 CHANNEL_NAMES = {mhz: f"R{i + 1}" for i, mhz in enumerate(RACEBAND)}
-DEFAULT_FLOOR_DBM = -24.0  # the meter at 5.8 GHz; used when the VTX is already on at the start
+# dBm at the board's input minus dBFS at gain 0: web/src/model/power.ts, CALIBRATION.
+WIDSCAN58_CAL = [(5658, 27.4), (5695, 27.3), (5732, 26.8), (5769, 26.1),
+                 (5806, 25.9), (5843, 25.3), (5880, 25.2), (5917, 26.1)]
+WIDSCAN58_MAX_DBM = -5.0  # web/src/model/power.ts, INPUT_MAX_DBM
+WIDSCAN58_CAL_REACH_MHZ = 10  # beyond the calibrated channels, as the web UI: uncalibrated
+WIDSCAN58_FRAMES = 8  # metrics frames per reading
+WIDSCAN58_LO_REACH_KHZ = 20000  # a frame's LO this close to the channel is on it (MODE SINGLE: 8 MHz below)
 NO_SIGNAL_DB = 3.0  # a reading this close to the floor is no signal
 NEAR_FLOOR_DB = 6.0  # flagged in the report; the floor correction is large here
 VISIBLE_MARGIN_DB = 6.0  # a level's label this far over the floor should show on the meter; VTXs read low
@@ -79,6 +104,9 @@ QUICK_TIMING = dict(step=0.0, measure_at=0.5, reads=3, settle=0.3)
 METER_READ_S = 0.06  # one meter reading, for the time estimate
 STABLE_SPREAD_DB = 1.0  # within a calibration point; settled readings stay under ~0.4
 STABLE_GAP_DB = 1.5  # between the two calibration points; settled readings stay under ~0.6
+DEFAULT_TITLE = "VTX output by channel and power level"
+DEFAULT_OUTPUT_W = 800
+GRAPH_W_IN = 9.5
 DROP_CONFIRM_S = 5.0  # for the meter to see a drop: a busy SmartAudio VTX can take a few seconds
 
 
@@ -138,8 +166,8 @@ def describe_level(lv, max_mw, attn_db):
         return f"{head} power unknown: too high"
     meter = at_meter_mw(mw, attn_db)
     if meter <= max_mw:
-        return f"{head} {meter:7.1f} mW at the meter: OK"
-    return f"{head} {meter:7.1f} mW at the meter: too high, needs {mw_to_dbm(mw / max_mw):.1f} dB"
+        return f"{head} {meter:7.3g} mW at the meter: OK"
+    return f"{head} {meter:7.3g} mW at the meter: too high, needs {mw_to_dbm(mw / max_mw):.1f} dB"
 
 
 def describe_table(table, max_mw, attn_db):
@@ -149,7 +177,7 @@ def describe_table(table, max_mw, attn_db):
 def check_table(table, args):
     """The levels to sweep. Raises SafetyAbort if the table doesn't allow a sweep."""
     allowed, rejected = classify(table, args.max_mw, args.attn)
-    where = f"{args.attn:g} dB, limit {args.max_mw:g} mW at the meter"
+    where = f"{args.attn:g} dB, limit {args.max_mw:.3g} mW at the meter"
     if rejected and not args.partial:
         raise SafetyAbort(f"the VTX table has levels too high for {where}:\n{describe_table(table, args.max_mw, args.attn)}\n"
                           "Use a larger attenuator, or --partial to skip those levels.")
@@ -238,6 +266,167 @@ def interpolate(mhz, by_freq):
     return a + (b - a) * (mhz - f0) / (f1 - f0)
 
 
+class ImmersionRC(Meter):
+    """The RF power meter: read at the two calibration frequencies around a channel."""
+    name = "immersionrc"
+    default_floor_dbm = -24.0  # at 5.8 GHz; used when the VTX is already on at the start
+
+    def points(self, mhz):
+        return cal_points(mhz)
+
+    def read_dbm(self):
+        return float(self.cmd("D")[0])
+
+    def close(self):
+        pass
+
+
+class Widscan58:
+    """A widscan58 board as power meter mode runs it: one channel at a time, reading its RSSI window."""
+    name = "widscan58"
+    default_floor_dbm = -28.0  # the +/- 15 MHz window's noise at gain 0, measured -27 to -29
+
+    def __init__(self, port, channels):
+        for mhz in channels:
+            if not WIDSCAN58_CAL[0][0] - WIDSCAN58_CAL_REACH_MHZ <= mhz <= WIDSCAN58_CAL[-1][0] + WIDSCAN58_CAL_REACH_MHZ:
+                raise SafetyAbort(f"{mhz} MHz is outside the widscan58's power calibration (R1-R8)")
+        self.link = w.Link(port, timeout=0.01)
+        self.text = queue.Queue()
+        self.cond = threading.Condition()
+        self.collecting = None  # the frames a reading is waiting for
+        self.error = None
+        self.stopping = False
+        self.mhz = None
+        # Always drained: frames left waiting on the device would make readings
+        # old, and the limit check has to see the power as it is now.
+        self.reader = threading.Thread(target=self._read_stream, daemon=True)
+        self.reader.start()
+        self._to_monitor()
+        profile = json.loads(self.command("PROFILE?", prefix="PROFILE ")[len("PROFILE "):])
+        if profile.get("name") != "c5-race":
+            raise SafetyAbort(f"no power calibration for band profile {profile.get('name')!r}: needs an ESP32-C5 (c5-race)")
+
+    def _read_stream(self):
+        try:
+            while not self.stopping:
+                for item in self.link.poll():
+                    if item[0] == "text":
+                        self.text.put(item[1])
+                    elif item[1] == w.FRAME_METRICS:
+                        with self.cond:
+                            if self.collecting is not None:
+                                self.collecting.append(w.parse_metrics(item[2]))
+                                self.cond.notify_all()
+        except Exception as e:  # noqa: BLE001: reported by the next reading
+            self.error = e
+            with self.cond:
+                self.cond.notify_all()
+
+    def _to_monitor(self):
+        # Opening the port can restart the board, and it boots silent in lap timer mode.
+        for _ in range(5):
+            try:
+                self.command("PROTOCOL MONITOR", timeout=1.0)
+                return
+            except TimeoutError:
+                pass
+        raise TimeoutError("the widscan58 did not answer PROTOCOL MONITOR")
+
+    def command(self, line, prefix=None, timeout=2.0):
+        """The first reply line (with prefix, or OK/ERR)."""
+        while not self.text.empty():
+            self.text.get_nowait()
+        self.link.send(line)
+        deadline = time.time() + timeout
+        while True:
+            try:
+                reply = self.text.get(timeout=max(0.0, deadline - time.time()))
+            except queue.Empty:
+                raise TimeoutError(f"widscan58: no reply to {line!r}") from None
+            if reply.startswith(prefix if prefix else ("OK", "ERR")):
+                return reply
+
+    def _send(self, *lines):
+        for line in lines:
+            reply = self.command(line)
+            if reply.startswith("ERR"):
+                raise SafetyAbort(f"widscan58: {line!r} -> {reply}")
+
+    def version(self):
+        return self.command("INFO", prefix="INFO")
+
+    def points(self, mhz):
+        return [mhz]
+
+    def set_freq(self, mhz):
+        if mhz == self.mhz:
+            return
+        # The scan the calibration was made with (web/src/model/power.ts, powerCommands).
+        self._send(f"CHANNELS X={mhz}", "MODE SINGLE", "ENABLE 1", "GAIN MANUAL 0", "WIN 15000000 15000000",
+                   "METRICS FULL", "SPEC 0 256 40000000 MAX", "SCAN START")
+        self.mhz = mhz
+
+    def _frames(self, n, timeout=3.0):
+        """The next n frames that are on this channel at gain 0."""
+        deadline = time.time() + timeout
+        on_channel = []
+        with self.cond:
+            self.collecting = []
+            try:
+                while len(on_channel) < n:
+                    if self.error:
+                        raise RuntimeError(f"widscan58: {self.error}")
+                    if time.time() > deadline:
+                        raise TimeoutError(f"widscan58: no readings on {self.mhz} MHz")
+                    self.cond.wait(0.1)
+                    on_channel += [m for m in self.collecting if m["gain"] == 0 and m["nch"]
+                                   and abs(m["lo_khz"] - self.mhz * 1000) <= WIDSCAN58_LO_REACH_KHZ]
+                    self.collecting.clear()
+            finally:
+                self.collecting = None
+        return on_channel
+
+    def read_dbm(self):
+        """dBm at the board's input. The median: Wi-Fi bursts in the window raise a mean."""
+        frames = self._frames(WIDSCAN58_FRAMES)
+        dbfs = statistics.median(m["channels"][0]["rssi"] / 100 for m in frames)
+        dbm = dbfs + interpolate_cal(self.mhz)
+        # A clipped capture reads low, so its level says nothing: it counts as over the range.
+        if sum(1 for m in frames if m["saturated"]) * 2 > len(frames):
+            dbm = max(dbm, WIDSCAN58_MAX_DBM + 0.1)
+        return dbm
+
+    def read(self, n, settle):
+        time.sleep(settle)
+        v = [self.read_dbm() for _ in range(n)]
+        return mean_db(v), max(v) - min(v)
+
+    def close(self):
+        """Back to the board's default scan and its boot mode."""
+        try:
+            self._send("CHANNELS DEFAULT", "MODE GROUP", "GAIN MANUAL 45", "WIN 5000000 12000000",
+                       "SPEC 4 256 40000000 MAX", "PROTOCOL RH")
+        finally:
+            self.stopping = True
+            self.reader.join(timeout=1.0)
+
+
+def interpolate_cal(mhz):
+    pts = WIDSCAN58_CAL
+    if mhz <= pts[0][0]:
+        return pts[0][1]
+    for (f0, a), (f1, b) in zip(pts, pts[1:]):
+        if mhz <= f1:
+            return a + (b - a) * (mhz - f0) / (f1 - f0)
+    return pts[-1][1]
+
+
+def open_meter(args):
+    if args.widscan58:
+        return Widscan58(args.widscan58_port, getattr(args, "channels", RACEBAND))
+    return ImmersionRC(args.meter)
+
+
 class Guard:
     """Meter readings, each one checked against the limit: the power at the meter's input."""
 
@@ -246,7 +435,7 @@ class Guard:
         self.limit_dbm = mw_to_dbm(max_mw)
 
     def read(self):
-        raw = float(self.meter.cmd("D")[0])
+        raw = self.meter.read_dbm()
         if raw > self.limit_dbm:
             raise OverLimit(raw)
         return raw
@@ -261,7 +450,7 @@ class Guard:
         """Raise SafetyAbort if the meter still reads over the limit after timeout."""
         deadline = time.time() + timeout
         while True:
-            raw = float(self.meter.cmd("D")[0])
+            raw = self.meter.read_dbm()
             if raw <= self.limit_dbm:
                 return
             if time.time() > deadline:
@@ -279,7 +468,7 @@ def measure_settled(guard, mhz, args):
     """A step's readings at its calibration points, and whether they held still."""
     deadline = time.time() + args.stable_timeout
     while True:
-        meter = {f: guard.measure(f, args.reads, args.settle) for f in cal_points(mhz)}
+        meter = {f: guard.measure(f, args.reads, args.settle) for f in guard.meter.points(mhz)}
         levels = [v[0] for v in meter.values()]
         if max(v[1] for v in meter.values()) <= STABLE_SPREAD_DB and max(levels) - min(levels) <= STABLE_GAP_DB:
             return meter, True
@@ -289,7 +478,7 @@ def measure_settled(guard, mhz, args):
 
 def measure_floor(meter, channels, reads, settle):
     floors = {}
-    for f in sorted({p for mhz in channels for p in cal_points(mhz)}):
+    for f in sorted({p for mhz in channels for p in meter.points(mhz)}):
         meter.set_freq(f)
         floors[f] = meter.read(reads, settle)[0]
         print(f"  {f} MHz: {floors[f]:.2f} dBm", file=sys.stderr)
@@ -323,7 +512,7 @@ def confirm_plan(args, vtx, table):
     labels = ", ".join(lv["label"].strip() for lv in vtx.allowed)
     n = len(args.channels) * len(vtx.allowed)
     per_step = max(args.step, args.measure_at + 2 * (args.settle + args.reads * METER_READ_S))
-    print(f"Sweep: {len(args.channels)} channels x levels [{labels}], limit {args.max_mw:g} mW at the meter, "
+    print(f"Sweep: {len(args.channels)} channels x levels [{labels}], limit {args.max_mw:.3g} mW at the meter, "
           f"{args.attn:g} dB attenuator: {n} steps, at least {n * per_step / 60:.1f} min", file=sys.stderr)
     if args.yes:
         return
@@ -348,7 +537,7 @@ def run_steps(args, vtx, guard, floors, out):
             rec = dict(rec="step", t=t0, mhz=mhz, index=lv["index"], label=lv["label"].strip(), nominal_mw=lv["mw"])
             try:
                 # The meter is on the channel's frequency before the level changes.
-                guard.meter.set_freq(cal_points(mhz)[0])
+                guard.meter.set_freq(guard.meter.points(mhz)[0])
                 vtx.send(mhz, lv["index"])
                 guard.watch(t0 + args.measure_at)
                 meter, settled = measure_settled(guard, mhz, args)
@@ -365,7 +554,7 @@ def run_steps(args, vtx, guard, floors, out):
                 out.flush()
                 continue
             raw = interpolate(mhz, {f: v[0] for f, v in meter.items()})
-            floor = interpolate(mhz, {f: floors.get(f, DEFAULT_FLOOR_DBM) for f in meter})
+            floor = interpolate(mhz, {f: floors.get(f, guard.meter.default_floor_dbm) for f in meter})
             # R8 at the lowest level can sit near the floor through a pad: only
             # the first step and the higher levels can tell a lost signal, and
             # only a level that should clear the floor through this attenuator.
@@ -389,7 +578,7 @@ def cmd_check(args):
     cfg = msp.vtx_config()
     print("FC:", json.dumps(cfg))
     table = msp.power_levels()
-    print(f"VTX table, {args.attn:g} dB attenuator, limit {args.max_mw:g} mW at the meter:")
+    print(f"VTX table, {args.attn:g} dB attenuator, limit {args.max_mw:.3g} mW at the meter:")
     print(describe_table(table, args.max_mw, args.attn))
     status = 0
     try:
@@ -402,11 +591,14 @@ def cmd_check(args):
     if not cfg["ready"]:
         print("VTX not ready (off?). A SmartAudio VTX's table can change when it comes up; "
               "the sweep reads it again then.")
-    meter = Meter(args.meter)
-    print("Meter:", meter.version())
-    for f in (5650, 5800, 5950):
-        meter.set_freq(f)
-        print(f"  {f} MHz: {meter.read(5, args.settle)[0]:.2f} dBm")
+    meter = open_meter(args)
+    try:
+        print("Meter:", meter.version())
+        for f in (meter.points(mhz)[0] for mhz in (RACEBAND[0], RACEBAND[4], RACEBAND[7])):
+            meter.set_freq(f)
+            print(f"  {f} MHz: {meter.read(5, args.settle)[0]:.2f} dBm")
+    finally:
+        meter.close()
     return status
 
 
@@ -442,8 +634,12 @@ def cmd_sweep(args):
         raise SystemExit(f"{jsonl} exists")
 
     msp = Msp(args.fc)
-    meter = Meter(args.meter)
-    print("Meter:", meter.version(), file=sys.stderr)
+    try:
+        meter = open_meter(args)
+        print("Meter:", meter.version(), file=sys.stderr)
+    except (SafetyAbort, OSError, TimeoutError) as e:
+        print(f"ABORT: {e}", file=sys.stderr)
+        return 1
     guard = Guard(meter, args.max_mw)
     cfg = msp.vtx_config()
     vtx = Vtx(msp, args, cfg)
@@ -459,12 +655,12 @@ def cmd_sweep(args):
             vtx.leave()
             floors = {}
             if cfg["ready"]:
-                print(f"The VTX is already on: no floor measurement, using {DEFAULT_FLOOR_DBM:g} dBm.", file=sys.stderr)
+                print(f"The VTX is already on: no floor measurement, using {meter.default_floor_dbm:g} dBm.", file=sys.stderr)
             else:
                 print("Meter floor, VTX off:", file=sys.stderr)
                 floors = measure_floor(meter, args.channels, args.reads, args.settle)
                 if msp.vtx_config()["ready"]:
-                    print(f"The VTX came up during the floor measurement: discarded, using {DEFAULT_FLOOR_DBM:g} dBm.",
+                    print(f"The VTX came up during the floor measurement: discarded, using {meter.default_floor_dbm:g} dBm.",
                           file=sys.stderr)
                     floors = {}
                 wait_ready(args, msp, guard)
@@ -474,7 +670,8 @@ def cmd_sweep(args):
             vtx.leave()  # the table may have a new lowest level
             confirm_plan(args, vtx, table)
             header = dict(rec="header", t=time.time(), attn_db=args.attn, max_mw=args.max_mw, table=table,
-                          floors={str(f): v for f, v in floors.items()}, meter=meter.version())
+                          floors={str(f): v for f, v in floors.items()}, meter=meter.version(), meter_name=meter.name,
+                          title=args.title)
             out.write(json.dumps(header) + "\n")
             out.flush()
             run_steps(args, vtx, guard, floors, out)
@@ -494,8 +691,12 @@ def cmd_sweep(args):
                 for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                     signal.signal(sig, signal.SIG_IGN)
                 status = leave_low(vtx, guard) or status
+            try:
+                meter.close()
+            except Exception as e:  # noqa: BLE001: the VTX comes first, and the report still gets written
+                print(f"WARNING: closing the meter: {e}", file=sys.stderr)
     if jsonl.stat().st_size:
-        report(jsonl)
+        report(jsonl, args.title, args.output_w)
     else:
         jsonl.unlink()
     return status
@@ -512,18 +713,19 @@ def load(jsonl):
     return header, steps
 
 
-def report(jsonl):
+def report(jsonl, title=None, width=DEFAULT_OUTPUT_W):
     jsonl = Path(jsonl)
     header, steps = load(jsonl)
+    title = title or (header or {}).get("title") or DEFAULT_TITLE
     levels = sorted({(s["nominal_mw"], s["label"]) for s in steps})
     channels = sorted({s["mhz"] for s in steps})
     if not steps:
         print("No steps measured: no table or graph.", file=sys.stderr)
         return
     write_csv(jsonl.with_suffix(".csv"), steps)
-    md = table_markdown(header, steps, levels, channels)
+    md = table_markdown(header, steps, levels, channels, title)
     jsonl.with_suffix(".md").write_text(md)
-    write_graph(jsonl.with_suffix(".png"), header, steps, levels, channels)
+    write_graph(jsonl.with_suffix(".png"), header, steps, levels, channels, title, width)
     print(md)
     print(f"Wrote {jsonl.with_suffix('.md')}, {jsonl.with_suffix('.csv')}, {jsonl.with_suffix('.png')}", file=sys.stderr)
 
@@ -544,13 +746,14 @@ def write_csv(path, steps):
                         int(s.get("near_floor", False)), int(over), int(not over and not s.get("settled", True))])
 
 
-def table_markdown(header, steps, levels, channels):
+def table_markdown(header, steps, levels, channels, title):
     cells = {(s["mhz"], s["label"]): s for s in steps}
-    lines = ["# VTX output by channel and power level", ""]
+    lines = [f"# {title}", ""]
     if header:
         lines += [f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(header['t']))}. "
                   f"{header['attn_db']:g} dB attenuator. Values are the VTX's output (the meter's reading plus the attenuator). "
-                  f"Limit {header['max_mw']:g} mW at the meter.", ""]
+                  f"Limit {header['max_mw']:.3g} mW at the meter."
+                  + (" Measured on a widscan58: about +/- 1 dB." if header.get("meter_name") == "widscan58" else ""), ""]
     lines += ["| Channel | MHz | " + " | ".join(level_name(*lv) for lv in levels) + " |",
               "|---|---:|" + "---:|" * len(levels)]
     near = over = unsettled = False
@@ -587,12 +790,13 @@ SURFACE, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 Y_TICKS = [1, 2, 5, 10, 25, 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800]
 
 
-def write_graph(path, header, steps, levels, channels):
+def write_graph(path, header, steps, levels, channels, title, width):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(9.5, 5.4), dpi=150, facecolor=SURFACE)
+    # The layout stays the same at any width; a hair over, as the pixel count is rounded down.
+    fig, ax = plt.subplots(figsize=(GRAPH_W_IN, 5.4), dpi=(width + 0.01) / GRAPH_W_IN, facecolor=SURFACE)
     ax.set_facecolor(SURFACE)
     x = {mhz: i for i, mhz in enumerate(channels)}
     measured = [s for s in steps if not s.get("over") and s.get("settled", True)]
@@ -628,7 +832,7 @@ def write_graph(path, header, steps, levels, channels):
     if limit is not None and limit <= max(values) * 2:
         values.append(limit)
         ax.axhline(limit, color=INK, lw=1.0, ls=":", zorder=2)
-        ax.annotate(f"Limit: {limit:g} mW at the VTX, {header['max_mw']:g} mW at the meter", (0, limit),
+        ax.annotate(f"Limit: {limit:.3g} mW at the VTX, {header['max_mw']:.3g} mW at the meter", (0, limit),
                     xycoords=("axes fraction", "data"), xytext=(4, 3), textcoords="offset points", fontsize=8.5, color=INK2)
     lo, hi = min(values) / 1.25, max(values) * 1.25
     ax.set_ylim(lo, hi)
@@ -652,7 +856,7 @@ def write_graph(path, header, steps, levels, channels):
         note = f"{header['attn_db']:g} dB attenuator, added back. " + note
     if left_out:
         note += f" {left_out} unsettled left out."
-    fig.suptitle("VTX output by channel and power level", x=0.02, y=0.975, ha="left", fontsize=13, color=INK)
+    fig.suptitle(title, x=0.02, y=0.975, ha="left", fontsize=13, color=INK)
     fig.text(0.02, 0.905, note, fontsize=8.5, color=INK2)
     if len(levels) >= 2:
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=len(levels), frameon=False,
@@ -674,15 +878,21 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fc", default=find_port("Betaflight", "STM32"), help="flight controller (MSP)")
     ap.add_argument("--meter", default=find_port("ImmersionRC"))
-    ap.add_argument("--max-mw", type=float, default=500.0, help="power limit at the meter's input, after the attenuator")
+    ap.add_argument("--max-mw", type=float, help="power limit at the meter's input, after the attenuator "
+                    "(default 500; with --widscan58 0.316, -5 dBm, and no higher)")
     ap.add_argument("--settle", type=float, help="seconds after a meter frequency change (default 0.7; --quick 0.3)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--attn", type=float, default=0.0, help="dB of attenuator before the meter (default 0); "
-                        "reported values have it added back")
+    common.add_argument("--attn", type=float, help="dB of attenuator before the meter (default 0; required with "
+                        "--widscan58); reported values have it added back")
     common.add_argument("--partial", action="store_true", help="skip table levels too high for the attenuator, instead of an error")
+    common.add_argument("--widscan58", action="store_true", help="measure on a widscan58 board instead of the RF power meter")
+    common.add_argument("--widscan58-port", default=find_port("Espressif"), help="the widscan58's port")
+    output = argparse.ArgumentParser(add_help=False)
+    output.add_argument("--title", help=f'table and graph title (default "{DEFAULT_TITLE}")')
+    output.add_argument("--output-w", type=int, default=DEFAULT_OUTPUT_W, help=f"graph width in pixels (default {DEFAULT_OUTPUT_W})")
     sub.add_parser("check", parents=[common])
-    s = sub.add_parser("sweep", parents=[common])
+    s = sub.add_parser("sweep", parents=[common, output])
     s.add_argument("-o", "--output", help="output path without extension (default tmp/vtxpower/<date>-<time>)")
     s.add_argument("--channels", type=channels_arg, default=RACEBAND, help="MHz, comma separated (default Raceband)")
     s.add_argument("--quick", action="store_true", help="cut the script's own waiting; noisier readings")
@@ -693,20 +903,34 @@ def main():
     s.add_argument("--ready-timeout", type=float, default=240.0, help="seconds to wait for the VTX to come up")
     s.add_argument("--table-wait", type=float, default=2.0, help="seconds from VTX ready to reading its table")
     s.add_argument("--yes", action="store_true", help="start without asking, once the plan is printed")
-    r = sub.add_parser("report")
+    r = sub.add_parser("report", parents=[output])
     r.add_argument("jsonl")
     args = ap.parse_args()
     for name, value in (QUICK_TIMING if getattr(args, "quick", False) else TIMING).items():
         if getattr(args, name, value) is None:  # an option this command has, not given
             setattr(args, name, value)
 
+    if getattr(args, "output_w", 1) <= 0:
+        ap.error("--output-w must be above 0")
     if args.cmd == "report":
-        report(args.jsonl)
+        report(args.jsonl, args.title, args.output_w)
         return 0
+    if args.widscan58:
+        if args.attn is None or args.attn <= 0:
+            ap.error("--widscan58 has no attenuator of its own: --attn with the attenuator's dB is required")
+        input_max = dbm_to_mw(WIDSCAN58_MAX_DBM)
+        if args.max_mw is None:
+            args.max_mw = input_max
+        elif args.max_mw > input_max:
+            ap.error(f"--widscan58 reads up to {WIDSCAN58_MAX_DBM:g} dBm: --max-mw can't be over {input_max:.3g}")
+    else:
+        args.attn = 0.0 if args.attn is None else args.attn
+        args.max_mw = 500.0 if args.max_mw is None else args.max_mw
     if args.attn < 0:
         ap.error("--attn can't be negative")
-    if not args.fc or not args.meter:
-        ap.error(f"port not found (--fc {args.fc}, --meter {args.meter})")
+    meter_port = args.widscan58_port if args.widscan58 else args.meter
+    if not args.fc or not meter_port:
+        ap.error(f"port not found (--fc {args.fc}, meter {meter_port})")
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, on_signal)
     if args.cmd == "check":

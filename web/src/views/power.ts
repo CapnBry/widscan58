@@ -58,7 +58,7 @@ export class PowerWarning implements View {
       el(
         "p",
         { class: "muted" },
-        `The ESP can read from about −32 dBm to ${dbmText(INPUT_MAX_DBM)} dBm. ` +
+        `The ESP can read from about −28 dBm to ${dbmText(INPUT_MAX_DBM)} dBm. ` +
           "" +
           "Note that many attenuators misreport their power reduction-- take the reported power " +
           "as simply a relative power reading for your measurement setup.",

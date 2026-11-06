@@ -45,7 +45,7 @@ export const CALIBRATION: Record<string, [number, number][]> = {
 };
 
 /** Measured range at the board's input: the noise floor in the window is
- *  about -32 dBm; the strongest input measured without compression -5.4 dBm. */
+ *  about -28 dBm; the strongest input measured without compression -5.4 dBm. */
 export const INPUT_MAX_DBM = -5;
 
 export interface Offset {

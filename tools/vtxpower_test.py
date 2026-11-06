@@ -12,6 +12,7 @@ import csv
 import math
 import os
 import pty
+import re
 import select
 import signal
 import struct
@@ -22,10 +23,13 @@ import threading
 import time
 import tty
 import unittest
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+
+import widscan58cli as w  # noqa: E402
 METER_FREQS = [35, 72, 433, 868, 900, 1200, 2400] + list(range(5600, 6001, 50))
 STARTUP = [("25", 14), ("100", 20)]
 FULL = [("25", 14), ("100", 20), ("400", 26)]
@@ -162,6 +166,74 @@ class Sim:
 
     def close(self):
         self.stop = True
+
+
+C5_OFFSETS = dict(zip(RACEBAND, [27.4, 27.3, 26.8, 26.1, 25.9, 25.3, 25.2, 26.1]))
+
+
+class C5Sim(Sim):
+    """A widscan58 in place of the meter: the real text commands and CRC-checked metrics frames."""
+
+    def __init__(self, *args, profile="c5-race", floor=-28.0, **kw):
+        self.commands = []
+        self.profile = profile
+        self.mhz, self.gain = 5658, 45
+        self.monitor = self.scanning = False
+        self.streaming = True
+        self.clip_level = None  # this level's captures clip
+        self.seq = 0
+        super().__init__(*args, floor=floor, **kw)
+
+    def run_meter(self):
+        os.set_blocking(self.meter.master, False)
+        buf = b""
+        while not self.stop:
+            r, _, _ = select.select([self.meter.master], [], [], 0.003)
+            if r:
+                buf += os.read(self.meter.master, 256)
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    self.command(line.decode().strip())
+            if self.monitor and self.scanning and self.streaming:
+                self.emit(self.frame())
+
+    def emit(self, data):
+        try:
+            os.write(self.meter.master, data)
+        except BlockingIOError:
+            pass  # nobody reading
+
+    def command(self, line):
+        self.commands.append(line)
+        if line == "PROFILE?":
+            self.emit(f'PROFILE {{"name":"{self.profile}"}}\n'.encode())
+            return
+        if line == "INFO":
+            self.emit(b"INFO widscan58|esp32c5|1|test\n")
+            return
+        if line.startswith("CHANNELS X="):
+            self.mhz = int(line.split("=")[1])
+        elif line.startswith("GAIN MANUAL "):
+            self.gain = int(line.split()[2])
+        elif line == "SCAN START":
+            self.scanning = True
+        elif line == "PROTOCOL MONITOR":
+            self.monitor = True
+        elif line == "PROTOCOL RH":
+            self.monitor = self.scanning = False
+        self.emit(b"OK\n")
+
+    def frame(self):
+        self.seq += 1
+        mw = self.output_mw() if abs(self.freq - self.mhz) <= 15 and not self.cable_off else 0.0
+        sig = 10 ** ((10 * math.log10(mw) - self.atten) / 10) if mw > 0 else 0.0
+        dbm = 10 * math.log10(sig + 10 ** (self.floor / 10))
+        rssi = round((dbm - C5_OFFSETS.get(self.mhz, 26.0)) * 100)
+        sat = 100 if self.power == self.clip_level and sig else 0
+        payload = w.METRICS_HDR.pack(self.seq, 0, (self.mhz - 8) * 1000, 0, 0, 0, sat, 0, 0, self.gain, 0, 1, 1) + \
+            w.CHANNEL.pack(0, 0, rssi, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        head = bytes([0xA5, ord("R"), w.FRAME_METRICS, 1]) + struct.pack("<H", len(payload)) + payload
+        return head + struct.pack("<I", zlib.crc32(head))
 
 
 FAST = ["--step", "0.02", "--measure-at", "0.01", "--reads", "2", "--ready-timeout", "3", "--table-wait", "0.2"]
@@ -306,6 +378,30 @@ class SweepTest(unittest.TestCase):
         self.assertIn("NOT SETTLED", stderr)
         self.assertIn("†", stdout)
         self.assertGreater(self.out.with_suffix(".png").stat().st_size, 10000)
+
+    def png_width(self, path):
+        return struct.unpack(">I", path.read_bytes()[16:20])[0]
+
+    def test_title_and_width(self):
+        """Defaults, then --title and --output-w on a sweep, then report: its own, or the sweep's title."""
+        default = Path(self.dir.name) / "default"
+        code, stdout, stderr = self.sweep(Sim(), "-o", str(default), "--channels", "5658")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(default.with_suffix(".md").read_text().splitlines()[0], "# VTX output by channel and power level")
+        self.assertEqual(self.png_width(default.with_suffix(".png")), 800)
+        code, stdout, stderr = self.sweep(Sim(), "--channels", "5658", "--title", "My VTX", "--output-w", "640")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.out.with_suffix(".md").read_text().splitlines()[0], "# My VTX")
+        self.assertEqual(self.png_width(self.out.with_suffix(".png")), 640)
+        run = [sys.executable, str(HERE / "vtxpower.py"), "report", str(self.out.with_suffix(".jsonl"))]
+        p = subprocess.run(run, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.out.with_suffix(".md").read_text().splitlines()[0], "# My VTX")
+        self.assertEqual(self.png_width(self.out.with_suffix(".png")), 800)
+        p = subprocess.run(run + ["--title", "Other", "--output-w", "1234"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.out.with_suffix(".md").read_text().splitlines()[0], "# Other")
+        self.assertEqual(self.png_width(self.out.with_suffix(".png")), 1234)
 
     def test_lower_limit(self):
         sim = Sim(on_table=FULL)
@@ -563,7 +659,147 @@ class SweepTest(unittest.TestCase):
         self.assertTrue(self.out.with_suffix(".png").exists())
 
 
+class Widscan58Test(SweepTest):
+    """Only this class's own tests: SweepTest's are for the RF power meter."""
+
+    def c5_run(self, sim, *extra, attn="32", top=()):
+        self.addCleanup(sim.close)
+        attn_args = ["--attn", attn] if attn is not None else []
+        cmd = [sys.executable, str(HERE / "vtxpower.py"), "--fc", sim.fc.path, "--settle", "0.02", *top, "sweep", "--widscan58",
+               "--widscan58-port", sim.meter.path, *attn_args, "-o", str(self.out), "--yes", *FAST, *extra]
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+
+    def test_c5_full_sweep(self):
+        """Every channel and level, reported at the VTX, in the calibration's scan; the board put back."""
+        sim = C5Sim(atten=32)
+        p = self.c5_run(sim)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assert_only_levels(sim, {1, 2, 3})
+        self.assert_left(sim)
+        rows = self.rows()
+        self.assertEqual(len(rows), 24)
+        for r in rows:
+            want = float(r["nominal_mw"]) * 0.8
+            self.assertAlmostEqual(float(r["mw"]), want, delta=want * 0.05, msg=str(r))
+            # The raw reading still has the noise floor in it: 0.5 dB at the lowest level here.
+            self.assertAlmostEqual(float(r["meter_dbm"]), float(r["dbm"]) - 32, delta=0.6, msg=str(r))
+        for line in ("MODE SINGLE", "GAIN MANUAL 0", "WIN 15000000 15000000", "METRICS FULL", "SPEC 0 256 40000000 MAX"):
+            self.assertIn(line, sim.commands)
+        self.assertEqual(sim.commands[-6:], ["CHANNELS DEFAULT", "MODE GROUP", "GAIN MANUAL 45", "WIN 5000000 12000000",
+                                             "SPEC 4 256 40000000 MAX", "PROTOCOL RH"])
+        self.assertIn("Measured on a widscan58", p.stdout)
+
+    def test_c5_needs_attn(self):
+        """No --attn, or 0: refused before anything is sent."""
+        for attn in (None, "0"):
+            with self.subTest(attn=attn):
+                sim = C5Sim(atten=32)
+                p = self.c5_run(sim, attn=attn)
+                self.assertEqual(p.returncode, 2, p.stderr)
+                self.assertIn("--attn", p.stderr)
+                self.assertEqual((sim.sets, sim.commands), ([], []))
+
+    def test_c5_table_limit_is_its_input(self):
+        """400 mW through 30 dB is -4 dBm at the board: an error naming 31 dB; --partial skips it."""
+        sim = C5Sim(atten=30)
+        p = self.c5_run(sim, attn="30")
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("needs 31.0 dB", p.stderr)
+        self.assert_only_levels(sim, {1})
+        self.assert_left(sim)
+        sim = C5Sim(atten=30)
+        p = self.c5_run(sim, "--partial", "--channels", "5658,5917", attn="30")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assert_only_levels(sim, {1, 2})
+
+    def test_c5_max_mw_only_lower(self):
+        sim = C5Sim(atten=32)
+        p = self.c5_run(sim, top=["--max-mw", "1"])
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertEqual(sim.sets, [])
+
+    def test_c5_reading_over_limit(self):
+        """A VTX far above its label: dropped at -5 dBm at the board, and that level stays off."""
+        sim = C5Sim(atten=32, true_mw=lambda i, f: {1: 20, 2: 80, 3: 1000}[i])
+        p = self.c5_run(sim, "--channels", "5658,5917")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("over the limit", p.stderr)
+        self.assertEqual(sum(1 for _, pw in sim.sets if pw == 3), 1)
+        self.assert_left(sim)
+
+    def test_c5_clipping_is_over_limit(self):
+        """Clipped captures can read low: they count as over, whatever level they report."""
+        sim = C5Sim(atten=32)
+        sim.clip_level = 3
+        p = self.c5_run(sim, "--channels", "5658,5917")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("over the limit", p.stderr)
+        self.assertEqual(sum(1 for _, pw in sim.sets if pw == 3), 1)
+
+    def test_c5_frames_stop(self):
+        """The board stops sending mid-sweep: abort, with the VTX left low."""
+        sim = C5Sim(atten=32)
+        threading.Thread(target=lambda: (self._wait(lambda: len(sim.sets) >= 4), setattr(sim, "streaming", False)),
+                         daemon=True).start()
+        p = self.c5_run(sim, "--step", "0.2")
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("no readings", p.stderr)
+        self.assert_left(sim)
+
+    def _wait(self, condition):
+        deadline = time.time() + 30
+        while not condition() and time.time() < deadline:
+            time.sleep(0.005)
+
+    def test_c5_cable_off(self):
+        sim = C5Sim(atten=32)
+        sim.cable_off = True
+        p = self.c5_run(sim)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("no signal", p.stderr)
+        self.assert_only_levels(sim, {1})
+
+    def test_c5_wrong_profile(self):
+        """An S3 has no power calibration: refused, and the VTX isn't touched."""
+        sim = C5Sim(atten=32, profile="s3-race24")
+        p = self.c5_run(sim)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("s3-race24", p.stderr)
+        self.assertEqual(sim.sets, [])
+
+    def test_c5_uncalibrated_channel(self):
+        sim = C5Sim(atten=32)
+        p = self.c5_run(sim, "--channels", "5600")
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("calibration", p.stderr)
+        self.assertEqual(sim.sets, [])
+
+    def test_c5_check(self):
+        """check changes nothing on the VTX, puts the board back, and reports a table too high."""
+        sim = C5Sim(atten=32, off_table=WITH_MAX, power_up_after=None)
+        self.addCleanup(sim.close)
+        cmd = [sys.executable, str(HERE / "vtxpower.py"), "--fc", sim.fc.path, "--settle", "0.02", "check", "--widscan58",
+               "--widscan58-port", sim.meter.path, "--attn", "32"]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("too high", p.stderr)
+        self.assertEqual(sim.sets, [])
+        self.assertEqual(sim.commands[-1], "PROTOCOL RH")
+
+
+# SweepTest's tests run once, not again under Widscan58Test.
+for _name in [n for n in dir(SweepTest) if n.startswith("test_")]:
+    setattr(Widscan58Test, _name, None)
+
+
 class UnitTest(unittest.TestCase):
+    def test_widscan58_calibration_matches_the_web_ui(self):
+        from vtxpower import WIDSCAN58_CAL, WIDSCAN58_MAX_DBM
+        src = (HERE.parent / "web/src/model/power.ts").read_text()
+        block = re.search(r'"c5-race": \[(.*?)\n  \],', src[src.index("CALIBRATION"):], re.S)[1]
+        self.assertEqual([(int(a), float(b)) for a, b in re.findall(r"\[(\d+), ([\d.]+)\]", block)], WIDSCAN58_CAL)
+        self.assertEqual(float(re.search(r"INPUT_MAX_DBM = (-?[\d.]+)", src)[1]), WIDSCAN58_MAX_DBM)
+
     def test_send_refuses_a_level_off_the_list(self):
         """The last check before the FC, whatever a bug upstream asks for."""
         from argparse import Namespace

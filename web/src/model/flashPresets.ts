@@ -20,7 +20,7 @@ export const FLASH_PRESETS: FlashPreset[] = [
   { name: "None", group: "Basic", commands: [] },
   { name: "Erase flash", group: "Basic", eraseFlash: true, commands: [] },
   { name: "Espressif C5 DevKit", group: "Hardware", commands: [...CLEAR, "GPIO 27 WS2812", "GPIO SAVE"] },
-  { name: "Seeed XIAO C5", group: "Hardware", commands: [...CLEAR, "GPIO 27 LED", "GPIO SAVE"] },
+  { name: "Seeed Studio XIAO C5", group: "Hardware", commands: [...CLEAR, "GPIO 27 LED", "GPIO SAVE"] },
   {
     name: "Waveshare C5 Mini - Builtin Antenna",
     group: "Hardware",

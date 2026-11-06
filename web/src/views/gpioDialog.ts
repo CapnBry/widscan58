@@ -77,8 +77,7 @@ export class GpioDialog {
       el(
         "p",
         {},
-        "LED and WS2812 show the status on one LED each: blinking when not scanning, on when scanning. " +
-          "In lap timer mode the WS2812 turns red while a seat is between its EnterAt and ExitAt levels.",
+        "LED and WS2812 show the status on one LED each.",
       ),
       this.status,
       this.tabs,

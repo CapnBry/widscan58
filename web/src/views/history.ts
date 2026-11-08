@@ -2,7 +2,8 @@
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
 import { smoothedSeries, type ChannelState } from "../model/store";
-import { axes, channelColor, drawGrid, el, prepare, theme } from "../util/canvas";
+import { isIsmProfile } from "../model/channelPlan";
+import { axes, channelColor, drawGrid, drawNotice, el, ISM_NOTICE, prepare, theme } from "../util/canvas";
 
 export class History implements View {
   el: HTMLElement;
@@ -51,6 +52,13 @@ export class History implements View {
     const p = store.profile;
     const s = prepare(this.canvas);
     if (!p) return;
+    if (isIsmProfile(p)) {
+      this.tip.style.display = "none";
+      this.legend.replaceChildren();
+      this.legendFor = store.planKey;
+      drawNotice(s, ISM_NOTICE);
+      return;
+    }
     const legendKey = store.planKey;
     if (this.legendFor !== legendKey) {
       this.legendFor = legendKey;

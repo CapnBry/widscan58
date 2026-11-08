@@ -352,6 +352,13 @@ button.icon { display: inline-flex; align-items: center; justify-content: center
 .spec-hump:disabled .spec-label { opacity: 0.45; cursor: default; }
 .spec-guides { position: absolute; left: var(--band-w); right: 0; top: 22px; bottom: 0; pointer-events: none; }
 .spec-guide { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--accent); opacity: 0.55; }
+/* The 2.4 GHz band: as wide as the band rows, its name on the left and the
+ * detail centered in the rest. */
+.plan-ism { margin-top: 10px; }
+.plan-ism-btn { display: flex; align-items: center; gap: 10px; width: 100%; }
+.plan-ism-btn b { flex: none; }
+.plan-ism-btn span { flex: 1; text-align: center; font-size: 11px; color: var(--muted); }
+.plan-ism-btn.on span { color: inherit; }
 .plan-buttons { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .plan-buttons .spacer { flex: 1; }
 .plan-count { color: var(--muted); }

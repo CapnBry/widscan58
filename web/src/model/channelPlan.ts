@@ -20,7 +20,21 @@ export const BANDS: Band[] = [
 /** The firmware scans at most this many channels. */
 export const MAX_CHANNELS = 8;
 
-/** Frequency (MHz) of a channel name such as "R1", or undefined. */
+/** The whole 2.4 GHz ISM band as one plan entry (ESP32-C5 only): sampled as
+ *  it is, on two LOs (2420 and 2460 MHz), with no channel measured; only the
+ *  panorama and waterfall show it. It is always alone in a plan. */
+export const ISM_CHANNEL = "2G4";
+export const ISM_MHZ = 2440;
+/** The firmware's ISM range (profile.c, ism_lo_khz..ism_hi_khz). */
+export const isIsmKhz = (khz: number) => khz >= 2400000 && khz <= 2500000;
+/** A plan (channel names) that scans the 2.4 GHz band. */
+export const isIsmPlan = (names: string[]) => names.includes(ISM_CHANNEL);
+/** A device profile (PROFILE?) whose channel plan scans the 2.4 GHz band. The
+ *  S3's scaled profile (scale < 1) has every channel in 2.4 GHz and no ISM band. */
+export const isIsmProfile = (p: { scale: number; channels: { khz: number }[] } | null | undefined) =>
+  !!p && p.scale === 1 && p.channels.some((c) => isIsmKhz(c.khz));
+
+/** Frequency (MHz) of a 5.8 GHz channel name such as "R1", or undefined (also for ISM_CHANNEL). */
 export function channelMhz(name: string): number | undefined {
   const band = BANDS.find((b) => b.letter === name[0]);
   const n = Number(name.slice(1));
@@ -28,16 +42,18 @@ export function channelMhz(name: string): number | undefined {
 }
 
 /** Known names only, no duplicates, at most MAX_CHANNELS, sorted by frequency
- *  (ties keep chart order) so channel ids run up the band like the panorama. */
+ *  (ties keep chart order) so channel ids run up the band like the panorama.
+ *  ISM_CHANNEL anywhere makes the plan that alone. */
 export function normalizePlan(names: string[]): string[] {
+  if (isIsmPlan(names)) return [ISM_CHANNEL];
   const order = BANDS.flatMap((b) => b.mhz.map((_, j) => `${b.letter}${j + 1}`));
   const known = [...new Set(names)].filter((n) => channelMhz(n) !== undefined).slice(0, MAX_CHANNELS);
   return known.sort((a, b) => channelMhz(a)! - channelMhz(b)! || order.indexOf(a) - order.indexOf(b));
 }
 
-/** CHANNELS command for a plan: each channel by its 5.8 GHz frequency. */
+/** CHANNELS command for a plan: each channel by its 5.8 GHz frequency, or the ISM band. */
 export function channelsCommand(names: string[]): string {
-  return `CHANNELS ${names.map((n) => `${n}=${channelMhz(n)}`).join(" ")}`;
+  return `CHANNELS ${names.map((n) => `${n}=${n === ISM_CHANNEL ? ISM_MHZ : channelMhz(n)}`).join(" ")}`;
 }
 
 export interface DeviceSettings {

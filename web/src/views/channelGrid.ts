@@ -4,7 +4,7 @@ import type { App, View } from "../model/app";
 import { smoothedSeries } from "../model/store";
 import { CHF } from "../proto/frames";
 import { channelColor, el, prepare, theme } from "../util/canvas";
-import { channelsCommand } from "../model/channelPlan";
+import { channelsCommand, isIsmProfile } from "../model/channelPlan";
 import { ChannelPlanDialog } from "./channelPlanDialog";
 
 interface Tile {
@@ -131,6 +131,7 @@ export class ChannelGrid implements View {
         `${st.plan.length} hop${st.plan.length === 1 ? "" : "s"} per rotation · ` + (st.mode === "GROUP" ? "grouped LOs" : "one LO per channel");
     const now = performance.now();
     const t = theme();
+    const ism = isIsmProfile(p);
     p.channels.forEach((c, id) => {
       const tile = this.tiles[id];
       const cs = store.channels[id];
@@ -140,7 +141,7 @@ export class ChannelGrid implements View {
       tile.root.classList.toggle("selected", this.app.settings.selected === id);
       tile.key.style.background = channelColor(id);
       tile.name.textContent = this.app.channelName(id);
-      tile.freq.textContent = `${Math.round(c.khz / 1000)} MHz`;
+      tile.freq.textContent = ism ? "2400–2480 MHz · whole band" : `${Math.round(c.khz / 1000)} MHz`;
       const m = cs?.latest;
       const stale = !!m && now - cs.updated > 1000;
       if (!m) {

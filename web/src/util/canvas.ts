@@ -73,6 +73,19 @@ export function prepare(canvas: HTMLCanvasElement): Surface {
   return { ctx, w, h };
 }
 
+/** A centered note on an empty chart, e.g. why it shows nothing. */
+export function drawNotice(s: Surface, text: string) {
+  const ctx = s.ctx;
+  ctx.fillStyle = theme().muted;
+  ctx.font = "13px system-ui";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, s.w / 2, s.h / 2);
+}
+
+/** The notice on the per-channel charts while the plan scans the 2.4 GHz band. */
+export const ISM_NOTICE = "Disabled in 2.4 GHz mode: see the panorama and waterfall";
+
 export function niceStep(range: number, target: number): number {
   const raw = range / Math.max(1, target);
   const mag = 10 ** Math.floor(Math.log10(raw));

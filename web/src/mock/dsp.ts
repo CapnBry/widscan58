@@ -25,7 +25,12 @@ export interface ProfileDef {
   loStepKhz: number;
   channels: { name: string; khz: number }[];
   spursKhz: number[];
+  /** 2.4 GHz ISM band (profile.c ism_*): a channel in it makes the plan these LOs, none measured. */
+  ismKhz?: [number, number];
+  ismLosKhz?: number[];
 }
+
+export const isIsm = (p: ProfileDef, khz: number) => !!p.ismKhz && khz >= p.ismKhz[0] && khz <= p.ismKhz[1];
 
 export interface Hop {
   loKhz: number;
@@ -64,6 +69,7 @@ function placeLo(p: ProfileDef, khz: number[]): number {
 
 export function planBuild(p: ProfileDef, channels: { khz: number }[], mask: number, group: boolean): Hop[] {
   const order = channels.map((c, i) => ({ i, khz: c.khz })).filter((c) => mask & (1 << c.i));
+  if (order.some((c) => isIsm(p, c.khz))) return (p.ismLosKhz ?? []).map((loKhz) => ({ loKhz, ch: [], offsetHz: [] }));
   order.sort((a, b) => a.khz - b.khz);
   const hops: Hop[] = [];
   for (let j = 0; j < order.length; ) {

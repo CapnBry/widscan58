@@ -637,6 +637,27 @@ static void test_plan_groups(void) {
     TEST_ASSERT_EQUAL(2, plan.hop[0].nch);
 }
 
+/* A 2.4 GHz ISM channel: the profile's two ISM LOs, no channels measured,
+ * in either mode; the S3's scaled profile has no ISM band. */
+static void test_plan_ism(void) {
+    const profile_t *p = profile_default("esp32c5");
+    profile_channel_t ch[1] = {{"2G4", 2440000}};
+    TEST_ASSERT_TRUE(profile_is_ism(p, 2440000));
+    TEST_ASSERT_FALSE(profile_is_ism(p, 5658000));
+    plan_t plan;
+    for (int mode = PLAN_GROUP; mode <= PLAN_SINGLE; mode++) {
+        plan_build(p, ch, 1, 0x1, (plan_mode_t)mode, &plan);
+        TEST_ASSERT_EQUAL_UINT(2, plan.nhops);
+        TEST_ASSERT_EQUAL_UINT32(2420000, plan.hop[0].lo_khz);
+        TEST_ASSERT_EQUAL_UINT32(2460000, plan.hop[1].lo_khz);
+        TEST_ASSERT_EQUAL_UINT(0, plan.hop[0].nch);
+        TEST_ASSERT_EQUAL_UINT(0, plan.hop[1].nch);
+    }
+    plan_build(p, ch, 1, 0x0, PLAN_GROUP, &plan);
+    TEST_ASSERT_EQUAL_UINT(0, plan.nhops);
+    TEST_ASSERT_FALSE(profile_is_ism(profile_default("esp32s3"), 2440000));
+}
+
 static void test_profile_equiv(void) {
     const profile_t *p = profile_default("esp32s3");
     uint32_t khz;
@@ -675,6 +696,7 @@ int main(void) {
     RUN_TEST(test_lap_ema);
     RUN_TEST(test_plan_default_raceband);
     RUN_TEST(test_plan_groups);
+    RUN_TEST(test_plan_ism);
     RUN_TEST(test_profile_equiv);
     RUN_TEST(test_led_color);
     return UNITY_END();

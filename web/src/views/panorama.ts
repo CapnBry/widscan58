@@ -1,6 +1,7 @@
 // Band panorama (stitched spectrum of every LO segment) and waterfall.
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
+import { isIsmProfile } from "../model/channelPlan";
 import type { Segment } from "../model/store";
 import { axes, channelColor, drawGrid, el, prepare, seqLut, theme, type Axes } from "../util/canvas";
 
@@ -206,13 +207,15 @@ export class Panorama implements View {
     this.lastAxes = a;
     const ctx = s.ctx;
     const st = store.status;
+    // The 2.4 GHz band's plan entry is no channel: nothing to mark.
+    const chans = isIsmProfile(p) ? [] : p.channels;
     // Channel windows first, so traces draw over them. Clipped to the plot:
     // disabled channels can lie outside the scanned span.
     ctx.save();
     ctx.beginPath();
     ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top);
     ctx.clip();
-    p.channels.forEach((c, id) => {
+    chans.forEach((c, id) => {
       const enabled = st ? (st.enabled & (1 << id)) !== 0 : true;
       const rssi = (st?.rssi_hz ?? p.rssi_hz) / 1000;
       const search = (st?.search_hz ?? p.search_hz) / 1000;
@@ -233,7 +236,7 @@ export class Panorama implements View {
     ctx.font = "600 11px system-ui";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    p.channels.forEach((c, id) => {
+    chans.forEach((c, id) => {
       if (c.khz < f0 || c.khz > f1) return;
       ctx.fillStyle = t.ink2;
       ctx.fillText(app.channelName(id), a.sx(c.khz), a.top + 2);
@@ -296,7 +299,7 @@ export class Panorama implements View {
     const i = Math.max(0, Math.min(n - 1, Math.floor(((this.hoverX - a.left) / (a.right - a.left)) * n)));
     const khz = a.ix(this.hoverX);
     const p = this.app.store.profile!;
-    const chId = p.channels.findIndex((c) => Math.abs(c.khz - khz) <= p.search_hz / 1000);
+    const chId = isIsmProfile(p) ? -1 : p.channels.findIndex((c) => Math.abs(c.khz - khz) <= p.search_hz / 1000);
     const fmt = (v: number) => (Number.isNaN(v) ? "—" : `${v.toFixed(1)} dB`);
     const row = (color: string, value: string, label: string) => {
       const r = el("div", { class: "row" }, el("i", { style: `background:${color}` }), el("b"), el("span"));
@@ -408,7 +411,7 @@ export class Panorama implements View {
     const p = store.profile!;
     s.ctx.textAlign = "center";
     s.ctx.textBaseline = "top";
-    p.channels.forEach((c, id) => {
+    (isIsmProfile(p) ? [] : p.channels).forEach((c, id) => {
       const x = wa.sx(c.khz);
       s.ctx.fillStyle = channelColor(id);
       s.ctx.fillRect(x - 1, wa.bottom, 2, 4);

@@ -4,7 +4,7 @@
 import type { Transport } from "../serial/device";
 import { encodeFrame } from "../serial/parser";
 import { CHF, FRAME_LEVELS, FRAME_METRICS, FRAME_RAWIQ, FRAME_SPECTRUM, FRAME_TELEMETRY, type MetricsMode } from "../proto/frames";
-import { channelMetrics, db, floorEstimate, percentileBias, planBuild, type Hop, type ProfileDef } from "./dsp";
+import { channelMetrics, db, floorEstimate, isIsm, percentileBias, planBuild, type Hop, type ProfileDef } from "./dsp";
 import { LapSeat, type LapFilter } from "./lap";
 import { RH, RH_API_MARKER, checksum } from "../proto/rh";
 
@@ -76,9 +76,14 @@ const c5race: SimProfile = {
     name: `R${i + 1}`,
     khz,
   })),
-  spursKhz: [5600000, 5712000, 5760000, 5920000],
+  spursKhz: [2400000, 2440000, 2448000, 2480000, 2496000, 5600000, 5712000, 5760000, 5920000],
   wifiKhz: [5745000, 5765000, 5785000, 5805000, 5825000],
+  ismKhz: [2400000, 2500000],
+  ismLosKhz: [2420000, 2460000],
 };
+
+// The 2.4 GHz ISM band (C5 only): Wi-Fi channels 1, 6 and 11.
+const ISM_WIFI_KHZ = [2412000, 2437000, 2462000];
 
 export type SimTarget = "c5" | "s3";
 
@@ -209,13 +214,20 @@ export class MockTransport implements Transport {
     this.specSpanHz = p.usableHz;
     this.state.clear();
     const now = performance.now();
-    this.vtx = this.channels.map((_, ch) => ({
+    this.wifi.next = 0;
+    // The ISM band has no VTXs, just Wi-Fi.
+    this.vtx = this.ism() ? [] : this.channels.map((_, ch) => ({
       ch,
       on: ch === 1 || ch === 5,
       powerDb: -22 - Math.random() * 14,
       offsetHz: (Math.random() - 0.5) * 0.6e6 * (p.scale < 1 ? p.scale * 3 : 1),
       nextToggle: now + 4000 + Math.random() * 12000,
     }));
+  }
+
+  /** The plan scans the 2.4 GHz ISM band. */
+  private ism(): boolean {
+    return this.channels.some((c) => isIsm(this.profile, c.khz));
   }
 
   private text(s: string) {
@@ -327,12 +339,15 @@ export class MockTransport implements Transport {
         return ok();
       case parts[0] === "CHANNELS": {
         // Same mapping as the firmware: 5.8 GHz MHz into the profile's band.
+        // A 2.4 GHz ISM channel is taken as it is, and only alone.
         const list = parts.slice(1).map((t) => {
           const [name, mhz] = t.split("=");
-          const khz = Math.round(p.baseKhz + (Number(mhz) * 1000 - p.equivBaseKhz) * p.scale);
-          return /^[A-Za-z0-9]{1,5}$/.test(name ?? "") && khz >= p.tuneLoKhz && khz <= p.tuneHiKhz ? { name, khz } : null;
+          const ism = isIsm(p, Number(mhz) * 1000);
+          const khz = ism ? Number(mhz) * 1000 : Math.round(p.baseKhz + (Number(mhz) * 1000 - p.equivBaseKhz) * p.scale);
+          return /^[A-Za-z0-9]{1,5}$/.test(name ?? "") && (ism || (khz >= p.tuneLoKhz && khz <= p.tuneHiKhz)) ? { name, khz } : null;
         });
-        if (!list.length || list.length > 8 || list.some((c) => !c)) return this.text("ERR channels\n");
+        const nIsm = list.filter((c) => c && isIsm(p, c.khz)).length;
+        if (!list.length || list.length > 8 || list.some((c) => !c) || (nIsm && list.length > 1)) return this.text("ERR channels\n");
         this.channels = list as { name: string; khz: number }[];
         this.enabled = (1 << this.channels.length) - 1;
         this.reset();
@@ -651,9 +666,11 @@ export class MockTransport implements Transport {
       }
     }
     if (now > this.wifi.next) {
-      this.wifi.until = now + 3 + Math.random() * 25;
-      this.wifi.next = now + 30 + Math.random() * 400;
-      const w = this.profile.wifiKhz;
+      const ism = this.ism();
+      // Busier in the ISM band: bursts most of the time.
+      this.wifi.until = now + (ism ? 300 + Math.random() * 2000 : 3 + Math.random() * 25);
+      this.wifi.next = ism ? this.wifi.until + 50 + Math.random() * 400 : now + 30 + Math.random() * 400;
+      const w = ism ? ISM_WIFI_KHZ : this.profile.wifiKhz;
       this.wifi.centerKhz = w[Math.floor(Math.random() * w.length)];
     }
   }

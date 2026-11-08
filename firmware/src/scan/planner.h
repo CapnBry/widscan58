@@ -22,6 +22,8 @@ typedef struct {
 /* Group mode groups enabled channels (sorted by frequency) into as few LOs as
  * possible, each group spanning at most the profile's hop_max_span_khz; the
  * LO goes where its DC spike sits farthest from every channel in the group.
- * Single mode gives each channel its own LO at single_lo_offset_khz. */
+ * Single mode gives each channel its own LO at single_lo_offset_khz.
+ * An enabled 2.4 GHz ISM channel (profile_is_ism) makes the plan the
+ * profile's ISM LOs, with no channels measured, in either mode. */
 void plan_build(const profile_t *p, const profile_channel_t *ch, unsigned nch, uint32_t enabled_mask,
                 plan_mode_t mode, plan_t *out);

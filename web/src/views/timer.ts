@@ -5,9 +5,12 @@ import type { App, View } from "../model/app";
 import type { FastestRun } from "../model/laps";
 import { TIMER_SEATS, type TimerSeat } from "../model/timer";
 import { levelDb, type LevelMetric } from "../proto/rh";
-import { axes, channelColor, drawGrid, el, prepare, theme } from "../util/canvas";
+import { isIsmPlan } from "../model/channelPlan";
+import { axes, channelColor, drawGrid, drawNotice, el, prepare, theme } from "../util/canvas";
 import { ChannelPlanDialog } from "./channelPlanDialog";
 import { TimerEventsDialog } from "./timerEventsDialog";
+
+const ISM_TIMER_NOTICE = "Disabled in 2.4 GHz mode: pick 5.8 GHz channels with Edit channels";
 
 const fmtLevel = (v: number | null, m: LevelMetric) =>
   v === null ? "—" : `${v} (${levelDb(v, m).toFixed(1)} ${m === "RSSI" ? "dBFS" : "dB"})`;
@@ -119,7 +122,9 @@ export class TimerSeats implements View {
     const m = timer.metric;
     const active = timer.seats.filter((s) => s.channel).length;
     const hz = timer.seats.find((s) => s.channel && s.loopUs)?.loopUs;
-    this.status.textContent = !this.app.device
+    this.status.textContent = isIsmPlan(this.app.deviceSettings.channels)
+      ? "disabled in 2.4 GHz mode"
+      : !this.app.device
       ? "not connected"
       : timer.error
         ? `error: ${timer.error}`
@@ -191,6 +196,10 @@ export class TimerGraph implements View {
     const timer = this.app.timer;
     const store = this.app.store;
     const s = prepare(this.canvas);
+    if (isIsmPlan(this.app.deviceSettings.channels)) {
+      drawNotice(s, ISM_TIMER_NOTICE);
+      return;
+    }
     const now = store.now();
     const seats = timer.seats.filter((x) => x.channel);
     const sel = timer.seats[this.app.settings.selected] ?? timer.seats[0];

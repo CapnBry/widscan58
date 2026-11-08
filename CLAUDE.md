@@ -125,6 +125,24 @@ skirt"). The analog filter code (`FILTER`) does not change the ADC rate. The
 web UI's power calibration was made at rate 0; R1–R5 are lowered 0.5 dB for
 it (`CALIBRATION`), an estimate until it is redone.
 
+**2.4 GHz band (C5):** a lone `CHANNELS` entry in the profile's ISM range
+(`ism_lo_khz`/`ism_hi_khz`, 2400–2500 MHz; not mapped like the S3's scaled band)
+makes the plan two LOs, 2420 and 2460 MHz (`ism_los_khz`), each ±40 MHz at 80 MS/s,
+with no channels measured (`nch` 0 in every hop; `planner.c`): spectra only,
+~130 rotations/s at the default FFT. `radio_c5.c` runs a full channel setup on
+every 2.4 GHz tune (the PLL-only retune is 5 GHz only), a band change forces a full
+tune, one calibration at 2440 MHz serves both LOs (`RECALMODE CACHE|ONCE`; the cal
+cache is 5 GHz only), and `adc_path_set` leaves the PHY's own 2.4 GHz ADC rate and
+filter mode. The analog filter is still the profile's (`FILTER 0`): flat to about
+±28 MHz from each LO on hardware (2026-11-07), so the stitched band is flat over
+2395–2485 MHz. Board spurs (in `c5_spurs_khz`, ticks in the panorama; nothing to
+mask, no channels are measured): 2400, 2440, 2480 MHz (40 MHz multiples) and 2448,
+2496 MHz (48 MHz crystal harmonics), 2496 the strongest (~22 dB over the floor in
+19.5 kHz bins, still 15 dB in LO 2460's roll-off); PLAN.md, "2.4 GHz band on the
+C5". No 2.4 GHz power calibration. Lap timer seats stay
+5.8 GHz only. Checked on hardware: a frequency-hopping signal in the 2420–2460 MHz
+overlap shows at the same frequencies from both LOs (not mirrored).
+
 **Host UART (C5 default TX GPIO11, RX GPIO12: UART0's own pins, D6/D7
 on the XIAO; not strapping pins):** UART0 at 921600 baud 8N1 mirrors the USB
 port's protocol, both modes, so a host such as a Raspberry Pi reaches the
@@ -264,7 +282,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | Command | Purpose |
 |---|---|
 | `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration (including `rawiq_max`), band profile, DSP time breakdown, masked board spurs |
-| `CHANNELS <name>=<MHz> …`, `CHANNELS DEFAULT` | Channel plan: up to 8 channels by their 5.8 GHz frequency, e.g. `CHANNELS R1=5658 A8=5725`. The C5 takes 5345–5945 MHz (`tune_lo_khz`/`tune_hi_khz` in `profile.c`: bands A, B, E, F, R and low band L, 5362–5621 MHz; L is untested on hardware and has no spur list or power calibration); the S3 maps them into its scaled band, which has no room for L. The web UI's panorama spans the LO segments scanned (`bandRange`, `views/panorama.ts`; `band_khz`, 5645–5945 MHz, only before the first spectrum), so board spurs and channels outside the scanned channels' span are not shown. Ids follow the order given; all are enabled. The UI's Channels → Edit sends this on every connect |
+| `CHANNELS <name>=<MHz> …`, `CHANNELS DEFAULT` | Channel plan: up to 8 channels by their 5.8 GHz frequency, e.g. `CHANNELS R1=5658 A8=5725`. The C5 takes 5345–5945 MHz (`tune_lo_khz`/`tune_hi_khz` in `profile.c`: bands A, B, E, F, R and low band L, 5362–5621 MHz; L is untested on hardware and has no spur list or power calibration); the S3 maps them into its scaled band, which has no room for L. The web UI's panorama spans the LO segments scanned (`bandRange`, `views/panorama.ts`; `band_khz`, 5645–5945 MHz, only before the first spectrum), so board spurs and channels outside the scanned channels' span are not shown. Ids follow the order given; all are enabled. The UI's Channels → Edit sends this on every connect. On the C5, one channel in 2400–2500 MHz, alone (`ERR channels` otherwise; the UI sends `CHANNELS 2G4=2440`), scans the real 2.4 GHz band instead: see "2.4 GHz band" |
 | `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R, E and L take 4), keeping it clear of every channel center where it can; `SINGLE` gives each channel its own LO |
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
@@ -409,6 +427,15 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   An About section below them links to the GitHub project and shows the
   connected device's firmware version (from `INFO`; over Web Serial also a
   newer version the page can flash).
+- **2.4 GHz band** (`ISM_CHANNEL` "2G4", `model/channelPlan.ts`): the channel
+  dialog's "2.4 GHz band" button replaces the selection, and any 5.8 GHz channel
+  replaces it. The panorama and waterfall show the band without channel marks;
+  Channel zoom, RSSI history and the lap timer's Levels graph show a "Disabled in
+  2.4 GHz mode" notice (`drawNotice`, `util/canvas.ts`), the lap timer seats are
+  all off (`channelMhz` has no 2G4), and Edit channels stays available there to
+  switch back. Monitor views test the device's profile (`isIsmProfile`), the lap
+  timer page the stored plan (`isIsmPlan`). The simulator scans it too (Wi-Fi
+  bursts on channels 1/6/11, no VTXs). The S3 answers `ERR channels`.
 - **Lap timer mode page** (`web/src/model/timer.ts`, `views/timer.ts`; seats card "Timer seats"): polls the
   board as RotorHazard's server does (every 100 ms: per seat, select it and read
   the pass stats and one queued peak/nadir), and shows each seat's level with

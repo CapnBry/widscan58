@@ -292,9 +292,11 @@ static bool parse_u32(const char *s, uint32_t *v) {
 }
 
 /* CHANNELS <name>=<MHz> ...: up to PROFILE_MAX_CHANNELS channels, each given
- * by its 5.8 GHz frequency; a scaled profile maps it into its own band. */
+ * by its 5.8 GHz frequency; a scaled profile maps it into its own band. Or
+ * one channel in the 2.4 GHz ISM band, alone, taken as it is (planner.h). */
 static bool parse_channels(char *args, const profile_t *p, scan_config_t *c) {
     unsigned n = 0;
+    bool ism = false;
     char *save;
     for (char *tok = strtok_r(args, " ", &save); tok; tok = strtok_r(NULL, " ", &save)) {
         char *eq = strchr(tok, '=');
@@ -303,12 +305,17 @@ static bool parse_channels(char *args, const profile_t *p, scan_config_t *c) {
         *eq = 0;
         for (const char *q = tok; *q; q++)
             if (!((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') || (*q >= '0' && *q <= '9'))) return false;
-        if (!parse_u32(eq + 1, &mhz) || mhz > 100000 || !profile_from_equiv_khz(p, mhz * 1000, &c->ch[n].khz))
+        if (!parse_u32(eq + 1, &mhz) || mhz > 100000) return false;
+        if (profile_is_ism(p, mhz * 1000)) {
+            c->ch[n].khz = mhz * 1000;
+            ism = true;
+        } else if (!profile_from_equiv_khz(p, mhz * 1000, &c->ch[n].khz)) {
             return false;
+        }
         strcpy(c->ch[n].name, tok);
         n++;
     }
-    if (!n) return false;
+    if (!n || (ism && n > 1)) return false;
     c->nch = (uint8_t)n;
     c->enabled = (1u << n) - 1;
     return true;

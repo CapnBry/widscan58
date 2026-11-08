@@ -11,7 +11,9 @@
  *
  * c5-race: the real thing (PLAN.md section 2.1). The C5 tunes in whole MHz, so
  * pair LOs land half a MHz off the channel midpoint; offsets stay exact. It
- * tunes down to low band; band_lo/hi_khz stay the usual 5645-5945 MHz. */
+ * tunes down to low band; band_lo/hi_khz stay the usual 5645-5945 MHz.
+ * It also samples the real 2.4 GHz ISM band: two LOs 40 MHz apart, each
+ * +-40 MHz wide at 80 MS/s, cover 2400-2483.5 MHz. */
 #include <string.h>
 #include "profile.h"
 
@@ -60,6 +62,8 @@ static const profile_t profiles[] = {
         .hop_max_span_khz = 40000,
         .single_lo_offset_khz = -8000,
         .lo_step_khz = 1000,
+        .ism_lo_khz = 2400000, .ism_hi_khz = 2500000,
+        .ism_los_khz = {2420000, 2460000},
         .nch = 8,
         .ch = {
             {"R1", 5658000}, {"R2", 5695000}, {"R3", 5732000}, {"R4", 5769000},
@@ -76,6 +80,10 @@ const profile_t *profile_default(const char *target) {
 
 double profile_equiv_khz(const profile_t *p, double khz) {
     return p->equiv_base_khz + (khz - p->base_khz) / p->scale;
+}
+
+bool profile_is_ism(const profile_t *p, uint32_t khz) {
+    return p->ism_lo_khz && khz >= p->ism_lo_khz && khz <= p->ism_hi_khz;
 }
 
 bool profile_from_equiv_khz(const profile_t *p, uint32_t equiv_khz, uint32_t *khz) {

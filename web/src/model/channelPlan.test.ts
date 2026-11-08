@@ -1,7 +1,7 @@
 // Channel plan helpers and the simulator's planner port (same cases as the
 // firmware's test_plan_*). GPL-3.0-or-later.
 import { describe, expect, it } from "vitest";
-import { BANDS, channelMhz, channelsCommand, normalizePlan } from "./channelPlan";
+import { BANDS, channelMhz, channelsCommand, isIsmPlan, isIsmProfile, normalizePlan } from "./channelPlan";
 import { planBuild, type ProfileDef } from "../mock/dsp";
 
 const c5 = { hopMaxSpanKhz: 40000, singleLoOffsetKhz: -8000, loStepKhz: 1000 } as ProfileDef;
@@ -20,9 +20,29 @@ describe("channel plan", () => {
     expect(normalizePlan(["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "R1"])).toHaveLength(8);
     expect(channelsCommand(["R1", "A8"])).toBe("CHANNELS R1=5658 A8=5725");
   });
+
+  it("keeps the 2.4 GHz band alone", () => {
+    expect(normalizePlan(["R1", "2G4", "R2"])).toEqual(["2G4"]);
+    expect(channelsCommand(["2G4"])).toBe("CHANNELS 2G4=2440");
+    expect(channelMhz("2G4")).toBeUndefined(); // no lap timer seat frequency
+    expect(isIsmPlan(["2G4"])).toBe(true);
+    expect(isIsmPlan(["R1"])).toBe(false);
+    expect(isIsmProfile({ scale: 1, channels: [{ khz: 2440000 }] })).toBe(true);
+    expect(isIsmProfile({ scale: 1, channels: [{ khz: 5658000 }] })).toBe(false);
+    expect(isIsmProfile({ scale: 0.28, channels: [{ khz: 2405219 }] })).toBe(false); // the S3's scaled Raceband
+  });
 });
 
 describe("planBuild", () => {
+  it("scans the ISM band on its two LOs, no channels", () => {
+    const p = { ...c5, ismKhz: [2400000, 2500000], ismLosKhz: [2420000, 2460000] } as ProfileDef;
+    expect(planBuild(p, chans([2440]), 1, true)).toEqual([
+      { loKhz: 2420000, ch: [], offsetHz: [] },
+      { loKhz: 2460000, ch: [], offsetHz: [] },
+    ]);
+    expect(planBuild(p, chans([2440]), 0, true)).toEqual([]);
+  });
+
   it("pairs Raceband like before", () => {
     const hops = planBuild(c5, chans([5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917]), 0xff, true);
     expect(hops.map((h) => h.loKhz)).toEqual([5677000, 5751000, 5825000, 5899000]);

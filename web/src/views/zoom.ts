@@ -2,7 +2,8 @@
 // GPL-3.0-or-later.
 import type { App, View } from "../model/app";
 import { CHF } from "../proto/frames";
-import { axes, channelColor, drawGrid, el, prepare, theme } from "../util/canvas";
+import { isIsmProfile } from "../model/channelPlan";
+import { axes, channelColor, drawGrid, drawNotice, el, ISM_NOTICE, prepare, theme } from "../util/canvas";
 import { composite } from "./panorama";
 
 export class Zoom implements View {
@@ -36,6 +37,12 @@ export class Zoom implements View {
     const app = this.app;
     const p = app.store.profile;
     const s = prepare(this.canvas);
+    if (isIsmProfile(p)) {
+      this.title.textContent = "";
+      this.readout.replaceChildren();
+      drawNotice(s, ISM_NOTICE);
+      return;
+    }
     if (!p || !app.store.segments.size) return;
     const id = Math.min(app.settings.selected, p.channels.length - 1);
     const ch = p.channels[id];

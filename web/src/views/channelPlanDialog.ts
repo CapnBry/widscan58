@@ -1,8 +1,9 @@
 // "Edit channels" dialog: pick up to 8 channels. Wide screens get the
 // channels on a frequency axis (humps, like the usual FPV charts); narrow
-// ones a band x channel grid. Both edit the same selection.
+// ones a band x channel grid. Both edit the same selection. Below them, the
+// whole 2.4 GHz band, which replaces any other selection.
 // GPL-3.0-or-later.
-import { BANDS, MAX_CHANNELS, normalizePlan, type Band } from "../model/channelPlan";
+import { BANDS, ISM_CHANNEL, MAX_CHANNELS, normalizePlan, type Band } from "../model/channelPlan";
 import { el } from "../util/canvas";
 
 // Spectrum view sections, each with its own axis (MHz) at the same scale
@@ -32,6 +33,8 @@ export class ChannelPlanDialog {
   private sections: Section[] = [];
   private gridScroll = el("div", { class: "plan-scroll" });
   private gridWrap = el("div", { class: "plan-scroll-wrap plan-grid-view" }, this.gridScroll);
+  // The grid view's 2.4 GHz button, lined up with the grid's rows (syncScrollFade).
+  private gridIsm = el("div", { class: "plan-ism plan-grid-view" }, this.buildIsm());
   private count = el("span", { class: "plan-count" });
   private okBtn = el("button", { class: "primary", autofocus: "" }, "OK");
   private onOk: (channels: string[]) => void = () => {};
@@ -55,9 +58,15 @@ export class ChannelPlanDialog {
       "dialog",
       { class: "plan-dialog" },
       el("h2", {}, "Channels to scan"),
-      el("p", {}, `Select up to ${MAX_CHANNELS} channels. Click a band name to select all eight of its channels.`),
+      el(
+        "p",
+        {},
+        `Select up to ${MAX_CHANNELS} channels. Click a band name to select all eight of its channels. ` +
+          "Or scan the 2.4 GHz band instead, on its own.",
+      ),
       this.buildSpectrum(),
       this.gridWrap,
+      this.gridIsm,
       el("div", { class: "plan-buttons" }, clearBtn, this.count, el("span", { class: "spacer" }), cancelBtn, this.okBtn),
     );
   }
@@ -80,6 +89,9 @@ export class ChannelPlanDialog {
   }
 
   private toggle(name: string) {
+    // The 2.4 GHz band is only ever alone in a plan.
+    if (name === ISM_CHANNEL && !this.selected.has(name)) this.selected.clear();
+    else if (name !== ISM_CHANNEL) this.selected.delete(ISM_CHANNEL);
     if (this.selected.has(name)) this.selected.delete(name);
     else if (this.selected.size < MAX_CHANNELS) this.selected.add(name);
     this.sync();
@@ -102,6 +114,17 @@ export class ChannelPlanDialog {
       return el("tr", {}, el("th", {}, this.bandButton(b)), ...cells);
     });
     return el("table", { class: "plan-chart" }, el("thead", {}, head), el("tbody", {}, ...rows));
+  }
+
+  private buildIsm(): HTMLElement {
+    const btn = el(
+      "button",
+      { class: "plan-ism-btn", title: "Scan 2400-2480 MHz (replaces the selection)" },
+      el("b", {}, "2.4 GHz band"),
+      el("span", {}, "2400–2480 MHz · panorama and waterfall only"),
+    );
+    this.addControl(ISM_CHANNEL, btn);
+    return btn;
   }
 
   private buildSpectrum(): HTMLElement {
@@ -142,7 +165,7 @@ export class ChannelPlanDialog {
       });
       return el("div", { class: "spec" }, el("div", { class: "spec-row spec-axis" }, el("div"), axis), ...rows, sec.guides);
     });
-    return el("div", { class: "spec-view" }, defs, ...specs);
+    return el("div", { class: "spec-view" }, defs, ...specs, el("div", { class: "plan-ism" }, this.buildIsm()));
   }
 
   private sync() {
@@ -150,7 +173,7 @@ export class ChannelPlanDialog {
     for (const { name, btn } of this.controls) {
       const on = this.selected.has(name);
       btn.classList.toggle("on", on);
-      btn.disabled = full && !on;
+      btn.disabled = full && !on && name !== ISM_CHANNEL; // the 2.4 GHz band replaces the selection
     }
     // Dashed lines through every band at each selected frequency: shows
     // near-collisions across bands (e.g. A8, R3, B1).
@@ -159,14 +182,27 @@ export class ChannelPlanDialog {
       s.guides.replaceChildren(
         ...picked.filter((c) => s.names.has(c.name)).map((c) => el("div", { class: "spec-guide", style: `left:${pct(s, c.mhz!)}%` })),
       );
-    this.count.textContent = `${this.selected.size} of ${MAX_CHANNELS} selected` + (full ? " (maximum)" : "");
+    this.count.textContent = this.selected.has(ISM_CHANNEL)
+      ? "2.4 GHz band selected"
+      : `${this.selected.size} of ${MAX_CHANNELS} selected` + (full ? " (maximum)" : "");
     this.okBtn.disabled = this.selected.size === 0;
   }
 
-  /** Fade the grid's edges where there is more to scroll to. */
+  /** Fade the grid's edges where there is more to scroll to, and line the
+   *  2.4 GHz button up with the grid's band rows: from the band buttons' left
+   *  to the rows' right, or the scroll area's right edge when they run past it. */
   private syncScrollFade() {
     const s = this.gridScroll;
     this.gridWrap.classList.toggle("more-left", s.scrollLeft > 1);
     this.gridWrap.classList.toggle("more-right", s.scrollLeft + s.clientWidth < s.scrollWidth - 1);
+    const row = s.querySelector("tbody tr");
+    if (!row || !s.clientWidth) return;
+    // Unscrolled geometry, so the button stays put while the grid scrolls.
+    const area = s.getBoundingClientRect();
+    const first = row.firstElementChild!.firstElementChild!.getBoundingClientRect();
+    const last = row.lastElementChild!.firstElementChild!.getBoundingClientRect();
+    const left = first.left + s.scrollLeft - area.left;
+    const right = Math.max(0, area.right - (last.right + s.scrollLeft));
+    this.gridIsm.style.margin = `10px ${right}px 0 ${left}px`;
   }
 }

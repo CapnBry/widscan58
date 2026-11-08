@@ -74,6 +74,12 @@ void plan_build(const profile_t *p, const profile_channel_t *ch, unsigned nch, u
         order[k] = v;
     }
     out->nhops = 0;
+    for (unsigned j = 0; j < n; j++) {
+        if (!profile_is_ism(p, ch[order[j]].khz)) continue;
+        for (unsigned k = 0; k < sizeof(p->ism_los_khz) / sizeof(p->ism_los_khz[0]); k++)
+            out->hop[out->nhops++] = (plan_hop_t){.lo_khz = p->ism_los_khz[k]};
+        return;
+    }
     /* Greedy from the lowest channel: optimal for covering points with
      * fixed-width windows. */
     for (unsigned j = 0; j < n;) {

@@ -38,6 +38,11 @@ typedef struct {
     uint32_t hop_max_span_khz;    /* widest channel spread one LO covers */
     int32_t single_lo_offset_khz; /* LO = channel + this in single mode */
     uint32_t lo_step_khz;   /* LO tuning resolution */
+    /* 2.4 GHz ISM band, sampled as it is (not mapped): a CHANNELS entry in
+     * ism_lo..hi_khz, alone, scans the whole band at ism_los_khz and
+     * measures no channel. ism_lo_khz 0: not supported. */
+    uint32_t ism_lo_khz, ism_hi_khz;
+    uint32_t ism_los_khz[2];
     uint8_t nch;            /* default channel plan */
     profile_channel_t ch[PROFILE_MAX_CHANNELS];
 } profile_t;
@@ -46,5 +51,7 @@ typedef struct {
 const profile_t *profile_default(const char *target);
 /* Equivalent 5.8 GHz frequency for display. */
 double profile_equiv_khz(const profile_t *p, double khz);
+/* A channel (profile kHz) in the 2.4 GHz ISM band (ism_lo..hi_khz). */
+bool profile_is_ism(const profile_t *p, uint32_t khz);
 /* Profile frequency of a 5.8 GHz channel; false outside the profile's tuning range. */
 bool profile_from_equiv_khz(const profile_t *p, uint32_t equiv_khz, uint32_t *khz);

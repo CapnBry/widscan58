@@ -67,8 +67,14 @@ extern void phy_i2c_writeReg(unsigned, unsigned, unsigned, unsigned);
  * covering them, ~7-10 dB over the floor in 39 kHz bins. 5600/5760/5920
  * are multiples of 160 MHz; 5712 and 5760 are 48 MHz crystal harmonics. The
  * odd multiples of 80 MHz (5680, 5840) came from ADC rate 0 and are gone at
- * rate 1 (adc_path_set). */
-static const uint32_t c5_spurs_khz[] = {5600000, 5712000, 5760000, 5920000};
+ * rate 1 (adc_path_set).
+ * 2.4 GHz (the ISM plan; LO sweep 2370-2512 MHz, 50 ohm load, gain 45,
+ * 2026-11-07): 40 MHz multiples 2400/2440/2480 and 48 MHz crystal harmonics
+ * 2448/2496 (2400 is both), ~7-22 dB over the floor in 19.5 kHz bins, from
+ * >= 90 % of the covering LOs; 2360/2520 too, outside the band shown. A 5 GHz
+ * LO never sees them, nor a 2.4 GHz one the 5 GHz ones (PLAN.md, Status). */
+static const uint32_t c5_spurs_khz[] = {2400000, 2440000, 2448000, 2480000, 2496000,
+                                        5600000, 5712000, 5760000, 5920000};
 
 static radio_caps_t caps = {
     .target = "esp32c5",
@@ -94,6 +100,7 @@ static radio_caps_t caps = {
  * and every channel within 0.12 dB (PLAN.md, periodic full tunes). */
 static unsigned tune_skip = 3;
 static bool tuned_once;
+static bool tuned_5g; /* the band of the last tune: a band change takes a full one */
 static uint32_t tuned_lo_khz;
 static int64_t tune_end_us; /* when the LO last moved; radio_capture settles from it */
 void radio_set_tune_skip(unsigned mask) {
@@ -281,6 +288,14 @@ static IRAM_ATTR void pll_retune(unsigned mhz, bool restored) {
     phy_xtal_duty_set(mhz);
 }
 
+/* 2.4 GHz (the profile's ISM plan): the PHY's own ADC rate and filter mode,
+ * a full channel setup on every tune (the PLL-only retune is 5 GHz only),
+ * and one calibration for the band, at ISM_CAL_MHZ, in RECALMODE CACHE and
+ * ONCE (the calibration cache is 5 GHz only, recal_c5.c; ONCE's center is a
+ * 5 GHz one). Untuned for the 2.4 GHz board spurs and power calibration. */
+#define BAND_5G_MHZ 4900u
+#define ISM_CAL_MHZ 2440u
+
 /* The PHY runs 5 GHz at ADC rate 0 with no decimation filter (RX filter mode
  * 0), and only above 5830 MHz at rate 1 with filter mode 8
  * (phy_rfpll_set_adc_rate). Rate 1 + mode 8 everywhere: a VTX 50-60 MHz from
@@ -291,7 +306,7 @@ static IRAM_ATTR void pll_retune(unsigned mhz, bool restored) {
  * only around a capture lost 5-8 dB (PLAN.md, the 5830/5831 MHz skirt). */
 #define ADC_RATE1_ABOVE_MHZ 5830u
 static IRAM_ATTR void adc_path_set(unsigned mhz) {
-    if (mhz > ADC_RATE1_ABOVE_MHZ) return; /* the PHY's own setting */
+    if (mhz < BAND_5G_MHZ || mhz > ADC_RATE1_ABOVE_MHZ) return; /* the PHY's own setting */
     phy_adc_rate_set(1);
     phy_rx_filter_mode(8);
 }
@@ -305,7 +320,10 @@ static IRAM_ATTR esp_err_t tune_locked(uint32_t lo_khz) {
         c5_cal_clear();
     }
     unsigned mhz = lo_khz / 1000u;
-    unsigned cal_mhz = recal_mode == RADIO_RECAL_ONCE ? recal_center_khz / 1000u : mhz;
+    bool is_5g = mhz >= BAND_5G_MHZ;
+    unsigned cal_mhz = !is_5g && recal_mode != RADIO_RECAL_EVERY_LO ? ISM_CAL_MHZ
+                       : recal_mode == RADIO_RECAL_ONCE         ? recal_center_khz / 1000u
+                                                                : mhz;
     bool recalibrated = false, restored = false;
     if (calibrated_mhz != cal_mhz) {
         restored = recal_mode == RADIO_RECAL_CACHE && c5_cal_restore(cal_mhz);
@@ -317,8 +335,8 @@ static IRAM_ATTR esp_err_t tune_locked(uint32_t lo_khz) {
         }
         calibrated_mhz = cal_mhz;
     }
-    bool pll_only = tune_skip & 1;
-    bool full = !tuned_once || recalibrated;
+    bool pll_only = (tune_skip & 1) && is_5g;
+    bool full = !tuned_once || recalibrated || is_5g != tuned_5g;
     if (!full && !restored && lo_khz == tuned_lo_khz) return ESP_OK;
     rx_tuning = true;
     if (full || !pll_only) {
@@ -345,6 +363,7 @@ static IRAM_ATTR esp_err_t tune_locked(uint32_t lo_khz) {
     }
     if (full || !(tune_skip & 4)) gain_apply();
     tuned_once = true;
+    tuned_5g = is_5g;
     tuned_lo_khz = lo_khz;
     tune_end_us = esp_timer_get_time();
     return ESP_OK;

@@ -511,7 +511,11 @@ npm run dev                         # http://localhost:5173 (Web Serial: Chrome/
   test with `npx vite preview`.
 - **Connect device**: Web Serial. Chrome, Edge, Firefox and Android Chrome all
   work, flashing included. Chrome remembers the grant, so later visits and
-  board resets reconnect automatically.
+  board resets reconnect automatically. Connect and Flash use the granted
+  board when there is exactly one (`grantedEspressifPorts`), and show the
+  chooser only for none, several, or a granted board that does not open. On
+  Android (WebUSB) Android's own "Allow access" prompt still appears once per
+  plug-in or app start; a page can't remember that one.
 - **Flash device**: flashes the firmware the page was deployed with
   (`web/src/serial/flasher.ts`; binaries come from `web/public/firmware`, staged
   by CI, never committed). The Config preset dropdown (`model/flashPresets.ts`,

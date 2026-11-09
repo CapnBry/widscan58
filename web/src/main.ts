@@ -7,6 +7,7 @@ import {
   WebSerialTransport,
   WebSocketTransport,
   grantedEspressifPort,
+  grantedEspressifPorts,
   requestEspressifPort,
   type Transport,
 } from "./serial/device";
@@ -399,6 +400,16 @@ connectBtn.onclick = async () => {
     return;
   }
   userDisconnected = false;
+  // Reuse the board this origin was already granted, so Connect after a
+  // Disconnect (or when auto-reconnect did not run) skips the chooser. With
+  // several granted boards, or if the granted one does not open, show the
+  // chooser so another board can be picked.
+  const granted = await grantedEspressifPorts();
+  if (granted.length === 1) {
+    await connect(new WebSerialTransport(granted[0]));
+    if (app.device) return;
+    store.addLog("info", "the previously granted board did not open; showing the port chooser");
+  }
   void connect(new WebSerialTransport());
 };
 // ?sim=s3 simulates the ESP32-S3's scaled 2.4 GHz band instead of the C5's.
@@ -426,7 +437,8 @@ const flashDialog = new FlashDialog({
       return port;
     }
     if (app.device) await disconnect(); // simulator or replay
-    const port = await requestEspressifPort();
+    const granted = await grantedEspressifPorts();
+    const port = granted.length === 1 ? granted[0] : await requestEspressifPort();
     flashing = true;
     return port;
   },

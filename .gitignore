@@ -11,6 +11,10 @@ firmware/sdkconfig.*
 !firmware/sdkconfig.defaults
 !firmware/sdkconfig.defaults.*
 firmware/managed_components/
+display/.pio/
+display/sdkconfig.*
+!display/sdkconfig.defaults
+display/managed_components/
 
 # Web
 web/node_modules/

@@ -146,7 +146,21 @@ bool link_printf(const char *fmt, ...) {
 link_port_t link_port(void) { return port; }
 
 static int port_read(link_port_t p, uint8_t *buf, size_t capacity, TickType_t wait) {
-    if (p == LINK_UART) return uart_read_bytes(HOST_UART, buf, capacity, wait);
+    if (p == LINK_UART) {
+        /* What is there as soon as anything is, as USB does: asking the UART
+         * driver for `capacity` bytes waits out `wait` for a short command,
+         * 20 ms on every RotorHazard request. */
+        int n = uart_read_bytes(HOST_UART, buf, 1, wait);
+        if (n <= 0) return n;
+        size_t more = 0;
+        uart_get_buffered_data_len(HOST_UART, &more);
+        if (more > capacity - 1) more = capacity - 1;
+        if (more) {
+            int m = uart_read_bytes(HOST_UART, buf + 1, more, 0);
+            if (m > 0) n += m;
+        }
+        return n;
+    }
     return usb_serial_jtag_read_bytes(buf, capacity, wait);
 }
 

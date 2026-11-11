@@ -163,7 +163,11 @@ pin reads a constant idle line. The UART's interrupt handler is in flash
 (`CONFIG_UART_ISR_IN_IRAM` would take ~2.3 KB of static RAM), and so is the
 ring buffer and FreeRTOS setup code only its driver uses (`hot_iram.lf`,
 `widscan58_ringbuf_cold`): the UART costs ~330 B of static RAM below the RF
-dump bank. Untested on hardware with a UART host so far.
+dump bank. `port_read` returns what the UART has as soon as anything arrives (as USB
+does): asking the driver for a full buffer waited out the 20 ms read timeout
+on every RotorHazard request (2026-11-11; the fix not yet run on hardware).
+Before it, tested with the display (`display/`) as the UART host: monitor
+mode's ~37 KB/s of frames, and lap timer polling at 180 ms for 8 seats.
 
 **Status LEDs (`src/status_led.c`):** `GPIO <n> LED` (one LED, lit when the pin
 is low) and `GPIO <n> WS2812` (one WS2812), one pin each. The LED is on while

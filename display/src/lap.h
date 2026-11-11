@@ -12,8 +12,8 @@
 #define LAP_POLL_MS 50
 #define LAP_HIST 320          /* polls kept per seat: 16 s */
 #define LAP_KEEP 64           /* lap times kept per seat */
-#define LAP_MIN_MS 5000       /* a pass sooner after the last counted one is ignored */
-#define LAP_RUN 3             /* fastest consecutive laps */
+#define LAP_RUN_MAX 9         /* fastest consecutive laps: at most */
+#define LAP_BREAK 0x80000000u /* laps_ms: the first lap after a break (no run across it) */
 #define DEFAULT_ENTER 125     /* the device's defaults: -32.5 / -37.5 dBFS */
 #define DEFAULT_EXIT 105
 
@@ -30,12 +30,13 @@ typedef struct {
     int passes;               /* counted passes */
     bool have_last;
     uint32_t last_pass_ms;
-    uint32_t laps_ms[LAP_KEEP]; /* ring, newest at laps_n - 1 */
+    uint32_t laps_ms[LAP_KEEP]; /* ring, newest at laps_n - 1; LAP_BREAK flag */
+    bool broke;               /* a break since the last lap: the next one starts a run */
     int laps_n;               /* laps since the clear (all, not just kept) */
-    uint32_t run_ms[LAP_RUN];
+    uint32_t run_ms[LAP_RUN_MAX];
     int run_n;
     bool have_best;
-    uint32_t best_ms[LAP_RUN];
+    uint32_t best_ms[LAP_RUN_MAX];
     uint32_t best_total_ms;
     int best_end;             /* laps_n when the fastest run ended (its last lap's number) */
     uint8_t hist[LAP_HIST];   /* level per poll, 0: none */
@@ -49,6 +50,8 @@ typedef struct {
     bool snr;                 /* levels are SNR, not RSSI */
     bool running;             /* a RotorHazard session is up */
     uint32_t loop_ms;         /* last poll's duration */
+    uint32_t min_ms;          /* a pass sooner after the last counted one is ignored */
+    int run;                  /* fastest consecutive laps, 2..LAP_RUN_MAX */
 } lapstate_t;
 
 extern lapstate_t L;
@@ -72,6 +75,10 @@ float lap_db(uint8_t code);
 uint8_t lap_recent(int seat, int ms);
 /* The kept lap k back from the newest (0: last lap), ms. */
 uint32_t lap_get(const seat_t *s, int k);
+/* Minimum lap and fastest run length (g_set's). A new run length finds
+ * every seat's fastest run again in the kept laps; a new minimum applies
+ * to the passes from now on. Under model_lock(). */
+void lap_set_rules(uint32_t min_ms, int run);
 
 /* Thresholds, kept in NVS by the display. */
 void lap_thresholds_load(void);

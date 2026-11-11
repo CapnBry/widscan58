@@ -31,6 +31,7 @@ keep that for anything new that is copied or derived from it.
 | `tools/widscan58cli.py` | Python client: `info`, `monitor`, `rawiq`, `spectrum`, `cmd`, `bootloader`. |
 | `tools/serial_bridge.py` | Serial ↔ WebSocket bridge (headless tests, remote viewing). |
 | `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN; `RX_ENV=esp32c5` for the C5). Experimental, see the flashing notes. |
+| `display/tools/gen_voice.py` | Makes the display's lap callout clips with a TTS model on OpenRouter (`OPENROUTER_API_KEY`); see "Display (CYD)". |
 | `tools/displayflash.py` | Build and flash the C5 through the display's USB port (`display/src/passthru.c`); run with `~/.platformio/penv/bin/python`. See "Display (CYD)". |
 | `tools/pages_firmware.py` | Stages the built firmware into `web/public/firmware` for the in-page flasher (used by CI). |
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
@@ -281,7 +282,12 @@ tools/cydshot.py shot out.png       # screenshot over USB; also swipe l|r|u|d, t
   still work), the seats get the plan's frequencies in order and the
   thresholds, and every 50 ms (`LAP_POLL_MS`) each seat is selected and read
   with `READ_LAP_STATS` (0x05: pass stats and extremums in one reply).
-  Laps as the web UI's `laps.ts`: 5 s minimum, fastest 3 consecutive. The
+  Laps as the web UI's `laps.ts`: minimum lap and fastest consecutive
+  laps from the settings' Lap settings screen (0-99 s, default 5; 2-9,
+  default 3; `g_set`, settings blob version 2, version 1 still read). A new
+  run length finds the fastest run again in the kept 64 laps (breaks are
+  flagged in `laps_ms`, `LAP_BREAK`); a new minimum applies from the next
+  pass. A run of more than 3 shows its average beside the total. The
   first counted pass picks the pilot's seat; the main screen shows its last
   lap big, the running lap, the fastest 3 and the laps before, over a graph
   of every seat's level; Clear drops the laps and the pick. Tapping the lap
@@ -301,6 +307,23 @@ tools/cydshot.py shot out.png       # screenshot over USB; also swipe l|r|u|d, t
   meter mode set up again 3 times a second after lap timer mode).
   LVGL 8.3 (component manager); screens must not have
   `LV_OBJ_FLAG_GESTURE_BUBBLE`, or LVGL sends no gesture at all.
+- **Lap callouts** (`src/audio.c`): each lap of the pilot's seat is said
+  to 0.1 s ("twenty three point nine", up to 999.9 s) through the speaker
+  connector: GPIO26 is DAC channel 2, into the board's amplifier;
+  `dac_continuous` (I2S0's DMA) at 16 kHz from the APLL (the default clock
+  goes no lower than 19.6 kHz). A new lap replaces one still waiting. The
+  words are 30 clips (zero to nineteen, twenty to ninety, hundred, point;
+  `voice/voice.bin`, 276 KB of 8-bit PCM, `EMBED_FILES`, not tracked:
+  the build needs it made first; table in `src/voice_clips.h`), made by
+  `tools/gen_voice.py` with Gemini TTS on OpenRouter (voice Leda, each
+  clip trimmed to the speech at −32 dB, no padding, no gap between
+  words). `--instructions` (delivery text, cached separately) and
+  `--only` (fetch a few words, leave `voice.bin`) are for trials; a
+  "quick, crisp announcer" style sounded worse than none (2026-11-11). Every API call costs money: the raw replies are
+  kept in `voice/cache/` (not tracked), and reruns only fetch missing clips,
+  so trim and level changes cost nothing. Don't delete the cache. Volume
+  in Lap settings, 0-100 % in steps of 10, Off at 0; Test says 23.9.
+  Not yet heard on hardware (2026-11-11).
 - **Display speed:** SPI2 on its IOMUX pins, DMA, two 320x40 LVGL buffers.
   The panel setup runs at 40 MHz (TFT_eSPI's rate here), then the bus at
   80 MHz (`LCD_PCLK_HZ`, `src/lvport.c`; `-DLCD_PCLK_HZ=40000000` for 40).

@@ -154,6 +154,11 @@ static void atten_step(lv_event_t *e) {
 
 static void edit_clicked(lv_event_t *e) { open_editor(); }
 
+static void lap_rules_clicked(lv_event_t *e) {
+    lap_rules_open();
+    delete_later(&scr_settings);
+}
+
 static void ch_clicked(lv_event_t *e) {
     int k = (int)(intptr_t)lv_event_get_user_data(e);
     if (settings_mode == MODE_LAP) {
@@ -271,12 +276,19 @@ void ui_open_settings(int mode) {
     lv_obj_set_pos(edit, 10, y);
     lv_obj_set_size(edit, 300, 34);
     settings_sync();
-    set_device = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "");
-    lv_obj_set_width(set_device, 300);
-    lv_label_set_long_mode(set_device, LV_LABEL_LONG_DOT);
-    lv_obj_align(set_device, LV_ALIGN_BOTTOM_LEFT, 10, -6);
-    lv_obj_t *hint = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "Swipe up to close");
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_RIGHT, -10, -20);
+    set_device = NULL;
+    if (mode == MODE_LAP) {
+        lv_obj_t *b = ui_button(s, "Lap settings", lap_rules_clicked, NULL);
+        lv_obj_set_pos(b, 10, y + 42);
+        lv_obj_set_size(b, 300, 34);
+    } else {
+        set_device = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "");
+        lv_obj_set_width(set_device, 300);
+        lv_label_set_long_mode(set_device, LV_LABEL_LONG_DOT);
+        lv_obj_align(set_device, LV_ALIGN_BOTTOM_LEFT, 10, -6);
+        lv_obj_t *hint = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "Swipe up to close");
+        lv_obj_align(hint, LV_ALIGN_BOTTOM_RIGHT, -10, -20);
+    }
     lv_obj_t *old = scr_settings;
     scr_settings = s;
     lv_scr_load(s);

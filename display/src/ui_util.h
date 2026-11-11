@@ -23,4 +23,5 @@ void lap_seat_update(void);          /* under model_lock() */
 void lap_poll_saves(void);
 void lap_list_open(int seat, lv_obj_t *back_to); /* every lap since the clear */
 lv_obj_t *lap_list_screen(void);
+void lap_rules_open(void);           /* volume, minimum lap, fastest run; back to settings */
 void lap_list_update(void);          /* under model_lock() */

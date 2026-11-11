@@ -12,6 +12,10 @@ typedef struct {
     uint8_t atten; /* power meter mode: attenuation, dB */
     uint8_t nch;
     chname_t ch[MAX_CH]; /* channel plan, normalized */
+    /* version 2 */
+    uint8_t volume;    /* lap callouts, 0-100 %, 0: off */
+    uint8_t lap_min_s; /* minimum lap, 0-99 s */
+    uint8_t lap_run;   /* fastest consecutive laps, 2-9 */
 } settings_t;
 
 extern settings_t g_set;

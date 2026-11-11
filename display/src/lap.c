@@ -3,13 +3,17 @@
 
 #include <string.h>
 
+#include "audio.h"
 #include "nvs.h"
+#include "settings.h"
 
 lapstate_t L;
 
 void lap_init(void) {
     memset(&L, 0, sizeof(L));
     L.selected = -1;
+    L.min_ms = g_set.lap_min_s * 1000u;
+    L.run = g_set.lap_run;
     for (int j = 0; j < SEATS; j++) {
         L.s[j].enter = DEFAULT_ENTER;
         L.s[j].exit = DEFAULT_EXIT;
@@ -21,6 +25,7 @@ void lap_init(void) {
 static void seat_break(seat_t *s) {
     s->have_last = false;
     s->run_n = 0;
+    s->broke = true;
 }
 
 static void seat_clear(seat_t *s) {
@@ -50,9 +55,26 @@ void lap_set_plan(const chname_t *names, int n) {
     }
 }
 
+/* A new fastest run of L.run laps ending with the seat's run_ms? */
+static void run_check(seat_t *s) {
+    if (s->run_n < L.run) return;
+    uint32_t total = 0;
+    for (int k = 0; k < L.run; k++) total += s->run_ms[k];
+    if (s->have_best && total >= s->best_total_ms) return;
+    s->have_best = true;
+    s->best_total_ms = total;
+    s->best_end = s->laps_n;
+    memcpy(s->best_ms, s->run_ms, L.run * sizeof(uint32_t));
+}
+
+static void run_add(seat_t *s, uint32_t lap_ms) {
+    if (s->run_n == L.run) memmove(s->run_ms, s->run_ms + 1, (L.run - 1) * sizeof(uint32_t)), s->run_n--;
+    s->run_ms[s->run_n++] = lap_ms;
+}
+
 static void pass(int j, uint32_t t) {
     seat_t *s = &L.s[j];
-    if (s->have_last && t - s->last_pass_ms < LAP_MIN_MS) return; /* a double or false detection */
+    if (s->have_last && t - s->last_pass_ms < L.min_ms) return; /* a double or false detection */
     bool lap = s->have_last;
     uint32_t lap_ms = t - s->last_pass_ms;
     s->have_last = true;
@@ -60,18 +82,12 @@ static void pass(int j, uint32_t t) {
     s->passes++;
     if (L.selected < 0) L.selected = j; /* the pilot is on the first seat that passes */
     if (!lap) return;
-    s->laps_ms[s->laps_n % LAP_KEEP] = lap_ms;
+    s->laps_ms[s->laps_n % LAP_KEEP] = lap_ms | (s->broke ? LAP_BREAK : 0);
+    s->broke = false;
     s->laps_n++;
-    if (s->run_n == LAP_RUN) memmove(s->run_ms, s->run_ms + 1, (LAP_RUN - 1) * sizeof(uint32_t)), s->run_n--;
-    s->run_ms[s->run_n++] = lap_ms;
-    if (s->run_n < LAP_RUN) return;
-    uint32_t total = 0;
-    for (int k = 0; k < LAP_RUN; k++) total += s->run_ms[k];
-    if (s->have_best && total >= s->best_total_ms) return;
-    s->have_best = true;
-    s->best_total_ms = total;
-    s->best_end = s->laps_n;
-    memcpy(s->best_ms, s->run_ms, sizeof(s->best_ms));
+    if (j == L.selected) audio_say_lap(lap_ms);
+    run_add(s, lap_ms);
+    run_check(s);
 }
 
 void lap_update(int j, uint32_t t, const uint8_t *p) {
@@ -128,7 +144,31 @@ uint8_t lap_recent(int j, int ms) {
     return got ? (uint8_t)((sum + got / 2) / got) : 0;
 }
 
-uint32_t lap_get(const seat_t *s, int k) { return s->laps_ms[(s->laps_n - 1 - k + LAP_KEEP * 4) % LAP_KEEP]; }
+static uint32_t lap_raw(const seat_t *s, int k) { return s->laps_ms[(s->laps_n - 1 - k + LAP_KEEP * 4) % LAP_KEEP]; }
+
+uint32_t lap_get(const seat_t *s, int k) { return lap_raw(s, k) & ~LAP_BREAK; }
+
+void lap_set_rules(uint32_t min_ms, int run) {
+    L.min_ms = min_ms;
+    if (run == L.run) return;
+    L.run = run;
+    for (int j = 0; j < SEATS; j++) {
+        seat_t *s = &L.s[j];
+        int n = s->laps_n < LAP_KEEP ? s->laps_n : LAP_KEEP, laps_n = s->laps_n;
+        uint32_t v[LAP_KEEP];
+        for (int k = 0; k < n; k++) v[k] = lap_raw(s, n - 1 - k); /* oldest kept first */
+        s->have_best = false;
+        s->run_n = 0;
+        for (int k = 0; k < n; k++) {
+            if (v[k] & LAP_BREAK) s->run_n = 0;
+            s->laps_n = laps_n - n + 1 + k; /* best_end: this lap's number */
+            run_add(s, v[k] & ~LAP_BREAK);
+            run_check(s);
+        }
+        s->laps_n = laps_n;
+        if (s->broke) s->run_n = 0; /* a break after the last lap */
+    }
+}
 
 void lap_thresholds_load(void) {
     nvs_handle_t h;

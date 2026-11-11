@@ -1,10 +1,12 @@
 /* Lap timer mode: the main screen (one pilot: the seat of the first pass,
- * its lap times big, the fastest 3 consecutive, every seat's level graph)
- * and each seat's EnterAt/ExitAt screen with its live level.
+ * its lap times big, the fastest consecutive laps, every seat's level graph),
+ * each seat's EnterAt/ExitAt screen with its live level, the lap list and
+ * the lap settings (callout volume, minimum lap, fastest run length).
  * GPL-3.0-or-later. */
 #include <stdio.h>
 #include <string.h>
 
+#include "audio.h"
 #include "graph.h"
 #include "host.h"
 #include "lap.h"
@@ -229,22 +231,36 @@ void lap_main_update(void) {
         buf[0] = 0;
     }
     ui_set_text(mn.now, buf);
+    char bt[12];
+    snprintf(bt, sizeof(bt), "Best %d", L.run);
+    ui_set_text(mn.best_t, bt);
     if (s->have_best) {
         fmt_lap(buf, sizeof(buf), s->best_total_ms);
         ui_set_text(mn.best, buf);
-        char a[12], b[12], c[12];
-        fmt_lap(a, sizeof(a), s->best_ms[0]);
-        fmt_lap(b, sizeof(b), s->best_ms[1]);
-        fmt_lap(c, sizeof(c), s->best_ms[2]);
-        /* Laps of a minute or more: a smaller font, single spaces, clear of
-         * the total. */
-        bool lng = s->best_ms[0] >= 60000 || s->best_ms[1] >= 60000 || s->best_ms[2] >= 60000;
+        /* Up to 3 laps fit beside the total, single spaced in a smaller
+         * font once one is a minute or more; a longer run shows its
+         * average (its laps are green in the lap list). */
+        bool lng = false;
+        for (int k = 0; k < L.run; k++) lng |= s->best_ms[k] >= 60000;
+        lng |= L.run > 3;
         if (lng != mn.best_long) {
             mn.best_long = lng;
             lv_obj_set_style_text_font(mn.best_laps, lng ? &lv_font_montserrat_12 : &lv_font_montserrat_14, 0);
             lv_obj_align(mn.best_laps, LV_ALIGN_TOP_RIGHT, -10, lng ? 119 : 117);
         }
-        snprintf(buf, sizeof(buf), lng ? "%s %s %s" : "%s  %s  %s", a, b, c);
+        if (L.run > 3) {
+            char a[12];
+            fmt_lap(a, sizeof(a), s->best_total_ms / L.run);
+            snprintf(buf, sizeof(buf), "avg %s", a);
+        } else {
+            int n = 0;
+            buf[0] = 0;
+            for (int k = 0; k < L.run; k++) {
+                char a[12];
+                fmt_lap(a, sizeof(a), s->best_ms[k]);
+                n += snprintf(buf + n, sizeof(buf) - n, "%s%s", k ? (lng ? " " : "  ") : "", a);
+            }
+        }
         ui_set_text(mn.best_laps, buf);
     } else {
         ui_set_text(mn.best, "--");
@@ -410,7 +426,7 @@ void lap_seat_update(void) {
 static struct {
     lv_obj_t *scr, *chip, *chip_text, *summary, *cell[LIST_MAX];
     lv_obj_t *back_to;
-    int seat, chip_seat, shown_n, shown_best;
+    int seat, chip_seat, shown_n, shown_best, shown_run;
     bool small;
 } ls = {.chip_seat = -2};
 
@@ -459,9 +475,10 @@ void lap_list_update(void) {
     const seat_t *s = &L.s[ls.seat];
     set_chip(ls.chip, ls.chip_text, ls.seat, &ls.chip_seat);
     int best = s->have_best ? s->best_end : 0;
-    if (s->laps_n == ls.shown_n && best == ls.shown_best) return;
+    if (s->laps_n == ls.shown_n && best == ls.shown_best && L.run == ls.shown_run) return;
     ls.shown_n = s->laps_n;
     ls.shown_best = best;
+    ls.shown_run = L.run;
     /* The newest LIST_MAX, oldest first. */
     int n = s->laps_n < LIST_MAX ? s->laps_n : LIST_MAX;
     uint64_t sum = 0;
@@ -497,9 +514,98 @@ void lap_list_update(void) {
         snprintf(buf, sizeof(buf), "%d: %s", num, v);
         lv_label_set_text(ls.cell[k], buf);
         /* The fastest consecutive laps in green, as on the main screen. */
-        bool in_best = best && num > best - LAP_RUN && num <= best;
+        bool in_best = best && num > best - L.run && num <= best;
         lv_obj_set_style_text_color(ls.cell[k], in_best ? TH_GOOD : TH_INK2, 0);
     }
+}
+
+/* ---- lap settings: callout volume, minimum lap, fastest run ---- */
+
+#define VOL_STEP 10
+
+static struct {
+    lv_obj_t *scr, *vol, *min, *run;
+} rs;
+
+static void rules_show(void) {
+    char buf[16];
+    if (g_set.volume) snprintf(buf, sizeof(buf), "%d %%", g_set.volume);
+    else strcpy(buf, "Off");
+    ui_set_text(rs.vol, buf);
+    snprintf(buf, sizeof(buf), "%d s", g_set.lap_min_s);
+    ui_set_text(rs.min, buf);
+    snprintf(buf, sizeof(buf), "%d laps", g_set.lap_run);
+    ui_set_text(rs.run, buf);
+}
+
+static void rules_back(lv_event_t *e) {
+    lv_obj_t *old = rs.scr;
+    ui_open_settings(MODE_LAP);
+    rs.scr = NULL;
+    lv_obj_del_async(old);
+}
+
+static void rules_gesture(lv_event_t *e) {
+    if (lvport_gesture_dir() == LV_DIR_TOP) rules_back(e);
+}
+
+/* user data: row (0 volume, 1 minimum lap, 2 fastest run) * 2 + (0 down, 1 up) */
+static void rules_step(lv_event_t *e) {
+    int u = (int)(intptr_t)lv_event_get_user_data(e), row = u / 2, d = u % 2 ? 1 : -1;
+    static const int lo[3] = {0, 0, 2}, hi[3] = {100, 99, LAP_RUN_MAX}, step[3] = {VOL_STEP, 1, 1};
+    uint8_t *f = row == 0 ? &g_set.volume : row == 1 ? &g_set.lap_min_s : &g_set.lap_run;
+    int v = *f + d * step[row];
+    if (v < lo[row] || v > hi[row]) return;
+    *f = v;
+    if (row) {
+        model_lock();
+        lap_set_rules(g_set.lap_min_s * 1000u, g_set.lap_run);
+        model_unlock();
+    }
+    rules_show();
+    ui_schedule_save();
+}
+
+static void rules_test(lv_event_t *e) { audio_say_lap(23900); }
+
+static void rules_row(lv_obj_t *s, int y, const char *name, int row, lv_obj_t **value) {
+    lv_obj_t *l = ui_label(s, &lv_font_montserrat_14, TH_INK2, name);
+    lv_obj_set_pos(l, 10, y + 8);
+    for (int a = 0; a < 2; a++) {
+        lv_obj_t *b = ui_button(s, a ? LV_SYMBOL_PLUS : LV_SYMBOL_MINUS, rules_step, (void *)(intptr_t)(row * 2 + a));
+        lv_obj_add_event_cb(b, rules_step, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)(row * 2 + a));
+        lv_obj_set_pos(b, a ? 268 : 130, y);
+        lv_obj_set_size(b, 42, 32);
+    }
+    *value = ui_label(s, &lv_font_montserrat_16, TH_INK, "");
+    lv_obj_set_width(*value, 90);
+    lv_obj_set_style_text_align(*value, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(*value, 174, y + 7);
+}
+
+void lap_rules_open(void) {
+    lv_obj_t *s = ui_screen();
+    lv_obj_add_event_cb(s, rules_gesture, LV_EVENT_GESTURE, NULL);
+    lv_obj_t *back = ui_button(s, LV_SYMBOL_LEFT " Back", rules_back, NULL);
+    lv_obj_set_pos(back, 6, 6);
+    lv_obj_set_size(back, 84, 30);
+    lv_obj_t *title = ui_label(s, &lv_font_montserrat_16, TH_INK, "Lap settings");
+    lv_obj_align(title, LV_ALIGN_TOP_RIGHT, -10, 12);
+    rules_row(s, 50, "Volume", 0, &rs.vol);
+    lv_obj_t *test = ui_button(s, "Test", rules_test, NULL);
+    lv_obj_set_pos(test, 70, 50);
+    lv_obj_set_size(test, 54, 32);
+    lv_obj_t *n = ui_label(s, &lv_font_montserrat_12, TH_MUTED, "Says each lap of the pilot's seat");
+    lv_obj_set_pos(n, 10, 86);
+    rules_row(s, 110, "Minimum lap", 1, &rs.min);
+    n = ui_label(s, &lv_font_montserrat_12, TH_MUTED, "A pass sooner after the last one is ignored");
+    lv_obj_set_pos(n, 10, 146);
+    rules_row(s, 170, "Fastest laps", 2, &rs.run);
+    n = ui_label(s, &lv_font_montserrat_12, TH_MUTED, "Consecutive laps in the best time");
+    lv_obj_set_pos(n, 10, 206);
+    rules_show();
+    rs.scr = s;
+    lv_scr_load(s);
 }
 
 void lap_poll_saves(void) {

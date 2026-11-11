@@ -1,6 +1,7 @@
 /* Widscan58 display: a CYD (ESP32-2432S028R) showing a widscan58 over its
  * UART, with the web UI's monitor, lap timer and power meter modes cut
  * down to 320x240. GPL-3.0-or-later. */
+#include "audio.h"
 #include "debug.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -96,6 +97,7 @@ void app_main(void) {
     settings_load();
     model_init();
     lap_init();
+    audio_init();
     lvport_init();
     ui_init();
     link_init(); /* before the host task sends anything */

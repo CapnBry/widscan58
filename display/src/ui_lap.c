@@ -8,6 +8,7 @@
 #include "graph.h"
 #include "host.h"
 #include "lap.h"
+#include "lvport.h"
 #include "model.h"
 #include "settings.h"
 #include "theme.h"
@@ -285,7 +286,7 @@ static void seat_back(lv_event_t *e) {
 }
 
 static void seat_gesture(lv_event_t *e) {
-    if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_TOP) seat_back(e);
+    if (lvport_gesture_dir() == LV_DIR_TOP) seat_back(e);
 }
 
 static void show_thresholds(void) {
@@ -423,7 +424,7 @@ static void list_back(lv_event_t *e) {
 }
 
 static void list_gesture(lv_event_t *e) {
-    if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_TOP) list_back(e);
+    if (lvport_gesture_dir() == LV_DIR_TOP) list_back(e);
 }
 
 void lap_list_open(int seat, lv_obj_t *back_to) {

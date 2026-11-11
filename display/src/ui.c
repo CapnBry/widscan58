@@ -9,6 +9,7 @@
 #include "bands.h"
 #include "host.h"
 #include "link.h"
+#include "lvport.h"
 #include "model.h"
 #include "pano.h"
 #include "power.h"
@@ -112,7 +113,7 @@ static void back_to_mode(lv_event_t *e) {
 }
 
 static void settings_gesture(lv_event_t *e) {
-    if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_TOP) back_to_mode(e);
+    if (lvport_gesture_dir() == LV_DIR_TOP) back_to_mode(e);
 }
 
 static void gain_apply(int v);
@@ -554,9 +555,7 @@ static void set_mode(int mode) {
 }
 
 static void mode_gesture(lv_event_t *e) {
-    lv_dir_t d = lv_indev_get_gesture_dir(lv_indev_get_act());
-    lv_indev_t *in = lv_indev_get_act();
-    lv_indev_wait_release(in); /* one gesture per swipe, also across the screen change */
+    lv_dir_t d = lvport_gesture_dir(); /* one per press (lvport.c) */
     if (d == LV_DIR_LEFT) set_mode((g_set.mode + 1) % MODE_COUNT);
     else if (d == LV_DIR_RIGHT) set_mode((g_set.mode + MODE_COUNT - 1) % MODE_COUNT);
     else if (d == LV_DIR_BOTTOM) ui_open_settings(g_set.mode);

@@ -16,6 +16,9 @@
  *  - Both objects write pixels straight into LVGL's draw buffer (LVGL 8's
  *    software renderer is synchronous) and claim to cover their area, so
  *    LVGL draws nothing under them.
+ *  - The average (the web UI's blue line) is an exponential average of
+ *    each column's power, 0.05 per spectrum as web/src/model/store.ts,
+ *    drawn over the trace with its own line span, diffed the same way.
  *  - The waterfall is a ring of colour indices, redrawn whole (320x40,
  *    ~5 ms) once per rotation of the LOs. */
 #include "pano.h"
@@ -39,6 +42,7 @@
 #define LABEL_H 15
 #define VALUE_PERIOD_MS 250
 #define EDGE_HZ 16000000 /* panorama margin beyond the outermost channels */
+#define AVG_W 0.05f      /* average weight per spectrum, as the web UI */
 
 static lv_obj_t *pano_obj, *wf_obj, *notice;
 static lv_obj_t *lab_name[MAX_CH], *lab_val[MAX_CH];
@@ -48,7 +52,10 @@ static bool val_wide;
 static int16_t col_y[W];          /* trace top, -1: no data */
 static int16_t col_lo[W], col_hi[W]; /* line rows, -1: none */
 static uint8_t col_code[W];
-static lv_color_t c_bg[W], c_bgg[W], c_fill[W], c_fillg[W], c_line;
+static float col_avg[W];             /* average power (linear), NAN: none */
+static int16_t col_ay[W];            /* average's y, -1: none */
+static int16_t col_alo[W], col_ahi[W]; /* average's line rows, -1: none */
+static lv_color_t c_bg[W], c_bgg[W], c_fill[W], c_fillg[W], c_line, c_avg;
 static uint8_t grid_row[PANO_H];
 static int16_t code_y[256];
 
@@ -108,6 +115,12 @@ static void pano_draw(lv_event_t *e) {
         for (; y <= y2 && y < lo; y++, p += stride) *p = grid_row[y] ? bgg : bg;
         for (; y <= y2 && y <= hi; y++, p += stride) *p = c_line;
         for (; y <= y2; y++, p += stride) *p = grid_row[y] ? fillg : fill;
+        /* The average over it. */
+        int alo = col_alo[x], ahi = col_ahi[x];
+        if (alo < 0) continue;
+        int ya = a.y1 - oy > alo ? a.y1 - oy : alo, yb = y2 < ahi ? y2 : ahi;
+        p = buf + (ya + oy - ba->y1) * stride + (x - ba->x1);
+        for (y = ya; y <= yb; y++, p += stride) *p = c_avg;
     }
 }
 
@@ -232,6 +245,7 @@ static void layout(void) {
         lv_label_set_text(v, "--");
     }
     value_t = 0;
+    for (int x = 0; x < W; x++) col_avg[x] = NAN, col_ay[x] = -1;
     lv_obj_invalidate(pano_obj);
     for (int s = 0; s < MAX_SEG; s++) seg_ver[s] = M.seg[s].ver - 1; /* recompute every column */
     pano_stats.layouts++;
@@ -247,6 +261,23 @@ static uint32_t layout_hash(void) {
         h = (h ^ g->bin_hz ^ (uint32_t)g->n << 20 ^ (uint32_t)s << 28) * 16777619u;
     }
     return h;
+}
+
+/* A trace's line rows in column x: y to the midpoints with its neighbours,
+ * 2 px where it is flat; -1 without data. */
+static void span(const int16_t *ys, int x, int *lo, int *hi) {
+    int y = ys[x];
+    *lo = *hi = -1;
+    if (y < 0) return;
+    *lo = y, *hi = y + 1;
+    for (int d = -1; d <= 1; d += 2) {
+        int nx = x + d;
+        if (nx < 0 || nx >= W || ys[nx] < 0) continue;
+        int m = (y + ys[nx]) / 2;
+        *lo = m < *lo ? m : *lo;
+        *hi = m > *hi ? m : *hi;
+    }
+    if (*hi >= PANO_H) *hi = PANO_H - 1;
 }
 
 /* ---- invalidation ---- */
@@ -356,11 +387,17 @@ void pano_update(void) {
         layout_key = key;
         layout();
     }
-    /* New trace values for the segments with a new spectrum. */
+    /* New trace values for the segments with a new spectrum; the average
+     * takes every spectrum, also those this loop missed. */
+    float aw[MAX_SEG];
+    for (int s = 0; s < MAX_SEG; s++) {
+        uint32_t dv = M.seg[s].ver - seg_ver[s];
+        aw[s] = dv >= 64 ? 1.0f : 1.0f - powf(1.0f - AVG_W, (float)dv);
+    }
     bool changed = false;
     for (int x = 0; x < W; x++) {
         int s = col_seg[x];
-        int y = -1;
+        int y = -1, ay = -1;
         if (s >= 0 && M.seg[s].used) {
             if (M.seg[s].ver == seg_ver[s]) continue;
             const uint8_t *c = M.seg[s].codes;
@@ -368,8 +405,14 @@ void pano_update(void) {
             for (int k = col_k0[x]; k <= col_k1[x]; k++) m = c[k] > m ? c[k] : m;
             col_code[x] = m;
             y = code_y[m];
+            float pw = powf(10.0f, (m / 2.0f - 127.5f) / 10);
+            col_avg[x] = isnan(col_avg[x]) ? pw : col_avg[x] + aw[s] * (pw - col_avg[x]);
+            ay = db_y(10 * log10f(col_avg[x]));
+        } else {
+            col_avg[x] = NAN;
         }
         if (y != col_y[x]) col_y[x] = y, changed = true;
+        if (ay != col_ay[x]) col_ay[x] = ay, changed = true;
     }
     for (int s = 0; s < MAX_SEG; s++) seg_ver[s] = M.seg[s].ver;
     if (changed) {
@@ -377,28 +420,29 @@ void pano_update(void) {
         rect_t rs[W];
         int n = 0;
         for (int x = 0; x < W; x++) {
-            int y = col_y[x], lo = -1, hi = -1;
-            if (y >= 0) {
-                lo = y, hi = y + 1; /* 2 px line where it is flat */
-                for (int d = -1; d <= 1; d += 2) {
-                    int nx = x + d;
-                    if (nx < 0 || nx >= W || col_y[nx] < 0) continue;
-                    int m = (y + col_y[nx]) / 2;
-                    lo = m < lo ? m : lo;
-                    hi = m > hi ? m : hi;
-                }
-                if (hi >= PANO_H) hi = PANO_H - 1;
-            }
-            int olo = col_lo[x], ohi = col_hi[x];
-            if (lo == olo && hi == ohi) continue;
+            int lo, hi, alo, ahi;
+            span(col_y, x, &lo, &hi);
+            span(col_ay, x, &alo, &ahi);
+            int olo = col_lo[x], ohi = col_hi[x], oalo = col_alo[x], oahi = col_ahi[x];
+            bool line = lo != olo || hi != ohi, avg = alo != oalo || ahi != oahi;
+            if (!line && !avg) continue;
             col_lo[x] = lo;
             col_hi[x] = hi;
-            rect_t r = {x, 0, x, PANO_H - 1};
-            if (lo >= 0 && olo >= 0) {
-                r.y1 = lo < olo ? lo : olo;
-                r.y2 = hi > ohi ? hi : ohi;
-            } else {
-                r.y1 = lo < 0 ? olo : olo < 0 ? lo : (lo < olo ? lo : olo);
+            col_alo[x] = alo;
+            col_ahi[x] = ahi;
+            rect_t r = {x, PANO_H, x, -1}; /* empty, grown below */
+            if (line) {
+                if (lo >= 0 && olo >= 0) {
+                    r.y1 = lo < olo ? lo : olo;
+                    r.y2 = hi > ohi ? hi : ohi;
+                } else { /* fill to the bottom appears or goes */
+                    r.y1 = lo < 0 ? olo : olo < 0 ? lo : (lo < olo ? lo : olo);
+                    r.y2 = PANO_H - 1;
+                }
+            }
+            if (avg) { /* only its own rows: it is drawn over the rest */
+                if (oalo >= 0) r.y1 = oalo < r.y1 ? oalo : r.y1, r.y2 = oahi > r.y2 ? oahi : r.y2;
+                if (alo >= 0) r.y1 = alo < r.y1 ? alo : r.y1, r.y2 = ahi > r.y2 ? ahi : r.y2;
             }
             if (n) {
                 rect_t u = join(&rs[n - 1], &r);
@@ -459,9 +503,11 @@ void pano_create(lv_obj_t *scr) {
     memset(grid_row, 0, sizeof(grid_row));
     for (int db = -80; db <= -30; db += 10) grid_row[db_y(db)] = 1;
     c_line = lv_color_hex(0xE8E8E6);
+    c_avg = TH_ACCENT;
     th_seq_lut(wf_lut);
     for (int x = 0; x < W; x++) {
-        col_y[x] = col_lo[x] = col_hi[x] = -1;
+        col_y[x] = col_lo[x] = col_hi[x] = col_ay[x] = col_alo[x] = col_ahi[x] = -1;
+        col_avg[x] = NAN;
         col_seg[x] = -1;
         c_bg[x] = c_bgg[x] = c_fill[x] = c_fillg[x] = TH_SURFACE;
     }

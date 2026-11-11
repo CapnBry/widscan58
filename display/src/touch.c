@@ -17,6 +17,7 @@
 #define RAW_X1 3850
 #define RAW_Y0 220
 #define RAW_Y1 3850
+#define MAX_SPREAD 64 /* raw units (~5 px) between the two closest readings */
 
 static spi_device_handle_t dev;
 
@@ -38,12 +39,13 @@ void touch_init(void) {
     ESP_ERROR_CHECK(spi_bus_add_device(SPI3_HOST, &cfg, &dev));
 }
 
-/* The average of the two closest of three readings. */
+/* The average of the two closest of three readings; -1 if even those
+ * disagree. */
 static int best_two(int a, int b, int c) {
     int ab = a > b ? a - b : b - a, ac = a > c ? a - c : c - a, bc = b > c ? b - c : c - b;
-    if (ab <= ac && ab <= bc) return (a + b) / 2;
-    if (ac <= ab && ac <= bc) return (a + c) / 2;
-    return (b + c) / 2;
+    if (ab <= ac && ab <= bc) return ab > MAX_SPREAD ? -1 : (a + b) / 2;
+    if (ac <= ab && ac <= bc) return ac > MAX_SPREAD ? -1 : (a + c) / 2;
+    return bc > MAX_SPREAD ? -1 : (b + c) / 2;
 }
 
 static int map(int v, int r0, int r1, int out) {
@@ -52,17 +54,19 @@ static int map(int v, int r0, int r1, int out) {
     return (v - r0) * (out - 1) / (r1 - r0);
 }
 
-bool touch_read(int *x, int *y) {
+touch_t touch_read(int *x, int *y) {
     /* Each 16-bit slot returns the previous command's 12-bit result. */
     static const uint8_t tx[19] = {0xB1, 0, 0xC1, 0, 0x91, 0, 0x91, 0, 0xD1, 0, 0x91, 0, 0xD1, 0, 0x91, 0, 0xD0, 0, 0};
     uint8_t rx[19];
     spi_transaction_t t = {.length = 8 * sizeof(tx), .tx_buffer = tx, .rx_buffer = rx};
-    if (spi_device_polling_transmit(dev, &t) != ESP_OK) return false;
+    if (spi_device_polling_transmit(dev, &t) != ESP_OK) return TOUCH_NONE;
     int w[9];
     for (int j = 0; j < 9; j++) w[j] = (rx[1 + 2 * j] << 8 | rx[2 + 2 * j]) >> 3;
     int z = w[0] + 4095 - w[1];
-    if (z < Z_THRESHOLD) return false;
-    *x = map(best_two(w[3], w[5], w[7]), RAW_X0, RAW_X1, LCD_W);
-    *y = map(best_two(w[4], w[6], w[8]), RAW_Y0, RAW_Y1, LCD_H);
-    return true;
+    if (z < Z_THRESHOLD) return TOUCH_NONE;
+    int px = best_two(w[3], w[5], w[7]), py = best_two(w[4], w[6], w[8]);
+    if (px < 0 || py < 0) return TOUCH_BAD;
+    *x = map(px, RAW_X0, RAW_X1, LCD_W);
+    *y = map(py, RAW_Y0, RAW_Y1, LCD_H);
+    return TOUCH_OK;
 }

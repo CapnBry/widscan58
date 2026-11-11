@@ -252,7 +252,7 @@ void passthru_run(void) {
         }
         lvport_tick();
         int x, y;
-        bool down = touch_read(&x, &y);
+        bool down = touch_read(&x, &y) != TOUCH_NONE;
         bool tapped = was_down && !down;
         was_down = down;
         if (tapped || (started && t - last > IDLE_MS) || (!started && t - start > START_MS)) {

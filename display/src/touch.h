@@ -3,5 +3,10 @@
 #include <stdbool.h>
 
 void touch_init(void);
-/* True while pressed, with the point in screen coordinates (landscape). */
-bool touch_read(int *x, int *y);
+typedef enum {
+    TOUCH_NONE, /* not pressed */
+    TOUCH_BAD,  /* pressed, but the readings disagree (light pressure, a finger lifting) */
+    TOUCH_OK,   /* pressed, the point in screen coordinates (landscape) */
+} touch_t;
+
+touch_t touch_read(int *x, int *y);

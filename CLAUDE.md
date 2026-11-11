@@ -263,7 +263,16 @@ tools/cydshot.py shot out.png       # screenshot over USB; also swipe l|r|u|d, t
   C5 and RotorHazard use them; −/+ one code, Now: the last second's
   average; live level, peak, passes and a level graph with the thresholds;
   also opened by tapping the pilot's channel on the lap timer screen, and
-  then Back returns there). Settings are in NVS (`src/settings.c`; thresholds `lapthr`,
+  then Back returns there). Swipes are detected in `src/lvport.c`, not by
+  LVGL (whose gesture restarts on any read that moves under its minimum
+  speed and ends at a release, so most swipes on this resistive panel
+  failed): 40 px along one axis and twice the other, from any point of the
+  last 600 ms; a press survives 3 reads with no or disagreeing touch
+  readings (`touch.c`, `TOUCH_BAD`); one swipe per press, sent to the
+  active screen as `LV_EVENT_GESTURE` (handlers read `lvport_gesture_dir()`),
+  not when the press is on a slider or scrolling. Monitor mode's panorama
+  also draws the web UI's average line (blue): per column, 0.05 per
+  spectrum in linear power. Settings are in NVS (`src/settings.c`; thresholds `lapthr`,
   `src/lap.c`); the lap timer gain is the device's own (`GAIN MANUAL`,
   `CONFIG SAVE`). Lap timer mode has no seats on 2.4 GHz and says so.
 - **Lap timer mode** (`src/host.c`, `src/lap.c`, `src/ui_lap.c`): the display

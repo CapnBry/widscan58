@@ -6,6 +6,8 @@
  *   drag <x0> <y0> <x1> <y1>  press, move in 10 steps, release
  *   peek <x> <y>      8 pixels of frame memory, G and B (console log)
  *   bench             30 full-screen redraws, timed (console log)
+ *   passthru          restart as a USB-UART bridge to the widscan58's
+ *                     download mode, for flashing it (passthru.c)
  * A screenshot is "\n#SHOT 320 240\n", then per flushed area
  * 'A' x1 y1 x2 y2 (u16 LE) and runs of (u8 count 1..255, u16 RGB565 LE)
  * covering it row by row, then 'E'. GPL-3.0-or-later. */
@@ -23,6 +25,7 @@
 #include "lap.h"
 #include "lcd.h"
 #include "model.h"
+#include "passthru.h"
 
 #define PORT UART_NUM_0
 #define MAX_PTS 24
@@ -72,6 +75,7 @@ static void console_task(void *arg) {
         if (!c) c = strstr(line, "reopen");
         if (!c) c = strstr(line, "drag");
         if (!c) c = strstr(line, "fakelaps");
+        if (!c) c = strstr(line, "passthru");
         if (!c) continue;
         memmove(line, c, strlen(c) + 1);
         int x, y, x2, y2;
@@ -79,6 +83,13 @@ static void console_task(void *arg) {
         if (!strcmp(line, "shot")) shot_req = true;
         else if (!strcmp(line, "bench")) bench_req = true;
         else if (!strcmp(line, "reopen")) reopen_req = true;
+        else if (!strcmp(line, "passthru")) {
+#ifdef WS_SIM
+            ESP_LOGW("passthru", "not in the simulator build");
+#else
+            passthru_request();
+#endif
+        }
         else if (sscanf(line, "peek %d %d", &x, &y) == 2) peek_y = y, peek_x = x;
         else if (sscanf(line, "swipe %c", &d) == 1) {
             if (d == 'l') inject_swipe(260, 120, 60, 120);

@@ -75,9 +75,12 @@ reboot the header UART is `/dev/ttyAMA0` (also `/dev/serial0`).
 - **Power both together.** A powered Pi driving the RX pin of an unpowered
   board (or the other way round) feeds current through the pin's protection
   diodes. Power the board from the Pi's 5 V, or from the same supply.
-- **Flashing:** the ROM's download mode listens on these same pins, but the
-  chip only enters it with BOOT held during a reset. Without access to the
-  BOOT button, flash over USB.
+- **Flashing:** the ROM's download mode listens on these same pins. A reset
+  with BOOT held enters it, and so does the `BOOTLOADER` command while the
+  firmware runs (send `PROTOCOL MONITOR` first; lap timer mode refuses it).
+  Then flash with esptool at 115200, `--before no-reset --after
+  watchdog-reset`; esptool raises the rate itself after it connects. A
+  failed flash leaves no firmware to answer `BOOTLOADER`: recover over USB.
 - **One host in charge.** Close the web UI or other programs on the
   USB port when a host on the UART is meant to be in charge: whichever port
   sent last gets the output.

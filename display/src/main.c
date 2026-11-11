@@ -15,6 +15,7 @@
 #include "lvport.h"
 #include "model.h"
 #include "pano.h"
+#include "passthru.h"
 #include "settings.h"
 #include "ui.h"
 
@@ -84,6 +85,11 @@ void app_main(void) {
     for (;;) {
         lcd_selftest();
         vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+#endif
+#ifndef WS_SIM
+    if (passthru_requested()) {
+        passthru_run(); /* does not return */
     }
 #endif
     debug_init();

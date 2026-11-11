@@ -31,6 +31,7 @@ keep that for anything new that is copied or derived from it.
 | `tools/widscan58cli.py` | Python client: `info`, `monitor`, `rawiq`, `spectrum`, `cmd`, `bootloader`. |
 | `tools/serial_bridge.py` | Serial ↔ WebSocket bridge (headless tests, remote viewing). |
 | `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN; `RX_ENV=esp32c5` for the C5). Experimental, see the flashing notes. |
+| `tools/displayflash.py` | Build and flash the C5 through the display's USB port (`display/src/passthru.c`); run with `~/.platformio/penv/bin/python`. See "Display (CYD)". |
 | `tools/pages_firmware.py` | Stages the built firmware into `web/public/firmware` for the in-page flasher (used by CI). |
 | `tools/check_phy_abi.sh` | Compares the private PHY functions we call between two ESP-IDF versions. |
 | `tools/ttyfix.py` | Leaves a serial port at VMIN=1 after pyserial use (see the Web UI "device has been lost" note). |
@@ -219,7 +220,8 @@ the right state (`tools/ttyfix.py`); `pio run -t upload` does not.
 
 Ways back into the bootloader: esptool's `usb-reset` (automatic on upload), or
 hold BOOT while pressing EN. The `BOOTLOADER` command left the board
-unresponsive in testing; don't rely on it yet.
+unresponsive in testing over USB; over the C5's host UART it works (the
+display's passthrough flashing uses it, 2026-11-11).
 
 To restore the original WebSDR firmware:
 `esptool --chip esp32s3 -p /dev/ttyACM0 write-flash 0 backup/websdr-s3-flash-4MB.bin`.
@@ -323,6 +325,23 @@ tools/cydshot.py shot out.png       # screenshot over USB; also swipe l|r|u|d, t
   TFT_eSPI sequence come the ST7789 analog and gamma values from TFT_eSPI's
   ST7789_Init.h, nothing that changes orientation or colours. Touch is the
   XPT2046 library's rotation-1 mapping, as in that sketch.
+- **Flashing the C5 through the display** (`src/passthru.c`,
+  `tools/displayflash.py`): the console's `passthru` sets a flag in RTC
+  no-init memory and restarts the CYD (the CH340 stays enumerated, so the
+  PC's port stays open) into a bridge: it sends the C5 `PROTOCOL MONITOR`
+  and `BOOTLOADER`, checks the ROM's banner for `DOWNLOAD` at 115200, says
+  `passthru: ready download|no-banner` at 921600, then copies bytes between
+  UART0 and the link with the log off. It watches esptool's SLIP for
+  `CHANGE_BAUDRATE` (0x0F) and moves both UARTs to the new rate once the
+  chip's reply has gone through. It restarts into the normal display after
+  8 s without traffic (esptool's `--after watchdog-reset` has started the
+  new firmware), 60 s if esptool never starts, or on a tap.
+  `displayflash.py` keeps one port open from `passthru` to the end, since
+  opening the port resets the CYD, and hands it to esptool's Python API
+  (`esptool.main(..., esp=...)`). It needs our firmware running on the C5:
+  CN1 has no BOOT or EN line, so a C5 left unbootable by a failed flash
+  needs its own USB port. The 691 KB image, 2026-11-11: 6.2 s at 921600 (the
+  default), 4.7 s at 1.5 Mbaud, 4.1 s at 2 Mbaud (`--baud`), all verified.
 - `cydshot.py` opening the port resets the board; it waits for the
   firmware's "main: up" before its steps (separated by `--`).
 

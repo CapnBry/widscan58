@@ -18,6 +18,8 @@ void lcd_init(uint32_t pclk_hz, size_t max_px, lcd_done_cb_t done, void *arg);
  * Returns at once; the buffer must stay untouched until the done callback. */
 void lcd_draw(int x1, int y1, int x2, int y2, const void *px);
 void lcd_backlight(bool on);
+/* Backlight level while on, 1-100 %. */
+void lcd_brightness(int pct);
 void lcd_reopen(void);
 void lcd_peek(int x, int y, int n, uint8_t *g6, uint8_t *b5);
 

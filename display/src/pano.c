@@ -111,16 +111,14 @@ static void pano_draw(lv_event_t *e) {
         int lo = col_lo[x], hi = col_hi[x];
         if (lo < 0) lo = hi = PANO_H; /* background all the way down */
         lv_color_t bg = c_bg[x], bgg = c_bgg[x], fill = c_fill[x], fillg = c_fillg[x];
-        int y = a.y1 - oy, y2 = a.y2 - oy;
-        for (; y <= y2 && y < lo; y++, p += stride) *p = grid_row[y] ? bgg : bg;
-        for (; y <= y2 && y <= hi; y++, p += stride) *p = c_line;
-        for (; y <= y2; y++, p += stride) *p = grid_row[y] ? fillg : fill;
-        /* The average over it. */
+        /* The average under the trace: over the background and fill, not
+         * over the trace's own rows. */
         int alo = col_alo[x], ahi = col_ahi[x];
-        if (alo < 0) continue;
-        int ya = a.y1 - oy > alo ? a.y1 - oy : alo, yb = y2 < ahi ? y2 : ahi;
-        p = buf + (ya + oy - ba->y1) * stride + (x - ba->x1);
-        for (y = ya; y <= yb; y++, p += stride) *p = c_avg;
+        if (alo < 0) alo = PANO_H, ahi = -1;
+        int y = a.y1 - oy, y2 = a.y2 - oy;
+        for (; y <= y2 && y < lo; y++, p += stride) *p = y >= alo && y <= ahi ? c_avg : grid_row[y] ? bgg : bg;
+        for (; y <= y2 && y <= hi; y++, p += stride) *p = c_line;
+        for (; y <= y2; y++, p += stride) *p = y >= alo && y <= ahi ? c_avg : grid_row[y] ? fillg : fill;
     }
 }
 
@@ -440,7 +438,7 @@ void pano_update(void) {
                     r.y2 = PANO_H - 1;
                 }
             }
-            if (avg) { /* only its own rows: it is drawn over the rest */
+            if (avg) { /* only its own rows (the trace is drawn over it) */
                 if (oalo >= 0) r.y1 = oalo < r.y1 ? oalo : r.y1, r.y2 = oahi > r.y2 ? oahi : r.y2;
                 if (alo >= 0) r.y1 = alo < r.y1 ? alo : r.y1, r.y2 = ahi > r.y2 ? ahi : r.y2;
             }

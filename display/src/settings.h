@@ -16,7 +16,11 @@ typedef struct {
     uint8_t volume;    /* lap callouts, 0-100 %, 0: off */
     uint8_t lap_min_s; /* minimum lap, 0-99 s */
     uint8_t lap_run;   /* fastest consecutive laps, 2-9 */
+    /* version 3 */
+    uint8_t backlight; /* %, BACKLIGHT_MIN-100 */
 } settings_t;
+
+#define BACKLIGHT_MIN 5
 
 extern settings_t g_set;
 void settings_load(void);

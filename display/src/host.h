@@ -22,5 +22,12 @@ void host_request_enable(uint32_t mask);
 /* Lap timer: write every seat's EnterAt/ExitAt from L. */
 void host_request_thresholds(void);
 
+/* GPIO configuration: read it (GPIO?) into M.gpio, or with want set
+ * (M.gpio's characters per pin, MAX_GPIO at most) send GPIO <n> ... for
+ * each pin whose active setting differs, then GPIO SAVE and GPIO?. */
+typedef enum { HOST_GPIO_IDLE, HOST_GPIO_BUSY, HOST_GPIO_DONE, HOST_GPIO_FAILED } host_gpio_t;
+void host_request_gpio(const char *want);
+host_gpio_t host_gpio_status(void);
+
 /* From the link task: every text line. */
 void host_on_line(const char *line);

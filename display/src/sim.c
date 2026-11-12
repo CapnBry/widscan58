@@ -116,6 +116,26 @@ static void status(const char *kw) {
           (unsigned)S.search_hz, S.spec_every, S.spec_bins, (unsigned)S.spec_span, plan_js);
 }
 
+/* GPIO? as a C5: USB on 13/14, flash on 16-22, the UART on 11/12. */
+static char gpio_active[] = "-----------TRxx-xxxxxxx------", gpio_saved[] = "-----------TRxx-xxxxxxx------";
+
+static void gpio_set(unsigned n, const char *what) {
+    static const char *const W[] = {"NONE", "LOW", "HIGH", "TX", "RX", "LED", "WS2812"};
+    static const char C[] = "-LHTRDW";
+    int k = -1;
+    for (int j = 0; j < 7; j++)
+        if (!strcmp(what, W[j])) k = j;
+    if (k < 0 || n >= sizeof(gpio_active) - 1 || gpio_active[n] == 'x') {
+        reply("ERR gpio_pin");
+        return;
+    }
+    if (k >= 3) /* one pin each: the one that had it goes back to unused */
+        for (char *p = gpio_active; *p; p++)
+            if (*p == C[k]) *p = '-';
+    gpio_active[n] = C[k];
+    reply("OK");
+}
+
 static void command(const char *line) {
     unsigned a, b, c;
     char d[8];
@@ -135,6 +155,10 @@ static void command(const char *line) {
     else if (!strcmp(line, "PROTOCOL MONITOR")) S.monitor = true, reply("OK");
     else if (!strcmp(line, "PROTOCOL RH")) S.monitor = false, reply("OK");
     else if (!strncmp(line, "CHANNELS ", 9)) set_channels(line + 9), S.enabled = (1u << S.nch) - 1, reply("OK");
+    else if (!strcmp(line, "GPIO?"))
+        reply("GPIO {\"count\":%u,\"active\":\"%s\",\"saved\":\"%s\"}", (unsigned)strlen(gpio_active), gpio_active, gpio_saved);
+    else if (!strcmp(line, "GPIO SAVE")) strcpy(gpio_saved, gpio_active), reply("OK");
+    else if (sscanf(line, "GPIO %u %7s", &a, d) == 2) gpio_set(a, d);
     else if (sscanf(line, "ENABLE %u", &a) == 1) S.enabled = a, reply("OK");
     else if (!strcmp(line, "MODE SINGLE")) S.single = true, plan(), reply("OK");
     else if (!strcmp(line, "MODE GROUP")) S.single = false, plan(), reply("OK");

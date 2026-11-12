@@ -60,12 +60,24 @@ typedef struct {
     uint8_t head, count;
 } chan_t;
 
+/* GPIO? (firmware src/gpio_out.c): one character per GPIO number, '-'
+ * unused, 'L' low, 'H' high, 'T'/'R' the UART's TX/RX, 'D' LED, 'W' WS2812,
+ * 'x' not available. */
+#define MAX_GPIO 48
+typedef struct {
+    bool valid;
+    int count;
+    char active[MAX_GPIO + 1], saved[MAX_GPIO + 1];
+    uint32_t ver; /* bumps with each reply */
+} gpio_state_t;
+
 typedef struct {
     char info[128];
     char version[48];
     profile_t prof;
     status_t st;
     chan_t ch[MAX_CH];
+    gpio_state_t gpio;
     segment_t seg[MAX_SEG];
     uint32_t spectra;       /* spectrum frames since boot */
     struct {

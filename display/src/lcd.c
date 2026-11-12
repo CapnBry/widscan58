@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
@@ -122,14 +123,51 @@ static void panel_init(void) {
     CMD(0xE1, 0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31, 0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E);
 }
 
-void lcd_backlight(bool on) { gpio_set_level(PIN_BL, on); }
+/* The backlight: LEDC PWM on its pin (the board's transistor), 10 bits at
+ * 5 kHz. */
+#define BL_BITS 10
+static int bl_pct = 100;
+static bool bl_on, bl_ready;
+
+static void bl_apply(void) {
+    if (!bl_ready) return;
+    uint32_t duty = bl_on ? ((1u << BL_BITS) - 1) * (uint32_t)bl_pct / 100 : 0;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+}
+
+static void bl_init(void) {
+    ledc_timer_config_t t = {.speed_mode = LEDC_LOW_SPEED_MODE,
+                             .duty_resolution = BL_BITS,
+                             .timer_num = LEDC_TIMER_0,
+                             .freq_hz = 5000,
+                             .clk_cfg = LEDC_AUTO_CLK};
+    ledc_timer_config(&t);
+    ledc_channel_config_t c = {.gpio_num = PIN_BL,
+                               .speed_mode = LEDC_LOW_SPEED_MODE,
+                               .channel = LEDC_CHANNEL_0,
+                               .timer_sel = LEDC_TIMER_0,
+                               .duty = 0};
+    ledc_channel_config(&c);
+    bl_ready = true;
+}
+
+void lcd_backlight(bool on) {
+    bl_on = on;
+    bl_apply();
+}
+
+void lcd_brightness(int pct) {
+    bl_pct = pct < 1 ? 1 : pct > 100 ? 100 : pct;
+    bl_apply();
+}
 
 void lcd_init(uint32_t pclk_hz, size_t max_px, lcd_done_cb_t done, void *arg) {
     done_cb = done;
     done_arg = arg;
-    gpio_config_t g = {.pin_bit_mask = (1ULL << PIN_RST) | (1ULL << PIN_BL), .mode = GPIO_MODE_OUTPUT};
+    gpio_config_t g = {.pin_bit_mask = 1ULL << PIN_RST, .mode = GPIO_MODE_OUTPUT};
     gpio_config(&g);
-    lcd_backlight(false);
+    bl_init(); /* off */
     spi_bus_config_t bus = {
         .sclk_io_num = PIN_SCLK,
         .mosi_io_num = PIN_MOSI,

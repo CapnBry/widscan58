@@ -65,6 +65,17 @@ static void parse_profile(const char *js) {
     }
 }
 
+static void parse_gpio(const char *js) {
+    gpio_state_t g = {.valid = true, .ver = M.gpio.ver + 1};
+    double v;
+    if (!json_num(js, "count", &v) || v < 1 || v > MAX_GPIO) return;
+    g.count = (int)v;
+    if (!json_str(js, "active", g.active, sizeof(g.active)) || !json_str(js, "saved", g.saved, sizeof(g.saved)) ||
+        (int)strlen(g.active) != g.count || (int)strlen(g.saved) != g.count)
+        return;
+    M.gpio = g;
+}
+
 static void parse_status(const char *js) {
     status_t s = {.valid = true};
     char str[16];
@@ -96,6 +107,7 @@ void model_line(const char *line) {
     if (!strncmp(line, "PROFILE ", 8)) parse_profile(line + 8);
     else if (!strncmp(line, "STATUS ", 7)) parse_status(line + 7);
     else if (!strncmp(line, "CONFIG ", 7)) parse_status(line + 7);
+    else if (!strncmp(line, "GPIO {", 6)) parse_gpio(line + 5);
     else if (!strncmp(line, "INFO ", 5)) {
         snprintf(M.info, sizeof(M.info), "%s", line + 5);
         /* widscan58|<target>|<proto>|<version>|... */

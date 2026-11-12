@@ -98,6 +98,7 @@ void app_main(void) {
     model_init();
     lap_init();
     audio_init();
+    lcd_brightness(g_set.backlight); /* applied once lcd_init (lvport) lights it */
     lvport_init();
     ui_init();
     link_init(); /* before the host task sends anything */

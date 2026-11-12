@@ -22,6 +22,7 @@ static const char *TAG = "host";
 #define REQ_LAP_GAIN (1u << 3)
 #define REQ_ENABLE (1u << 4)
 #define REQ_THRESH (1u << 5)
+#define REQ_GPIO (1u << 6)
 
 /* RotorHazard node protocol (firmware/src/proto/rh.c). */
 #define RH_READ_FREQUENCY 0x03
@@ -45,6 +46,8 @@ static volatile int mode_applied = -1;
 static volatile int lap_gain;
 static volatile uint32_t enable_mask;
 static int64_t dev_ms = -1; /* the device's clock at the last poll */
+static char gpio_want[MAX_GPIO + 1]; /* empty: only read */
+static volatile host_gpio_t gpio_status;
 
 host_state_t host_state(void) { return state; }
 int host_mode(void) { return mode_applied; }
@@ -86,6 +89,14 @@ void host_request_lap_gain(int gain) {
     lap_gain = gain;
     request(REQ_LAP_GAIN);
 }
+void host_request_gpio(const char *want) {
+    model_lock();
+    snprintf(gpio_want, sizeof(gpio_want), "%s", want ? want : "");
+    model_unlock();
+    gpio_status = HOST_GPIO_BUSY;
+    request(REQ_GPIO);
+}
+host_gpio_t host_gpio_status(void) { return gpio_status; }
 
 void host_on_line(const char *line) {
     if (!waiting) return;
@@ -277,6 +288,49 @@ static int cmd(const char *line, int timeout_ms) {
     return 1;
 }
 
+static const char *gpio_word(char c) {
+    switch (c) {
+    case 'L': return "LOW";
+    case 'H': return "HIGH";
+    case 'T': return "TX";
+    case 'R': return "RX";
+    case 'D': return "LED";
+    case 'W': return "WS2812";
+    default: return "NONE";
+    }
+}
+
+/* The GPIO request: every changed pin, GPIO SAVE, then read it back. False
+ * if the device stopped answering. */
+static bool gpio_job(void) {
+    char want[MAX_GPIO + 1], active[MAX_GPIO + 1];
+    model_lock();
+    snprintf(want, sizeof(want), "%s", gpio_want);
+    snprintf(active, sizeof(active), "%s", M.gpio.valid ? M.gpio.active : "");
+    model_unlock();
+    bool fail = false;
+    if (want[0]) {
+        if (strlen(want) != strlen(active)) fail = true;
+        for (int n = 0; !fail && want[n]; n++) {
+            if (want[n] == active[n] || want[n] == 'x' || active[n] == 'x') continue;
+            char line[32];
+            snprintf(line, sizeof(line), "GPIO %d %s", n, gpio_word(want[n]));
+            int r = cmd(line, 1000);
+            if (r < 0) return false;
+            fail = r == 0;
+        }
+        if (!fail) {
+            int r = cmd("GPIO SAVE", 1000);
+            if (r < 0) return false;
+            fail = r == 0;
+        }
+    }
+    int r = cmd("GPIO?", 1000);
+    if (r < 0) return false;
+    gpio_status = fail || r == 0 ? HOST_GPIO_FAILED : HOST_GPIO_DONE;
+    return true;
+}
+
 /* Run a list of commands; false if the device stopped answering. */
 static bool cmds(const char *const *list, int n) {
     for (int j = 0; j < n; j++)
@@ -371,6 +425,7 @@ static void host_task(void *arg) {
         req = take_requests(wait);
         int want = g_set.mode;
         if (want != mode_applied || (req & REQ_MODE)) {
+            if (req & REQ_GPIO) request(REQ_GPIO); /* after the setup */
             if (want != mode_applied) {
                 /* Swipes come in bursts: set up only the mode that stays. */
                 vTaskDelay(pdMS_TO_TICKS(150));
@@ -396,6 +451,7 @@ static void host_task(void *arg) {
         }
         if ((req & REQ_CHANNELS) && mode_applied == MODE_LAP) ok = rh_write_seats();
         if ((req & REQ_THRESH) && mode_applied == MODE_LAP) rh_write_thresholds();
+        if (req & REQ_GPIO) ok = ok && gpio_job();
         if ((req & REQ_ENABLE) && mode_applied != MODE_LAP) {
             char line[32];
             snprintf(line, sizeof(line), "ENABLE %u", (unsigned)enable_mask);
@@ -430,6 +486,7 @@ static void host_task(void *arg) {
         }
         if (!ok) {
             ESP_LOGW(TAG, "lost the device");
+            if (gpio_status == HOST_GPIO_BUSY) gpio_status = HOST_GPIO_FAILED;
             link_set_raw(false);
             model_lock();
             L.running = false;

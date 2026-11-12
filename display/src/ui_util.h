@@ -25,3 +25,10 @@ void lap_list_open(int seat, lv_obj_t *back_to); /* every lap since the clear */
 lv_obj_t *lap_list_screen(void);
 void lap_rules_open(void);           /* volume, minimum lap, fastest run; back to settings */
 void lap_list_update(void);          /* under model_lock() */
+
+/* ui_global.c */
+lv_obj_t *global_create(void);       /* the Global screen, in the mode cycle */
+lv_obj_t *global_screen(void);
+void global_update(void);            /* under model_lock() */
+lv_obj_t *gpio_screen(void);         /* NULL when not open */
+void gpio_update(void);              /* under model_lock() */

@@ -17,6 +17,9 @@
 
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <stdlib.h>
 #include "lcd.h"
 #include "lvgl.h"
 #include "debug.h"
@@ -29,6 +32,8 @@
 #endif
 
 static lv_disp_draw_buf_t draw_buf;
+static lv_color_t *bufs[2];
+static int buf_rows;
 static lv_disp_drv_t disp_drv;
 static lv_indev_drv_t indev_drv;
 static lv_indev_t *indev;
@@ -120,14 +125,20 @@ static void swipe_send(void) {
     swipe_dir = LV_DIR_NONE;
 }
 
+/* Both buffers in one block: freed, it merges with what is around it. */
+static lv_color_t *bufs_alloc(int rows) {
+    return heap_caps_malloc((size_t)2 * LCD_W * rows * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+}
+
 void lvport_init(void) {
     lcd_init(LCD_PCLK_HZ, LCD_W * LV_BUF_ROWS, flush_done, NULL);
     touch_init();
     lv_init();
     size_t n = LCD_W * LV_BUF_ROWS;
-    lv_color_t *b1 = heap_caps_malloc(n * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    lv_color_t *b2 = heap_caps_malloc(n * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    lv_disp_draw_buf_init(&draw_buf, b1, b2, n);
+    bufs[0] = bufs_alloc(LV_BUF_ROWS);
+    bufs[1] = bufs[0] + n;
+    buf_rows = LV_BUF_ROWS;
+    lv_disp_draw_buf_init(&draw_buf, bufs[0], bufs[1], n);
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res = LCD_W;
     disp_drv.ver_res = LCD_H;
@@ -143,6 +154,25 @@ void lvport_init(void) {
     indev_drv.gesture_min_velocity = 255;
     indev = lv_indev_drv_register(&indev_drv);
     last_tick_us = esp_timer_get_time();
+}
+
+int lvport_rows(void) { return buf_rows; }
+
+bool lvport_buf_rows(int rows) {
+    if (rows == buf_rows) return true;
+    while (draw_buf.flushing) vTaskDelay(1); /* the last area still on the wire */
+    free(bufs[0]);
+    lv_color_t *b = bufs_alloc(rows);
+    bool ok = b != NULL;
+    if (!ok) b = bufs_alloc(rows = buf_rows); /* where the old ones just were */
+    bufs[0] = b;
+    bufs[1] = b + (size_t)LCD_W * rows;
+    lv_disp_draw_buf_init(&draw_buf, bufs[0], bufs[1], (uint32_t)LCD_W * rows);
+    if (ok) {
+        buf_rows = rows;
+        lv_obj_invalidate(lv_scr_act());
+    }
+    return ok;
 }
 
 void lvport_tick(void) {

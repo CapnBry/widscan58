@@ -1,6 +1,7 @@
-/* Screens: the three mode screens and the Global screen (swipe left/right
- * to cycle, with an overlay for 0.7 s), each mode's settings (swipe down)
- * and the channel editor. GPL-3.0-or-later. */
+/* Screens: the three mode screens, the RemoteID list (while the receiver
+ * is on) and the Global screen (swipe left/right to cycle, with an overlay
+ * for 0.7 s), each mode's settings (swipe down) and the channel editor.
+ * GPL-3.0-or-later. */
 #include "ui.h"
 
 #include <stdio.h>
@@ -23,10 +24,12 @@
 
 static const char *const MODE_NAME[MODE_COUNT] = {"Monitor", "Lap timer", "Power meter"};
 
-/* The cycle: the modes, then Global (ui_global.c) between power meter and
- * monitor. Global leaves the widscan58 in the mode it was in. */
-#define SCR_GLOBAL MODE_COUNT
-#define NSCR (MODE_COUNT + 1)
+/* The cycle: the modes, then RemoteID (ui_rid.c, only while its receiver
+ * is on) and Global (ui_global.c), between power meter and monitor. Both
+ * leave the widscan58 in the mode it was in. */
+#define SCR_RID SCREEN_RID
+#define SCR_GLOBAL SCREEN_GLOBAL
+#define NSCR SCREEN_COUNT
 static lv_obj_t *scr_mode[MODE_COUNT];
 static int cur_scr; /* in the cycle: a MODE_* or SCR_GLOBAL */
 static lv_obj_t *overlay, *overlay_label;
@@ -81,6 +84,10 @@ void ui_device_text(char *out, size_t n) {
 
 static void overlay_show(const char *name) {
     lv_label_set_text(overlay_label, name);
+    /* 200 px, wider for a longer name ("RemoteID receiver"). */
+    lv_point_t sz;
+    lv_txt_get_size(&sz, name, &lv_font_montserrat_20, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_width(overlay, sz.x + 32 > 200 ? sz.x + 32 : 200);
     lv_obj_clear_flag(overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_update_layout(overlay);
     lv_area_t a;
@@ -565,22 +572,38 @@ static void power_update(uint32_t t) {
 
 static void show(int k) {
     cur_scr = k;
+    /* The boot screen too: RemoteID and Global as such, a mode by g_set.mode. */
+    g_set.screen = k >= MODE_COUNT ? (uint8_t)k : SCREEN_OF_MODE;
+    ui_schedule_save();
+    if (k == SCR_RID) {
+        lv_scr_load(rid_screen());
+        overlay_show("RemoteID receiver");
+        return;
+    }
     if (k == SCR_GLOBAL) {
         lv_scr_load(global_screen());
-        overlay_show("Global");
+        overlay_show("Global settings");
         return;
     }
     g_set.mode = k;
-    ui_schedule_save();
     host_request_mode();
     lv_scr_load(scr_mode[k]);
     overlay_show(MODE_NAME[k]);
 }
 
+/* The next screen in the cycle that way, past RemoteID while it is off. */
+static int next_scr(int d) {
+    int k = cur_scr;
+    do k = (k + d + NSCR) % NSCR;
+    while (k == SCR_RID && !g_set.rid_on);
+    return k;
+}
+
 static void mode_gesture(lv_event_t *e) {
     lv_dir_t d = lvport_gesture_dir(); /* one per press (lvport.c) */
-    if (d == LV_DIR_LEFT) show((cur_scr + 1) % NSCR);
-    else if (d == LV_DIR_RIGHT) show((cur_scr + NSCR - 1) % NSCR);
+    if (d == LV_DIR_LEFT) show(next_scr(1));
+    else if (d == LV_DIR_RIGHT) show(next_scr(-1));
+    else if (d == LV_DIR_BOTTOM && cur_scr == SCR_RID) rid_settings_open();
     else if (d == LV_DIR_BOTTOM && cur_scr != SCR_GLOBAL) ui_open_settings(g_set.mode);
 }
 
@@ -595,6 +618,7 @@ void ui_init(void) {
     pano_create(scr_mode[MODE_MONITOR]);
     lap_main_create(scr_mode[MODE_LAP]);
     power_create(scr_mode[MODE_POWER]);
+    lv_obj_add_event_cb(rid_create(), mode_gesture, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(global_create(), mode_gesture, LV_EVENT_GESTURE, NULL);
     overlay = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(overlay);
@@ -609,14 +633,18 @@ void ui_init(void) {
     overlay_label = ui_label(overlay, &lv_font_montserrat_20, TH_INK, "");
     lv_obj_center(overlay_label);
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+    /* The screen last shown: RemoteID only while its receiver is on. The
+     * widscan58 is set up for g_set.mode whichever it is. */
     cur_scr = g_set.mode;
-    lv_scr_load(scr_mode[g_set.mode]);
+    if (g_set.screen == SCR_GLOBAL || (g_set.screen == SCR_RID && g_set.rid_on)) cur_scr = g_set.screen;
+    lv_scr_load(cur_scr == SCR_RID ? rid_screen() : cur_scr == SCR_GLOBAL ? global_screen() : scr_mode[cur_scr]);
 }
 
 void ui_update(void) {
     uint32_t t = now_ms();
     overlay_check(t);
     lap_poll_saves();
+    rid_poll(); /* whatever shows */
     if (save_at && (int32_t)(t - save_at) >= 0) {
         save_at = 0;
         settings_save();
@@ -635,6 +663,12 @@ void ui_update(void) {
         lap_seat_update();
     } else if (act && act == lap_list_screen()) {
         lap_list_update();
+    } else if (act == rid_screen()) {
+        rid_main_update();
+    } else if (act && act == rid_detail_screen()) {
+        rid_detail_update();
+    } else if (act && act == rid_settings_screen()) {
+        rid_settings_update();
     } else if (act == global_screen()) {
         global_update();
     } else if (act && act == gpio_screen()) {

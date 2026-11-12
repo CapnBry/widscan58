@@ -1,6 +1,7 @@
 /* Widscan58 display: a CYD (ESP32-2432S028R) showing a widscan58 over its
  * UART, with the web UI's monitor, lap timer and power meter modes cut
- * down to 320x240. GPL-3.0-or-later. */
+ * down to 320x240, and a RemoteID receiver on its own radios.
+ * GPL-3.0-or-later. */
 #include "audio.h"
 #include "debug.h"
 #include "esp_heap_caps.h"
@@ -17,6 +18,7 @@
 #include "model.h"
 #include "pano.h"
 #include "passthru.h"
+#include "rid_radio.h"
 #include "settings.h"
 #include "ui.h"
 
@@ -55,7 +57,7 @@ static void ui_task(void *arg) {
             ESP_LOGI(TAG,
                      "pano %.1f fps, %.1f rects/frame, %.0f kpx/s | lcd %.0f KB/s %.0f draws/s, waited %.1f%% | "
                      "wf %.1f rows/s | loop: update %.2f ms, refresh %.2f ms (max %.1f) | link %u frames %.1f KB/s | "
-                     "lap poll %u ms, %u polls | heap %u",
+                     "lap poll %u ms, %u polls | heap %u (min %u)",
                      (pano_stats.updates - prev.updates) / dt,
                      pano_stats.updates == prev.updates ? 0.0f
                                                         : (float)(pano_stats.rects - prev.rects) / (pano_stats.updates - prev.updates),
@@ -63,7 +65,8 @@ static void ui_task(void *arg) {
                      (fl - prev_flush) / dt / 1e4, (pano_stats.wf_rows - prev.wf_rows) / dt, upd_us / 1000.0 / frames,
                      refr_us / 1000.0 / frames, refr_max / 1000.0, (unsigned)M.frames, M.bytes / dt / 1024,
                      (unsigned)L.loop_ms, (unsigned)(L.polls - prev_polls),
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
             M.frames = M.bytes = 0;
             prev_polls = L.polls;
             prev = pano_stats;
@@ -95,6 +98,9 @@ void app_main(void) {
 #endif
     debug_init();
     settings_load();
+    rid_radio_init(); /* first: frees the controller's Classic memory; radios
+                       * off until the UI starts them (rid_poll) */
+    rid_radio_config(g_set.rid_ble_pct, g_set.rid_lock);
     model_init();
     lap_init();
     audio_init();

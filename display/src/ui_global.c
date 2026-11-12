@@ -3,7 +3,8 @@
  * UI's GPIO dialog (web/src/views/gpioDialog.ts). The GPIO screen edits a
  * copy: OK sends the changed pins, then GPIO SAVE; Cancel and Back drop
  * it. The UART's TX and RX stay where they are: the display talks to the
- * widscan58 through them. GPL-3.0-or-later. */
+ * widscan58 through them. The RemoteID receiver's switch is here too.
+ * GPL-3.0-or-later. */
 #include <stdio.h>
 #include <string.h>
 
@@ -42,9 +43,16 @@ static void bl_step(lv_event_t *e) {
 
 static void gpio_open(lv_event_t *e);
 
+/* On: its screen joins the cycle and the radios start (rid_poll); off:
+ * both go. */
+static void rid_toggle(lv_event_t *e) {
+    g_set.rid_on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+    ui_schedule_save();
+}
+
 lv_obj_t *global_create(void) {
     lv_obj_t *s = scr_global = ui_screen();
-    lv_obj_t *title = ui_label(s, &lv_font_montserrat_16, TH_INK, "Global");
+    lv_obj_t *title = ui_label(s, &lv_font_montserrat_16, TH_INK, "Global settings");
     lv_obj_align(title, LV_ALIGN_TOP_RIGHT, -10, 12);
     int y = 50;
     lv_obj_t *l = ui_label(s, &lv_font_montserrat_14, TH_INK2, "Backlight");
@@ -73,12 +81,17 @@ lv_obj_t *global_create(void) {
     lv_obj_t *b = ui_button(s, "GPIO config", gpio_open, NULL);
     lv_obj_set_pos(b, 10, y);
     lv_obj_set_size(b, 300, 34);
+    lv_obj_t *cb = lv_checkbox_create(s);
+    lv_checkbox_set_text(cb, "RemoteID receiver");
+    lv_obj_set_style_text_color(cb, TH_INK2, 0);
+    lv_obj_set_pos(cb, 10, y + 46);
+    lv_obj_set_ext_click_area(cb, 6);
+    if (g_set.rid_on) lv_obj_add_state(cb, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(cb, rid_toggle, LV_EVENT_VALUE_CHANGED, NULL);
     gl_device = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "");
     lv_obj_set_width(gl_device, 300);
     lv_label_set_long_mode(gl_device, LV_LABEL_LONG_DOT);
     lv_obj_align(gl_device, LV_ALIGN_BOTTOM_LEFT, 10, -6);
-    lv_obj_t *hint = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "Swipe left or right for the modes");
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_RIGHT, -10, -20);
     return s;
 }
 

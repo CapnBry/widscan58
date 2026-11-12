@@ -7,6 +7,7 @@
   cydshot.py tap X Y                inject a tap
   cydshot.py drag X0 Y0 X1 Y1       inject a drag (sliders)
   cydshot.py fakelaps SEAT N        N sample laps on a seat (screenshots)
+  cydshot.py fakerid N              a frame from each of N made-up aircraft
   cydshot.py bench                  time full-screen redraws (see log)
   cydshot.py log [SECONDS]          print the console (frame rate stats)
 
@@ -118,7 +119,7 @@ def main():
             continue
         if st[0] == "shot":
             shot(s, st[1] if len(st) > 1 else "shot.png")
-        elif st[0] in ("swipe", "tap", "drag", "bench", "peek", "reopen", "fakelaps"):
+        elif st[0] in ("swipe", "tap", "drag", "bench", "peek", "reopen", "fakelaps", "fakerid"):
             s.write((" ".join(st) + "\n").encode())
             time.sleep(0.3)
         elif st[0] == "sleep":

@@ -26,6 +26,17 @@ lv_obj_t *lap_list_screen(void);
 void lap_rules_open(void);           /* volume, minimum lap, fastest run; back to settings */
 void lap_list_update(void);          /* under model_lock() */
 
+/* ui_rid.c */
+void rid_poll(void);                 /* every UI pass: the received frames into the list */
+lv_obj_t *rid_create(void);          /* the list screen, in the cycle while the receiver is on */
+lv_obj_t *rid_screen(void);
+void rid_main_update(void);
+lv_obj_t *rid_detail_screen(void);   /* NULL when not open */
+void rid_detail_update(void);
+void rid_settings_open(void);        /* split and lock; back to the list */
+lv_obj_t *rid_settings_screen(void); /* NULL when not open */
+void rid_settings_update(void);
+
 /* ui_global.c */
 lv_obj_t *global_create(void);       /* the Global screen, in the mode cycle */
 lv_obj_t *global_screen(void);

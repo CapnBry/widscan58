@@ -3,6 +3,7 @@
  *   swipe l|r|u|d     a finger swipe left/right/up/down across the middle
  *   tap <x> <y>       a short press
  *   fakelaps <seat> <n> [lo_ms hi_ms]  n sample laps on a seat (screenshots)
+ *   fakerid <n>       one frame from each of n made-up aircraft (rid_fake)
  *   drag <x0> <y0> <x1> <y1>  press, move in 10 steps, release
  *   peek <x> <y>      8 pixels of frame memory, G and B (console log)
  *   bench             30 full-screen redraws, timed (console log)
@@ -26,6 +27,7 @@
 #include "lcd.h"
 #include "model.h"
 #include "passthru.h"
+#include "rid_radio.h"
 
 #define PORT UART_NUM_0
 #define MAX_PTS 24
@@ -76,6 +78,7 @@ static void console_task(void *arg) {
         if (!c) c = strstr(line, "drag");
         if (!c) c = strstr(line, "fakelaps");
         if (!c) c = strstr(line, "passthru");
+        if (!c) c = strstr(line, "fakerid");
         if (!c) continue;
         memmove(line, c, strlen(c) + 1);
         int x, y, x2, y2;
@@ -114,6 +117,12 @@ static void console_task(void *arg) {
             lap_inject_pass(x, t);
             for (int k = 0; k < y; k++) lap_inject_pass(x, t += ms[k]);
             model_unlock();
+        } else if (sscanf(line, "fakerid %d", &x) == 1 && x > 0 && x <= RID_MAX) {
+            for (int k = 0; k < x; k++) {
+                rid_raw_t m;
+                rid_fake(&m, k, now_ms());
+                rid_radio_inject(&m);
+            }
         } else if (sscanf(line, "drag %d %d %d %d", &x, &y, &x2, &y2) == 4) {
             inject_swipe(x, y, x2, y2);
         } else if (sscanf(line, "tap %d %d", &x, &y) == 2) {

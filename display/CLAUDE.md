@@ -13,7 +13,7 @@ protocol, web UI) is in [../CLAUDE.md](../CLAUDE.md).
 | `tools/cydshot.py` | Screenshots and injected touch over the CYD's USB port (see below). |
 | `tools/gen_voice.py` | Makes the lap callout clips with a TTS model on OpenRouter (`OPENROUTER_API_KEY`); see "Lap callouts". |
 | `../tools/displayflash.py` | Builds and flashes the C5 through the display's USB port (`src/passthru.c`); see "Flashing the C5 through the display". |
-| `voice/` | The callout clips (`voice.bin`) and the paid API's cached replies (`cache/`). Not tracked. |
+| `voice/` | The callout clips (`voice.bin`, tracked) and the paid API's cached replies (`cache/`, not tracked). |
 
 `display/` is its own PlatformIO + ESP-IDF 5.5.5 project (the same pioarduino
 platform as `firmware/`) for an ESP32-2432S028R: 320x240 in landscape,
@@ -183,8 +183,8 @@ pio test -e native                  # host tests (test/test_rid)
   `dac_continuous` (I2S0's DMA) at 16 kHz from the APLL (the default clock
   goes no lower than 19.6 kHz). A new lap replaces one still waiting. The
   words are 30 clips (zero to nineteen, twenty to ninety, hundred, point;
-  `voice/voice.bin`, 276 KB of 8-bit PCM, `EMBED_FILES`, not tracked:
-  the build needs it made first; table in `src/voice_clips.h`), made by
+  `voice/voice.bin`, 276 KB of 8-bit PCM, `EMBED_FILES`, tracked, so a
+  build needs no API key; table in `src/voice_clips.h`), made by
   `tools/gen_voice.py` with Gemini TTS on OpenRouter (voice Leda, each
   clip trimmed to the speech at −32 dB, no padding, no gap between
   words). `--instructions` (delivery text, cached separately) and
@@ -192,8 +192,20 @@ pio test -e native                  # host tests (test/test_rid)
   "quick, crisp announcer" style sounded worse than none (2026-11-11). Every API call costs money: the raw replies are
   kept in `voice/cache/` (not tracked), and reruns only fetch missing clips,
   so trim and level changes cost nothing. Don't delete the cache. Volume
-  in Lap settings, 0-100 % in steps of 10, Off at 0; Test says 23.9.
-  Not yet heard on hardware (2026-11-11).
+  in Lap settings: Off, 5, 10, then steps of 10 to 100 % (default 50);
+  Test says 23.9.
+  Every DAC write is a whole 256 samples, carried across words: a clip's
+  odd-sized last chunk stopped the DMA after the first word. Between
+  callouts the DAC holds 0 V, ramped to mid-scale and back over 50 ms each
+  side: held at mid-scale the PCB's digital noise was loud in the speaker,
+  at 0 V it is quieter (not silent), with the channel off no quieter. Heard on hardware
+  (2026-11-13). The amplifier (SC8002B) came with a gain of ~29 (Rf 68 kΩ
+  across pins 4-5, Ri the 4.7 kΩ from GPIO26, then a capacitor to GND and
+  the coupling capacitor to pin 4): 50 % overdrove the speaker. With Rf
+  changed to 6.8 kΩ (gain ~2.9) the old 10 % is about 100 %. The capacitor
+  to GND is no low-pass: the coupling capacitor goes to pin 4's virtual
+  ground, so the two split the current in a fixed ratio. The DAC has no
+  gain of its own.
 - **Display speed:** SPI2 on its IOMUX pins, DMA, two 320x40 LVGL buffers
   (320x20 while the RemoteID receiver is on: monitor full redraw 25.8 ms
   instead of 21.8, live updates unchanged).

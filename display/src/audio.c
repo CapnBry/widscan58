@@ -11,7 +11,8 @@
 
 #define CHUNK 256      /* samples per DAC write */
 #define WORD_GAP_MS 0  /* silence between words (the clips are trimmed to the speech) */
-#define TAIL_MS 20     /* mid-scale after a sentence: the DMA stops on it */
+#define TAIL_MS 20     /* mid-scale after a sentence, before the ramp down */
+#define RAMP (VOICE_RATE / 20) /* 0 V to mid-scale and back: 50 ms, no click */
 #define MAX_WORDS 8    /* "nine hundred ninety nine point nine": 7 */
 
 static const char *TAG = "audio";
@@ -21,15 +22,24 @@ extern const uint8_t voice_start[] asm("_binary_voice_bin_start");
 static dac_continuous_handle_t dac;
 static QueueHandle_t q;
 
-static void out(const uint8_t *src, int n, int vol) {
-    uint8_t buf[CHUNK];
-    while (n > 0) {
-        int m = n < CHUNK ? n : CHUNK;
-        for (int k = 0; k < m; k++) buf[k] = src ? (uint8_t)(128 + ((src[k] - 128) * vol) / 100) : 128;
-        dac_continuous_write(dac, buf, m, NULL, -1);
-        if (src) src += m;
-        n -= m;
+/* Every DAC write is a whole CHUNK: the driver splits a write over two DMA
+ * descriptors, and one of an odd number of samples (a clip's last partial
+ * chunk) seems to stop it: only the first word was heard (2026-11-13).
+ * Samples carry over from one clip to the next, and a sentence ends with
+ * the ramp down to 0 V, padded with 0. */
+static uint8_t buf[CHUNK];
+static int fill;
+
+static void put(uint8_t v) {
+    buf[fill++] = v;
+    if (fill == CHUNK) {
+        dac_continuous_write(dac, buf, CHUNK, NULL, -1);
+        fill = 0;
     }
+}
+
+static void out(const uint8_t *src, int n, int vol) {
+    while (n-- > 0) put(src ? (uint8_t)(128 + ((*src++ - 128) * vol) / 100) : 128);
 }
 
 /* The words of a time in tenths of a second, 0-9999 (999.9 s). */
@@ -47,20 +57,18 @@ static int words(uint32_t tenths, uint8_t *w) {
     return n;
 }
 
+/* Between callouts the DAC holds 0 V: at mid-scale the PCB's digital noise
+ * was loud in the speaker, at 0 V it is quieter, and with the channel off no
+ * quieter (2026-11-13). The DMA stops on the last sample, so each sentence
+ * ramps up from 0 V and back down. */
 static void audio_task(void *arg) {
-    /* From 0 V up to mid-scale over 50 ms: no click at boot. */
-    const int ramp = VOICE_RATE / 20;
-    uint8_t buf[CHUNK];
-    for (int i = 0; i < ramp; i += CHUNK) {
-        for (int k = 0; k < CHUNK; k++) buf[k] = i + k < ramp ? 128 * (i + k) / ramp : 128;
-        dac_continuous_write(dac, buf, CHUNK, NULL, -1);
-    }
     uint32_t ms;
     for (;;) {
         xQueueReceive(q, &ms, portMAX_DELAY);
         int vol = g_set.volume;
         uint32_t tenths = (ms + 50) / 100;
         if (!vol || tenths > 9999) continue;
+        for (int i = 1; i <= RAMP; i++) put(128 * i / RAMP);
         uint8_t w[MAX_WORDS];
         int n = words(tenths, w);
         for (int k = 0; k < n; k++) {
@@ -68,6 +76,8 @@ static void audio_task(void *arg) {
             if (k < n - 1) out(NULL, VOICE_RATE * WORD_GAP_MS / 1000, 0);
         }
         out(NULL, VOICE_RATE * TAIL_MS / 1000, 0);
+        for (int i = 1; i <= RAMP; i++) put(128 - 128 * i / RAMP);
+        while (fill) put(0);
     }
 }
 

@@ -521,7 +521,9 @@ void lap_list_update(void) {
 
 /* ---- lap settings: callout volume, minimum lap, fastest run ---- */
 
+/* Volume steps: 0 (off), 5, 10, then 10 at a time to 100. */
 #define VOL_STEP 10
+#define VOL_FINE 5 /* below VOL_STEP */
 
 static struct {
     lv_obj_t *scr, *vol, *min, *run;
@@ -554,7 +556,8 @@ static void rules_step(lv_event_t *e) {
     int u = (int)(intptr_t)lv_event_get_user_data(e), row = u / 2, d = u % 2 ? 1 : -1;
     static const int lo[3] = {0, 0, 2}, hi[3] = {100, 99, LAP_RUN_MAX}, step[3] = {VOL_STEP, 1, 1};
     uint8_t *f = row == 0 ? &g_set.volume : row == 1 ? &g_set.lap_min_s : &g_set.lap_run;
-    int v = *f + d * step[row];
+    int st = row == 0 && (d > 0 ? *f < VOL_STEP : *f <= VOL_STEP) ? VOL_FINE : step[row];
+    int v = *f + d * st;
     if (v < lo[row] || v > hi[row]) return;
     *f = v;
     if (row) {

@@ -47,6 +47,20 @@ GPIO11 and GPIO12 are the widscan58's default UART pins. Leave the C5 board's
 USB unplugged when powering it from the display's 3.3V pin: two regulators
 would otherwise feed the same rail.
 
+## Sound output
+
+In lap timer mode the display says each lap time through the speaker
+connector. As shipped, the board's amplifier is so loud that it pulls down
+the input voltage and sounds terrible. Two resistors around the amplifier
+(the 8-pin chip by the speaker connector) set its gain, 2 × Rf / Ri:
+
+- Rf, marked `683` (68 kΩ), across the amplifier's pins 4 and 5;
+- Ri, marked `472` (4.7 kΩ), on the line from GPIO26.
+
+Replacing the `683` with a `682` (6.8 kΩ) lowers the gain from about 29 to
+about 2.9, so full volume is about as loud as 10 % was before. If that is
+still too loud, also replace the `472` with a `682`, for a gain of 2.
+
 ## Building
 
 ```sh
@@ -55,5 +69,6 @@ pio run -e cyd -t upload        # the display, for a widscan58 on its UART
 pio run -e cyd-sim -t upload    # with a built-in simulated widscan58, no C5 needed
 ```
 
-The lap callouts need `voice/voice.bin`, made with `tools/gen_voice.py`
-(a paid text-to-speech API); see CLAUDE.md.
+The lap callouts are `voice/voice.bin`, made with `tools/gen_voice.py`
+(a paid text-to-speech API; see CLAUDE.md). It is in the repository, so a
+build does not need to make it.

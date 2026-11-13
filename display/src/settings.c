@@ -20,7 +20,7 @@ static void defaults(void) {
     g_set.atten = 30;
     g_set.nch = 8;
     for (int j = 0; j < 8; j++) g_set.ch[j][0] = 'R', g_set.ch[j][1] = '1' + j;
-    g_set.volume = 70;
+    g_set.volume = 50;
     g_set.lap_min_s = 5; /* as the web UI */
     g_set.lap_run = 3;
     g_set.backlight = 100;

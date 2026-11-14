@@ -271,6 +271,21 @@ pio test -e native                  # host tests (test/test_rid)
   to GND is no low-pass: the coupling capacitor goes to pin 4's virtual
   ground, so the two split the current in a fixed ratio. The DAC has no
   gain of its own.
+  **Open: crackle on one word per callout**, a different word each time
+  (Test: sometimes "point", sometimes "nine" or "three"). Tried on
+  2026-11-14, none made a difference: 128 ms of DMA buffering instead of
+  32 ms (the driver splits each 256-sample write into two 128-sample
+  descriptors, so `desc_num 4` held 32 ms) and the audio task at priority 7
+  instead of 3; a sound-only firmware (only `settings_load` and the audio,
+  23.9 every 3 s: no panel, backlight, touch, link or radios); and the
+  driver's async mode (a ring of DMA buffers refilled from `on_convert_done`,
+  never stopping, no audio task). The clips are not clipped (none reach 0 or
+  255). The blocking write's DMA stops once per callout, always 8 ms in
+  (after the first 128 samples, with 2048 queued) and restarted by the next
+  write: during the ramp-up, before the first word, and async mode, without
+  it, crackled the same. Untested: the analog side (the DAC's 8-bit steps
+  at a low level, the amplifier), e.g. a steady tone from the DAC's cosine
+  generator (no DMA).
 - **Display speed:** SPI2 on its IOMUX pins, DMA, two 320x40 LVGL buffers
   (320x20 while the RemoteID receiver is on: monitor full redraw 25.8 ms
   instead of 21.8, live updates unchanged).

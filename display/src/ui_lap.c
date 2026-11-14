@@ -20,6 +20,7 @@
 #define THR_STEP 1 /* level code (0.25 dB) */
 #define SAVE_DELAY_MS 2000
 #define RECENT_SHOWN 6
+#define LEAD_HOLD_MS 750 /* before a pick: the strongest seat shown at least this long */
 
 static uint32_t thr_save_at;
 
@@ -81,18 +82,35 @@ static struct {
         *notice, *notice2;
     graph_t graph;
     int chip_seat;
+    int lead;         /* before a pick: the strongest seat shown, -1: none */
+    uint32_t lead_t;  /* when lead last changed */
     bool dot_on, best_long;
     uint32_t text_t;
-} mn = {.chip_seat = -2};
+} mn = {.chip_seat = -2, .lead = -1};
 
 static lv_obj_t *main_scr;
 
-/* The pilot's channel: its thresholds, back to here. */
+/* The channel shown (the pilot's, or before a pick the strongest): its
+ * thresholds, back to here. */
 static void chip_clicked(lv_event_t *e) {
-    model_lock();
-    int sel = L.selected;
-    model_unlock();
-    if (sel >= 0) lap_seat_open_from(sel, main_scr);
+    int seat = mn.chip_seat;
+    if (seat >= 0) lap_seat_open_from(seat, main_scr);
+}
+
+/* Before the first pass picks a seat: the seat with the highest level, so
+ * its thresholds are a tap away when it does not reach EnterAt. A change
+ * holds for LEAD_HOLD_MS, so the chip does not flicker between seats of
+ * about the same level; a seat that lost its level is replaced at once. */
+static int lead_seat(uint32_t t) {
+    int best = -1;
+    for (int j = 0; j < SEATS; j++)
+        if (L.s[j].on && L.s[j].have && (best < 0 || L.s[j].level > L.s[best].level)) best = j;
+    bool valid = mn.lead >= 0 && L.s[mn.lead].on && L.s[mn.lead].have;
+    if (best != mn.lead && (!valid || t - mn.lead_t >= LEAD_HOLD_MS)) {
+        mn.lead = best;
+        mn.lead_t = t;
+    }
+    return mn.lead;
 }
 
 static void laps_clicked(lv_event_t *e) {
@@ -179,19 +197,26 @@ void lap_main_update(void) {
     graph_update(&mn.graph);
     if (t - mn.text_t < TEXT_PERIOD_MS) return;
     mn.text_t = t;
-    set_chip(mn.chip, mn.chip_text, sel, &mn.chip_seat);
     const seat_t *s = sel >= 0 ? &L.s[sel] : NULL;
-    char buf[48];
-    if (s && s->have) snprintf(buf, sizeof(buf), "Level %u", s->level);
-    else buf[0] = 0;
-    ui_set_text(mn.level, buf);
-    set_dot(mn.dot, s && s->crossing, &mn.dot_on);
     /* Not timing yet: say why. */
     const char *note = NULL, *note2 = "";
+    bool waiting = false; /* for the first pass */
     if (host_state() == HOST_SEARCHING) note = "Searching for widscan58...";
     else if (!L.running || host_mode() != MODE_LAP) note = "Setting up...";
     else if (plan_is_ism(g_set.ch, g_set.nch)) note = "No lap timing on 2.4 GHz", note2 = "Edit channels to pick 5.8 GHz";
-    else if (!s) note = "Fly through the gate", note2 = "The first pass picks the channel";
+    else if (!s) note = "Fly through the gate", note2 = "The first pass locks the channel", waiting = true;
+    /* The pilot's seat; while waiting for the first pass, the strongest
+     * (not a pick: only a pass picks). */
+    int shown = sel;
+    if (waiting) shown = lead_seat(t);
+    else mn.lead = -1;
+    set_chip(mn.chip, mn.chip_text, shown, &mn.chip_seat);
+    const seat_t *cs = shown >= 0 ? &L.s[shown] : NULL;
+    char buf[48];
+    if (cs && cs->have) snprintf(buf, sizeof(buf), "Level %u", cs->level);
+    else buf[0] = 0;
+    ui_set_text(mn.level, buf);
+    set_dot(mn.dot, cs && cs->crossing, &mn.dot_on);
     hide(mn.notice, !note);
     hide(mn.notice2, !note);
     if (note) {

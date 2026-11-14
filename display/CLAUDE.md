@@ -225,7 +225,12 @@ pio test -e native                  # host tests (test/test_rid)
   pass. A run of more than 3 shows its average beside the total. The
   first counted pass picks the pilot's seat; the main screen shows its last
   lap big, the running lap, the fastest 3 and the laps before, over a graph
-  of every seat's level; Clear drops the laps and the pick. Tapping the lap
+  of every seat's level; Clear drops the laps and the pick. Until a pass
+  picks a seat ("Fly through the gate"), the channel chip shows the seat
+  with the highest level, its level and crossing dot (`lead_seat`,
+  `ui_lap.c`), so a tap opens the thresholds of a pilot whose level stays
+  below EnterAt; that is not a pick. A change holds at least 750 ms
+  (`LEAD_HOLD_MS`), unless the seat shown loses its level. Tapping the lap
   grid opens every lap since the clear (the newest 50, 5 x 10, the fastest
   run in green). Laps of a minute or more read 1:02.35 (no "s" after the big
   time) and switch the Best 3 laps and the lap list to a smaller font; 10

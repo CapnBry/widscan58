@@ -77,6 +77,14 @@ unsigned radio_get_tune_skip(void);
 void radio_idle_enter(unsigned depth);
 void radio_idle_exit(unsigned depth);
 
+/* Idle, while nothing is scanned (scanner.c): the C5 stops the Wi-Fi driver
+ * (the PHY and its tracking off) and runs the CPU from the crystal; USB and
+ * the UART keep working. radio_wake puts both back and the next tune
+ * recalibrates. Settings (gain, filter, recal mode) may be set while asleep:
+ * they apply at that tune. No-ops on the S3. Scanner task only. */
+void radio_sleep(void);
+void radio_wake(void);
+
 /* The capture aperture, for scratch use between captures (it is overwritten
  * by the next radio_capture). */
 uint32_t *radio_sample_buffer(unsigned *max_words);

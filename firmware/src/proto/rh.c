@@ -338,6 +338,15 @@ void rh_host_check(int64_t now_us) {
     scanner_set_config(&c);
 }
 
+void rh_host_stop(void) {
+    host_gone = true;
+    scan_config_t c;
+    scanner_get_config(&c);
+    if (!c.running) return;
+    c.running = false;
+    scanner_set_config(&c);
+}
+
 bool rh_idle(void) { return !wneed; }
 
 void rh_rx(uint8_t b, int64_t now_us) {

@@ -33,6 +33,9 @@
  * idle task (freeing deleted tasks) and the FreeRTOS timer task. */
 #define YIELD_US 1000000
 #define YIELD_SLEEP_US 100
+/* Stopped this long, the radio goes idle (radio_sleep; at once after
+ * scanner_idle_now). Short stops (a plan change) keep it up. */
+#define IDLE_AFTER_US 1000000
 
 static SemaphoreHandle_t lock;
 static QueueHandle_t requests;
@@ -54,6 +57,10 @@ typedef struct {
     plan_t plan;
     unsigned hop;
     bool scanning;
+    bool asleep;         /* radio_sleep: idle until the scan runs again */
+    bool idle_now;       /* scanner_idle_now: idle at the next stopped pass */
+    int64_t stopped_us;  /* when the scan last stopped, or a request ran */
+    uint32_t wake_us;    /* the last radio_wake */
     uint32_t tuned_lo_khz; /* LO the radio was last tuned to by do_hop; 0 = unknown */
     channel_state_t ch[PROFILE_MAX_CHANNELS];
     psd_iq_t iq[PROFILE_MAX_CHANNELS]; /* per plan hop (one LO each) */
@@ -147,6 +154,7 @@ void scanner_get_config(scan_config_t *c) {
 void scanner_set_config(const scan_config_t *c) {
     xSemaphoreTake(lock, portMAX_DELAY);
     shared = *c;
+    if (c->running && sp) sp->idle_now = false; /* a stop and start before the loop saw the stop */
     plan_build(shared.profile, shared.ch, shared.nch, shared.enabled, shared.mode, &shared_plan);
     dirty = true;
     xSemaphoreGive(lock);
@@ -675,6 +683,15 @@ static void yield_lower(void) {
     else vTaskDelay(1);
 }
 
+static void wake(void) {
+    if (!sp->asleep) return;
+    int64_t t0 = esp_timer_get_time();
+    radio_wake();
+    sp->asleep = false;
+    sp->tuned_lo_khz = 0;
+    sp->wake_us = (uint32_t)(esp_timer_get_time() - t0);
+}
+
 static void scanner_task(void *arg) {
     (void)arg;
     /* Until scanner_start. A notification, not vTaskSuspend: FreeRTOS is in
@@ -682,13 +699,15 @@ static void scanner_task(void *arg) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     apply_config();
     sp->window_start = esp_timer_get_time();
-    sp->rotation_start = sp->w_rot_from = sp->window_start;
+    sp->rotation_start = sp->w_rot_from = sp->stopped_us = sp->window_start;
     int64_t last_yield = sp->window_start;
     TaskHandle_t timer_task = xTimerGetTimerDaemonTaskHandle();
     for (;;) {
         if (dirty) apply_config();
         scan_request_t req;
         while (xQueueReceive(requests, &req, 0) == pdTRUE) {
+            wake();
+            sp->stopped_us = esp_timer_get_time();
             sp->tuned_lo_khz = 0; /* these tune (or recalibrate) the radio themselves */
             if (req.type == SCAN_REQ_RAWIQ) do_rawiq(&req);
             else if (req.type == SCAN_REQ_FFTEVAL_SYNTH || req.type == SCAN_REQ_FFTEVAL_LIVE) do_fft_eval(&req);
@@ -701,10 +720,20 @@ static void scanner_task(void *arg) {
         int64_t now = esp_timer_get_time();
         if (now - sp->window_start >= TELEMETRY_US) emit_telemetry(now);
         if (!sp->cfg.running || !sp->plan.nhops) {
+            if (sp->scanning) sp->stopped_us = now;
             sp->scanning = false;
             sp->w_rot_from = now; /* a restart's first rate leaves the stop out */
+            if (!sp->asleep && (sp->idle_now || now - sp->stopped_us >= IDLE_AFTER_US)) {
+                radio_sleep();
+                sp->asleep = true;
+            }
+            sp->idle_now = false;
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
+        }
+        if (sp->asleep) {
+            wake();
+            sp->rotation_start = sp->w_rot_from = esp_timer_get_time();
         }
         sp->scanning = true;
         do_hop();
@@ -764,6 +793,16 @@ bool scanner_scanning(bool *rh) {
     if (!sp) return false;
     *rh = sp->cfg.rh;
     return sp->scanning;
+}
+
+void scanner_idle_now(void) {
+    if (sp) sp->idle_now = true;
+}
+
+bool scanner_idle(uint32_t *wake_us) {
+    if (!sp) return false;
+    if (wake_us) *wake_us = sp->wake_us;
+    return sp->asleep;
 }
 
 esp_err_t scanner_start(void) {

@@ -62,6 +62,13 @@ void scanner_get_plan(plan_t *plan);
  * no channels); *rh: and it is in RotorHazard mode. For the status LEDs. */
 bool scanner_scanning(bool *rh);
 
+/* Idle: the radio is off while nothing is scanned (radio_sleep), from
+ * IDLE_AFTER_US after the scan stops, or from the next pass of the scan loop
+ * after scanner_idle_now (SCAN STOP). scanner_idle reports it, and how long
+ * the last wake-up took. */
+void scanner_idle_now(void);
+bool scanner_idle(uint32_t *wake_us);
+
 typedef enum { SCAN_REQ_RAWIQ, SCAN_REQ_RECAL, SCAN_REQ_FFTEVAL_SYNTH, SCAN_REQ_FFTEVAL_LIVE } scan_req_type_t;
 typedef struct {
     scan_req_type_t type;

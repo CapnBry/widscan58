@@ -82,7 +82,7 @@ there is no `READY` line any more. Our hosts switch with `PROTOCOL MONITOR`
 `pio device monitor` or a terminal, type it). In monitor mode a lone RotorHazard
 probe byte (0x22) after 100 ms of input silence switches back to lap timer
 mode, so a RotorHazard server can take over a port a monitor left streaming.
-In lap timer mode, input bytes `A`–`P` and `T` (unused by RotorHazard) start one of our
+In lap timer mode, input bytes `A`–`P`, `S` and `T` (unused by RotorHazard) start one of our
 command lines; only a few are allowed there (`rh_allowed`).
 
 **Slim build:** `firmware/CMakeLists.txt` sets `COMPONENTS` to our component
@@ -169,6 +169,26 @@ does): asking the driver for a full buffer waited out the 20 ms read timeout
 on every RotorHazard request (2026-11-11; the fix not yet run on hardware).
 Before it, tested with the display as the UART host (display/CLAUDE.md):
 monitor mode's ~37 KB/s of frames, and lap timer polling at 180 ms for 8 seats.
+
+**Idle (C5):** 1 s after the scan stops (`IDLE_AFTER_US`, `scanner.c`), or at
+once after `SCAN STOP`, the scanner task calls `radio_sleep` (`radio_c5.c`):
+`esp_wifi_stop` (the PHY and its tracking timer off) and the CPU from 240 MHz
+on the PLL to the crystal (48 MHz). USB, the UART, commands and the status LED
+keep working. Any scan, `RAWIQ` or `FFTEVAL` wakes it (`radio_wake`, ~4 ms:
+CPU back, Wi-Fi started as in `main.c`, calibration cache cleared, so the
+first rotation recalibrates). `STATUS?` reports `idle` and `wake_us` (the last
+wake-up). Gain, filter and calibration settings may change while idle: the
+radio keeps them for the first tune, and `gain_max` is the value from before
+the sleep (the modem's registers are out of reach). USB current at 5.23 V:
+91 mA at boot idle before, 13.7–14.4 mA now (monitor mode with the scan
+stopped, telemetry streaming: 15.1). The PLL stays on: the USB PHY runs from
+it. When the CPU leaves the PLL, IDF gates the PLL output it ran from, and a
+USB (RTS) reset keeps that gate; the bootloader then switched to it and hung
+with USB dead (a RotorHazard port open on an idle board, 2026-11-14), so
+`radio_sleep` keeps it ungated (no measurable cost). Below 48 MHz saves little
+(12 MHz: −2.3 mA); light sleep would drop USB (no USB Serial/JTAG in light
+sleep on the C5). PLAN.md, "Idle power on the C5". The S3 has no idle mode
+(`radio_sleep` is a no-op).
 
 **Status LEDs (`src/status_led.c`):** `GPIO <n> LED` (one LED, lit when the pin
 is low) and `GPIO <n> WS2812` (one WS2812), one pin each. The LED is on while
@@ -289,7 +309,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 |---|---|
 | `INFO`, `STATUS?`, `PROFILE?`, `TIMING?`, `SPURS?` | Identity, full configuration (including `rawiq_max`), band profile, DSP time breakdown, masked board spurs |
 | `CHANNELS <name>=<MHz> …`, `CHANNELS DEFAULT` | Channel plan: up to 8 channels by their 5.8 GHz frequency, e.g. `CHANNELS R1=5658 A8=5725`. The C5 takes 5345–5945 MHz (`tune_lo_khz`/`tune_hi_khz` in `profile.c`: bands A, B, E, F, R and low band L, 5362–5621 MHz; L is untested on hardware and has no spur list or power calibration); the S3 maps them into its scaled band, which has no room for L. The web UI's panorama spans the LO segments scanned (`bandRange`, `views/panorama.ts`; `band_khz`, 5645–5945 MHz, only before the first spectrum), so board spurs and channels outside the scanned channels' span are not shown. Ids follow the order given; all are enabled. The UI's Channels → Edit sends this on every connect. On the C5, one channel in 2400–2500 MHz, alone (`ERR channels` otherwise; the UI sends `CHANNELS 2G4=2440`), scans the real 2.4 GHz band instead: see "2.4 GHz band" |
-| `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R, E and L take 4), keeping it clear of every channel center where it can; `SINGLE` gives each channel its own LO |
+| `ENABLE <mask>`, `MODE GROUP\|SINGLE`, `SCAN START\|STOP` | Which channels are scanned, and how. `SCAN STOP` also puts the C5 in idle at once (see "Idle"); in lap timer mode it acts as the host timeout (the next RotorHazard command restarts the scan), and `SCAN START` is monitor mode only. `GROUP` (default) puts channels within 40 MHz under one LO (bands A, B and F take 3 LOs; R, E and L take 4), keeping it clear of every channel center where it can; `SINGLE` gives each channel its own LO |
 | `GAIN MANUAL <idx>\|HARDWARE`, `FILTER <code>\|AUTO` | RX gain and analog filter |
 | `FFTTYPE R2\|R4\|S16\|S16R`, `FFTTYPE?` | FFT implementation. Default S16R (rounded 16-bit: esp-sdr's SIMD radix-2 on the S3, a radix-4 kernel elsewhere); R4 is exact float and best for step-on/IMD measurement. On the C5, float FFTs take ~68 ms/hop (no FPU) |
 | `FFTEVAL SYNTH <noise×100> <tone_dBFS×10> <reps>`, `FFTEVAL LIVE <lo_kHz> <reps>` | Compare all FFT types on identical samples, against float R4 (R2 for sizes that are not a power of 4). A type that cannot load says `FFTEVAL … <type> ERR <error>` |
@@ -308,7 +328,7 @@ Send these with `tools/widscan58cli.py cmd …` or the UI's Protocol console.
 | `PROTOCOL MONITOR\|RH`, `PROTOCOL?` | Host protocol: our commands and frames (`MONITOR`), or RotorHazard's node protocol (`RH`, the boot default, silent until polled). Each mode keeps its own scan settings across switches, but every `PROTOCOL MONITOR` applies `METRICS FULL`, and every `PROTOCOL RH` (also a RotorHazard probe taking over, and boot) applies the saved RotorHazard defaults (`CONFIG SAVE`) |
 | `CONFIG SAVE` | Lap timer mode only (`ERR rh_only` otherwise): save the current gain, `FFT`, `METRICS RSSI\|SNR`, `MODE` and `LEVELFILTER` to NVS as the lap timer mode defaults, since RotorHazard's UI can't set them (the capture follows the FFT size). Without a save: `FFT 64` (256 samples), `METRICS RSSI`, `MODE GROUP`, `GAIN MANUAL 45` (as monitor mode), `LEVELFILTER MEDIAN` |
 | `CONFIG RESET` | Lap timer mode only: erase the saved lap timer mode defaults and apply the built-in ones |
-| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in lap timer mode. In lap timer mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `PLATEAU…`, `RECAL`, `THROTTLE`, `PHYIDLE…` and `GPIO…` work; the rest answer `ERR rh_mode` |
+| `CONFIG?` | `STATUS?` under another name (`CONFIG {…}`), allowed in lap timer mode. In lap timer mode only `PROTOCOL…`, `INFO`, `CONFIG?`, `CONFIG SAVE`, `CONFIG RESET`, `METRICS RSSI\|SNR\|?`, `GAIN …`, `FFT`, `FILTER`, `IQCORR`, `MODE GROUP\|SINGLE`, `LEVELFILTER …`, `PLATEAU…`, `RECAL`, `THROTTLE`, `PHYIDLE…`, `GPIO…` and `SCAN STOP` work; the rest answer `ERR rh_mode` |
 | `LEVELFILTER MEDIAN\|EMA`, `LEVELFILTER?` | Lap timer mode only (`ERR rh_only` otherwise; the query works in both): the seats' level filter. `MEDIAN` (default): the 255 ms running median, as RotorHazard's nodes. `EMA`: a median of 3, then an exponential average with a 2.72 ms time constant at any update rate (its weight comes from each update's interval), as FPVGateC5MK (alpha 0.3 at ~1030 /s). A change resets the seats' levels. Reported as `level_filter` in `STATUS?`/`CONFIG?` |
 | `PLATEAU <codes>`, `PLATEAU?` | Debug, both modes: the lap timer's pass plateau tolerance, 0–31 level codes (0.25 dB each; default 2, 0.5 dB). A pass is timed at the middle of the crossing's first to last update within that many codes of its peak, across dips (RotorHazard's node rule at 0; the plateau code does not run then). Not saved by `CONFIG SAVE`; kept across mode switches until a restart. A change mid-crossing restarts that crossing's plateau from its peak. Reported as `plateau` in `STATUS?`/`CONFIG?` |
 | `GPIO <n> NONE\|LOW\|HIGH\|TX\|RX\|LED\|WS2812`, `GPIO SAVE`, `GPIO RESET`, `GPIO?` | GPIO outputs set at boot, e.g. an antenna switch (Waveshare ESP32-C5-Zero: GPIO26), the host UART's pins (see "Host UART") and the status LEDs (see "Status LEDs"). A change drives the pin at once (`NONE`: back to the reset state, pull-up on); `TX`, `RX`, `LED` and `WS2812` move that role to the pin, and the pin that had it goes back to `NONE`. `GPIO SAVE` makes the settings in effect the boot ones (NVS: outputs in base 3 per GPIO number, 40 per `u64` key `gpio0`, `gpio1`; the UART pins as `u16` key `uart`, erased while they are the defaults; the LED pins as `u16` key `leds`, erased while there are none; `src/gpio_out.c`), applied right after `link_init`. `GPIO?` answers `GPIO {"count":N,"active":"…","saved":"…"}`, one character per GPIO: `-` unused, `L`, `H`, `T` and `R` the UART's TX and RX, `D` the LED, `W` the WS2812, `x` not available (USB, and the flash pins IDF reserves). `GPIO RESET`: the built-in settings at once (no outputs or LEDs, the UART on its default pins) and every key erased. Works in both modes |
@@ -390,6 +410,7 @@ RotorHazard's server needs no changes: add the port to `GENERAL` →
   while the scan runs (the pass waits for the next poll) and loses passes once it
   stops, and a hidden web UI tab polls about once a second. Monitor mode has no
   timeout. A lap timer mode test needs a host polling to keep the scan running.
+  A second later the C5 goes idle (see "Idle"); `SCAN STOP` does both at once.
 - **Check:** `tools/rh_check.py` runs RotorHazard's own interface code against
   the board (no VTX: thresholds inside the filtered noise make noise
   crossings; at manual gain 60 the seats sit at codes ~79–83, drifting with

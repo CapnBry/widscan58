@@ -14,6 +14,10 @@
 #include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
+#include "esp_private/esp_clk_tree_common.h"
+#include "esp_private/rtc_clk.h"
+#include "soc/rtc.h"
 #include "heap_memory_layout.h"
 #include "soc/lp_aon_reg.h"
 #include "soc/soc.h"
@@ -116,12 +120,18 @@ static uint32_t recal_center_khz = 5787000;
 static unsigned calibrated_mhz;
 static uint32_t cal_gen = 1; /* bumped whenever the DC/IQ tables may have changed */
 
+/* radio_sleep: the modem is off, its registers out of reach. */
+static bool asleep;
+static unsigned asleep_gain_max;
+
 static IRAM_ATTR unsigned gain_max(void) {
+    if (asleep) return asleep_gain_max;
     unsigned maximum = (REG_READ(GAIN_REG) >> 8) & 127u;
     return maximum < 90u ? maximum : 0u; /* never expose uncalibrated slots */
 }
 
 static IRAM_ATTR void gain_apply(void) {
+    if (asleep) return; /* radio_wake's first tune applies it */
     unsigned maximum = gain_max();
     if (gain_code > maximum) gain_code = maximum;
     force_rx_gain(gain_mode == RADIO_GAIN_MANUAL, gain_code, 0);
@@ -428,6 +438,72 @@ void radio_idle_exit(unsigned depth) {
         if (tuned_lo_khz) tune_locked(tuned_lo_khz);
         if (depth == 4) rx_path_on();
     }
+    _lock_release(&lock);
+}
+
+/* Idle (PLAN.md, idle power on the C5), at 5.23 V on USB: the radio on and
+ * not scanning ~92 mA; RF off (phy_close_rf) 24.6; the Wi-Fi driver stopped
+ * 23.0 (also its PHY tracking timer); with the CPU on the crystal 14.0
+ * (from 240 MHz on the PLL; 40 MHz from the PLL is still 18.8: the PLL's
+ * 160/240 MHz outputs are off the clock tree). The PLL itself stays on: the
+ * USB PHY runs from it (IDF keeps it on only while a USB host is there) and
+ * so may the UART and RMT. Lower CPU clocks save little (12 MHz: 12.2 mA);
+ * light sleep would drop USB (no USB Serial/JTAG in light sleep on the C5). */
+static rtc_cpu_freq_config_t awake_cpu;
+static bool on_xtal;
+
+/* The PLL output the CPU ran from. Leaving it gates it off (rtc_clk.c), and
+ * a USB (RTS) reset keeps that gate: the bootloader, which switches to it
+ * without ungating it, then hung with USB dead (RotorHazard's port open
+ * resets the board). So it stays ungated while the CPU is on the crystal. */
+static soc_module_clk_t awake_pll(void) {
+    return awake_cpu.source == SOC_CPU_CLK_SRC_PLL_F160M ? SOC_MOD_CLK_PLL_F160M : SOC_MOD_CLK_PLL_F240M;
+}
+
+void radio_sleep(void) {
+    if (asleep) return;
+    asleep_gain_max = gain_max();
+    esp_wifi_stop();
+    asleep = true;
+    static bool pll_held;
+    if (!pll_held) {
+        rtc_clk_bbpll_add_consumer();
+        pll_held = true;
+    }
+    rtc_clk_cpu_freq_get_config(&awake_cpu);
+    rtc_cpu_freq_config_t xtal;
+    if (awake_cpu.source != SOC_CPU_CLK_SRC_XTAL &&
+        rtc_clk_cpu_freq_mhz_to_config((uint32_t)rtc_clk_xtal_freq_get(), &xtal)) {
+        rtc_clk_cpu_freq_set_config(&xtal);
+        esp_rom_set_cpu_ticks_per_us(xtal.freq_mhz);
+        esp_clk_tree_enable_src(awake_pll(), true);
+        on_xtal = true;
+    }
+}
+
+void radio_wake(void) {
+    if (!asleep) return;
+    if (on_xtal) {
+        rtc_clk_cpu_freq_set_config(&awake_cpu); /* takes its own count of the PLL output */
+        esp_rom_set_cpu_ticks_per_us(awake_cpu.freq_mhz);
+        esp_clk_tree_enable_src(awake_pll(), false);
+        on_xtal = false;
+    }
+    /* As at boot (main.c); the PHY comes back from its own init. */
+    esp_wifi_start();
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    _lock_t lock = phy_get_lock();
+    _lock_acquire(&lock);
+    asleep = false;
+    /* Recalibrate: the PHY's registers are its defaults, and the board may
+     * be at another temperature than the cached calibrations. */
+    calibrated_mhz = 0;
+    cal_gen++;
+    c5_cal_clear();
+    tuned_once = false;
+    tuned_lo_khz = 0;
     _lock_release(&lock);
 }
 

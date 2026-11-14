@@ -214,18 +214,18 @@ static void set_proto(proto_t p) {
 }
 
 /* Our commands in RotorHazard mode: switching, identity and the settings
- * that shape the seat levels. All start with 'A'..'P' or 'T' (rh_text_start),
+ * that shape the seat levels. All start with 'A'..'P', 'S' or 'T' (rh_text_start),
  * bytes RotorHazard does not use, so the command task can tell them from its
  * commands. */
 /* RotorHazard's commands are 0x00..0x40 (reads), 0x51, 0x71..0x7E (writes). */
-static bool rh_text_start(uint8_t b) { return (b >= 'A' && b <= 'P') || b == 'T'; }
+static bool rh_text_start(uint8_t b) { return (b >= 'A' && b <= 'P') || b == 'S' || b == 'T'; }
 
 static bool rh_allowed(const char *line) {
     static const char *const exact[] = {"PROTOCOL?", "PROTOCOL MONITOR", "PROTOCOL RH", "INFO", "CONFIG?",
                                         "METRICS RSSI", "METRICS SNR", "METRICS?", "GAIN?", "GAIN HARDWARE",
                                         "FILTER AUTO", "MODE GROUP", "MODE SINGLE", "CONFIG SAVE",
                                         "CONFIG RESET", "RECAL", "LEVELFILTER MEDIAN", "LEVELFILTER EMA",
-                                        "LEVELFILTER?", "PLATEAU?", "PHYIDLE?", "GPIO?"};
+                                        "LEVELFILTER?", "PLATEAU?", "PHYIDLE?", "GPIO?", "SCAN STOP"};
     static const char *const prefix[] = {"GAIN MANUAL ", "FFT ", "FILTER ", "IQCORR ", "PLATEAU ", "PHYIDLE ", "THROTTLE ", "GPIO "};
     for (unsigned j = 0; j < sizeof(exact) / sizeof(exact[0]); j++)
         if (!strcmp(line, exact[j])) return true;
@@ -239,13 +239,15 @@ static void send_status(const char *keyword) {
     plan_t plan;
     scanner_get_config(&c);
     scanner_get_plan(&plan);
+    uint32_t wake_us;
+    int idle = scanner_idle(&wake_us);
     reply_add("%s {\"protocol\":\"%s\",\"profile\":\"%s\",\"running\":%d,\"enabled\":%" PRIu32 ",\"mode\":\"%s\","
               "\"capture_samples\":%u,\"nfft\":%u,\"segments\":%u,\"rate_code\":%u,\"filter\":%d,"
               "\"iq_corr\":%d,\"settle_us\":%" PRIu32 ",\"tskip\":%u,\"gain_mode\":\"%s\",\"gain\":%u,\"gain_max\":%u,\"rawiq_max\":%u,"
               "\"recal\":\"%s\",\"metrics\":\"%s\",\"rssi_hz\":%" PRIu32 ",\"search_hz\":%" PRIu32 ",\"dc_guard\":%u,"
               "\"ema_ms\":%u,\"clear_ms\":%u,\"signal_db\":%.1f,\"avg_shift\":%u,\"spec_every\":%u,\"spec_bins\":%u,"
               "\"spec_span_hz\":%" PRIu32 ",\"spec_detector\":%u,\"fft\":\"%s\",\"level_filter\":\"%s\",\"plateau\":%u,\"throttle_hz\":%" PRIu32 ","
-              "\"phy_idle\":%u,\"phy_idle_min_us\":%" PRIu32 ",\"link\":\"%s\",\"plan\":[",
+              "\"phy_idle\":%u,\"phy_idle_min_us\":%" PRIu32 ",\"idle\":%d,\"wake_us\":%" PRIu32 ",\"link\":\"%s\",\"plan\":[",
               keyword, proto == PROTO_RH ? "RH" : "MONITOR", c.profile->name, c.running, c.enabled, c.mode == PLAN_GROUP ? "GROUP" : "SINGLE",
               c.capture_samples, c.nfft, c.segments, c.rate_code, c.filter, c.iq_corr, c.settle_us, radio_get_tune_skip(),
               c.gain_mode == RADIO_GAIN_MANUAL ? "MANUAL" : "HARDWARE", c.gain, radio_caps()->gain_max, (unsigned)radio_caps()->max_samples,
@@ -254,7 +256,7 @@ static void send_status(const char *keyword) {
               c.ema_ms, c.clear_ms, (double)c.signal_snr_db, c.avg_shift, c.spec_every,
               c.spec_bins, c.spec_span_hz, c.spec_detector, psd_fft_name((psd_fft_t)c.fft_type),
               level_filter_name(rh_get_filter()), rh_get_plateau(), c.max_rotation_hz, c.phy_idle, c.phy_idle_min_us,
-              link_port() == LINK_UART ? "uart" : "usb");
+              idle, wake_us, link_port() == LINK_UART ? "uart" : "usb");
     for (unsigned j = 0; j < plan.nhops; j++) {
         const plan_hop_t *h = &plan.hop[j];
         reply_add("%s{\"lo_khz\":%" PRIu32 ",\"ch\":[", j ? "," : "", h->lo_khz);
@@ -398,9 +400,15 @@ static void handle(char *line) {
         c.mode = line[5] == 'G' ? PLAN_GROUP : PLAN_SINGLE;
         scanner_set_config(&c);
         link_text("OK\n");
+    } else if (proto == PROTO_RH && !strcmp(line, "SCAN STOP")) {
+        /* As the host timeout: the next RotorHazard command restarts it. */
+        rh_host_stop();
+        scanner_idle_now();
+        link_text("OK\n");
     } else if (!strcmp(line, "SCAN START") || !strcmp(line, "SCAN STOP")) {
         c.running = line[5] == 'S' && line[6] == 'T' && line[7] == 'A';
         scanner_set_config(&c);
+        if (!c.running) scanner_idle_now();
         link_text("OK\n");
     } else if (!strcmp(line, "GAIN HARDWARE")) {
         c.gain_mode = RADIO_GAIN_HARDWARE;

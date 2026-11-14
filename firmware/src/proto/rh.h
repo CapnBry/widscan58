@@ -32,6 +32,8 @@ void rh_poll(int64_t now_us);
  * RotorHazard command for a while. Its next one restarts the scan, with the
  * seats' levels reset. */
 void rh_host_check(int64_t now_us);
+/* SCAN STOP: stop the scan as rh_host_check does, at once. */
+void rh_host_stop(void);
 /* Switching to RotorHazard mode: the wait for the host starts now. The caller
  * applies rh_apply_plan. */
 void rh_host_reset(int64_t now_us);

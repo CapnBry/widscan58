@@ -65,6 +65,17 @@ Other ESP32-C5 boards work too, such as the C5 devkit.
 > runs a scaled-down mock-up of the band at 2.4 GHz and is only used for
 > development.
 
+## Cheap Yellow Display
+
+The C5 can plug right into a phone or laptop, but a dedicated device can be made from
+an ESP32 "Cheap Yellow Display" for a stand-alone touchscreen for the widscan58 that
+does lap timing with callouts, the monitor, power meter, and even a RemoteID receiver.
+
+![display's monitor screen: Raceband panorama with two VTXs and a waterfall](images/display-monitor.png)
+![display's lap timer: current lap, best three consecutive laps and the level graph](images/display-laptimer.png)
+
+**[See what it can do and how to build one →](display/README.md)**
+
 ## Getting started
 
 1. Plug the ESP32-C5 into your computer or Android phone over USB.

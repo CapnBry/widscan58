@@ -6,7 +6,23 @@ web UI's three modes, monitor (panorama, waterfall and per-channel levels),
 lap timer (with spoken lap times through the board's speaker connector) and
 power meter, plus a Global screen for the backlight and the widscan58's GPIO
 configuration. Swipe left or right to change modes, swipe down for the
-mode's settings.
+mode's settings. The display's own radio also receives RemoteID broadcasts
+from drones nearby, independent of the widscan58.
+
+## Screens
+
+The screenshots below are from the display running its built-in simulator.
+
+| | |
+|:---:|:---:|
+| ![Monitor mode](../images/display-monitor.png) | ![Lap timer mode](../images/display-laptimer.png) |
+| **Monitor:** the band panorama with peak levels per channel, and a waterfall | **Lap timer:** the current lap, the last laps and the fastest three in a row, and the level graph |
+| ![Lap timer mode settings](../images/display-laptimer-settings.png) | ![Lap settings](../images/display-lap-settings.png) |
+| **Lap timer settings:** receiver gain, a button per seat for its EnterAt/ExitAt levels, the channel plan | **Lap settings:** callout volume, minimum lap and fastest consecutive laps |
+| ![Power meter mode](../images/display-powermeter.png) | ![GPIO configuration](../images/display-gpio.png) |
+| **Power meter:** each channel's VTX output in dBm and mW, through an attenuator | **GPIO config:** the widscan58's outputs and status LEDs; changed pins show in yellow until saved |
+| ![RemoteID receiver](../images/display-remoteid.png) | ![RemoteID details](../images/display-remoteid-details.png) |
+| **RemoteID:** drones heard over Wi-Fi or Bluetooth, with signal, height, speed and age | **RemoteID details:** every field the aircraft broadcasts, with reception statistics |
 
 ## Hardware
 

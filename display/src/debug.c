@@ -1,4 +1,4 @@
-/* Commands, one per line at 921600 baud:
+/* Commands, one per line (921600 baud on a UART):
  *   shot              the whole screen, RLE (below), from a full refresh
  *   swipe l|r|u|d     a finger swipe left/right/up/down across the middle
  *   tap <x> <y>       a short press
@@ -9,7 +9,8 @@
  *   bench             30 full-screen redraws, timed (console log)
  *   passthru          restart as a USB-UART bridge to the widscan58's
  *                     download mode, for flashing it (passthru.c)
- * A screenshot is "\n#SHOT 320 240\n", then per flushed area
+ * on the board's console: UART0, or the USB Serial/JTAG (CONSOLE_USB_JTAG).
+ * A screenshot is "\n#SHOT <LCD_W> <LCD_H>\n", then per flushed area
  * 'A' x1 y1 x2 y2 (u16 LE) and runs of (u8 count 1..255, u16 RGB565 LE)
  * covering it row by row, then 'E'. GPL-3.0-or-later. */
 #include "debug.h"
@@ -17,7 +18,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "board.h"
 #include "driver/uart.h"
+#if CONSOLE_USB_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#endif
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -31,6 +37,31 @@
 
 #define PORT UART_NUM_0
 #define MAX_PTS 24
+
+/* ---- the console port ---- */
+
+#if CONSOLE_USB_JTAG
+static void con_init(void) {
+    usb_serial_jtag_driver_config_t c = {.rx_buffer_size = 256, .tx_buffer_size = 4096};
+    usb_serial_jtag_driver_install(&c);
+    usb_serial_jtag_vfs_use_driver(); /* the log too, not interleaved */
+}
+static bool con_getc(uint8_t *b) { return usb_serial_jtag_read_bytes(b, 1, portMAX_DELAY) == 1; }
+static void con_write(const void *p, size_t n) {
+    const uint8_t *b = p;
+    while (n) { /* a full ring takes part of it; nothing in 1 s: no host */
+        int k = usb_serial_jtag_write_bytes(b, n, pdMS_TO_TICKS(1000));
+        if (k <= 0) return;
+        b += k, n -= k;
+    }
+}
+static void con_drain(void) { usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(30000)); }
+#else
+static void con_init(void) { uart_driver_install(PORT, 256, 0, 0, NULL, 0); }
+static bool con_getc(uint8_t *b) { return uart_read_bytes(PORT, b, 1, portMAX_DELAY) == 1; }
+static void con_write(const void *p, size_t n) { uart_write_bytes(PORT, p, n); }
+static void con_drain(void) { uart_wait_tx_done(PORT, pdMS_TO_TICKS(30000)); }
+#endif
 
 static volatile bool shot_req, shot_on, bench_req, reopen_req;
 static volatile int peek_x = -1, peek_y;
@@ -57,7 +88,7 @@ static void console_task(void *arg) {
     size_t len = 0;
     for (;;) {
         uint8_t b;
-        if (uart_read_bytes(PORT, &b, 1, portMAX_DELAY) != 1) continue;
+        if (!con_getc(&b)) continue;
         if (b != '\n' && b != '\r' && (b < 0x20 || b > 0x7E)) continue; /* reset noise, NULs */
         if (b != '\n' && b != '\r') {
             if (len == sizeof(line) - 1) { /* keep the newest: noise can fill it before a command */
@@ -87,18 +118,20 @@ static void console_task(void *arg) {
         else if (!strcmp(line, "bench")) bench_req = true;
         else if (!strcmp(line, "reopen")) reopen_req = true;
         else if (!strcmp(line, "passthru")) {
-#ifdef WS_SIM
-            ESP_LOGW("passthru", "not in the simulator build");
+#if defined(WS_SIM) || !BOARD_HAS_PASSTHRU
+            ESP_LOGW("passthru", "not in this build");
 #else
             passthru_request();
 #endif
         }
         else if (sscanf(line, "peek %d %d", &x, &y) == 2) peek_y = y, peek_x = x;
         else if (sscanf(line, "swipe %c", &d) == 1) {
-            if (d == 'l') inject_swipe(260, 120, 60, 120);
-            else if (d == 'r') inject_swipe(60, 120, 260, 120);
-            else if (d == 'd') inject_swipe(160, 40, 160, 200);
-            else if (d == 'u') inject_swipe(160, 200, 160, 40);
+            /* across the middle, 5/8 of the screen (200 x 160 px at 320 x 240) */
+            const int cx = LCD_W / 2, cy = LCD_H / 2, dx = LCD_W * 5 / 16, dy = LCD_H / 3;
+            if (d == 'l') inject_swipe(cx + dx, cy, cx - dx, cy);
+            else if (d == 'r') inject_swipe(cx - dx, cy, cx + dx, cy);
+            else if (d == 'd') inject_swipe(cx, cy - dy, cx, cy + dy);
+            else if (d == 'u') inject_swipe(cx, cy + dy, cx, cy - dy);
         } else if (sscanf(line, "fakelaps %d %d", &x, &y) == 2 && x >= 0 && x < SEATS && y > 0 && y < 200) {
             /* y laps of lo-hi ms (default 12.4-15.6 s) on seat x, ending
              * 1.5 s ago; laps 8-10 a quicker run */
@@ -134,7 +167,7 @@ static void console_task(void *arg) {
 }
 
 void debug_init(void) {
-    uart_driver_install(PORT, 256, 0, 0, NULL, 0);
+    con_init();
     xTaskCreatePinnedToCore(console_task, "console", 3072, NULL, 3, NULL, 0);
 }
 
@@ -165,21 +198,22 @@ void debug_poll(void) {
     shot_req = false;
     esp_log_level_set("*", ESP_LOG_NONE); /* nothing between the records */
     vTaskDelay(pdMS_TO_TICKS(20));
-    const char *hdr = "\n#SHOT 320 240\n";
-    uart_write_bytes(PORT, hdr, strlen(hdr));
+    char hdr[24];
+    snprintf(hdr, sizeof(hdr), "\n#SHOT %d %d\n", LCD_W, LCD_H);
+    con_write(hdr, strlen(hdr));
     shot_on = true;
     lv_obj_invalidate(lv_scr_act());
     lv_refr_now(NULL);
     shot_on = false;
-    uart_write_bytes(PORT, "E", 1);
-    uart_wait_tx_done(PORT, pdMS_TO_TICKS(30000));
+    con_write("E", 1);
+    con_drain();
     esp_log_level_set("*", ESP_LOG_INFO);
 }
 
 void debug_flush(const lv_area_t *a, const lv_color_t *px) {
     if (!shot_on) return;
     uint8_t h[9] = {'A', a->x1, a->x1 >> 8, a->y1, a->y1 >> 8, a->x2, a->x2 >> 8, a->y2, a->y2 >> 8};
-    uart_write_bytes(PORT, h, 9);
+    con_write(h, 9);
     size_t n = (size_t)lv_area_get_width(a) * lv_area_get_height(a);
     static uint8_t out[3 * 128];
     size_t o = 0;
@@ -192,11 +226,11 @@ void debug_flush(const lv_area_t *a, const lv_color_t *px) {
         out[o++] = v >> 8;
         j += k;
         if (o == sizeof(out)) {
-            uart_write_bytes(PORT, out, o);
+            con_write(out, o);
             o = 0;
         }
     }
-    if (o) uart_write_bytes(PORT, out, o);
+    if (o) con_write(out, o);
 }
 
 bool debug_touch(int *x, int *y, bool *pressed) {

@@ -1,14 +1,14 @@
-/* LVGL on the ILI9341 and XPT2046. GPL-3.0-or-later. */
+/* LVGL on the board's panel (lcd.h) and touch (touch.h). GPL-3.0-or-later. */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "board.h"
 #include "lvgl.h"
 
-/* Rows per LVGL draw buffer (two buffers, full width); fewer while the
- * RemoteID receiver's radios need the memory (2 x 12.8 KB). */
-#define LV_BUF_ROWS 40
-#define LV_BUF_ROWS_LOW 20
+/* Rows per LVGL draw buffer (two buffers, full width): the board's
+ * LV_BUF_ROWS, LV_BUF_ROWS_LOW while the RemoteID receiver's radios need
+ * the memory (board.h). */
 
 void lvport_init(void);
 /* Advance LVGL's clock, then run its timers (input, refresh, animations). */

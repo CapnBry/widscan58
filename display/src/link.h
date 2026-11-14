@@ -4,14 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* CYD pins (connector CN1, with GND and 3.3 V). The widscan58's own UART is
- * TX GPIO11 / RX GPIO12 on the C5 (D6/D7 on a XIAO ESP32-C5). */
-#ifndef LINK_TX_GPIO
-#define LINK_TX_GPIO 22
-#endif
-#ifndef LINK_RX_GPIO
-#define LINK_RX_GPIO 27
-#endif
+#include "board.h" /* LINK_UART, LINK_TX_GPIO, LINK_RX_GPIO */
+
 #define LINK_BAUD 921600
 
 void link_init(void);

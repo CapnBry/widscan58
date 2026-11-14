@@ -1,0 +1,58 @@
+# Widscan58 display on the CYD (ESP32-2432S028R). GPL-3.0-or-later.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# The console on UART0 (the CH340).
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
+# RemoteID receiver (src/rid_radio.c): Wi-Fi promiscuous mode and a BLE
+# passive scan straight to the controller (VHCI, no host stack), one at a
+# time. Off, both are deinitialized.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_ONLY=y
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_HCI_MODE_VHCI=y
+CONFIG_BTDM_CTRL_BLE_MAX_CONN=1
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+# CONFIG_ESP_WIFI_AMPDU_TX_ENABLED is not set
+# CONFIG_ESP_WIFI_AMPDU_RX_ENABLED is not set
+# CONFIG_ESP_WIFI_SOFTAP_SUPPORT is not set
+# CONFIG_ESP_WIFI_ENABLE_WPA3_SAE is not set
+# CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set
+# IRAM: without these the image overflows it (LVGL's drawing is there).
+# Only management frames are taken, a few per second.
+# CONFIG_ESP_WIFI_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_EXTRA_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_RX_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_SLP_IRAM_OPT is not set
+# The ring buffers (UART drivers, whose interrupt handlers are in flash
+# anyway) in flash too: ~4 KB of IRAM.
+CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y
+# Advertising reports unthrottled: there is no host stack to hand the
+# controller its flow control credits back.
+# CONFIG_BTDM_BLE_ADV_REPORT_FLOW_CTRL_SUPP is not set
+# No duplicate filter (the scan asks for every report) and no scanning
+# while connected: memory.
+# CONFIG_BTDM_BLE_SCAN_DUPL is not set
+# CONFIG_BTDM_CTRL_FULL_SCAN_SUPPORTED is not set
+# The receiver never joins a network: no enterprise (EAP/TLS), GMAC,
+# ESP-NOW keys, Wi-Fi settings in NVS, or power saving while disconnected;
+# the fewest management short buffers.
+# CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT is not set
+# CONFIG_ESP_WIFI_MBEDTLS_TLS_CLIENT is not set
+# CONFIG_ESP_WIFI_GMAC_SUPPORT is not set
+CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM=0
+# CONFIG_ESP_WIFI_NVS_ENABLED is not set
+# CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE is not set
+CONFIG_ESP_WIFI_MGMT_SBUF_NUM=6
+# Scanning only: no channel assessment or LE ping (connection features), no
+# modem sleep (it never idles while on), and the controller's interrupt at
+# an ordinary level: the level 4 one needs its own 4.4 KB stack in .data.
+# CONFIG_BTDM_BLE_CHAN_ASS_EN is not set
+# CONFIG_BTDM_BLE_PING_EN is not set
+# CONFIG_BTDM_CTRL_MODEM_SLEEP is not set
+# CONFIG_BTDM_CTRL_HLI is not set
+# Promiscuous management frames only, a few per second: 2 static RX
+# buffers (the least) and 2 for management frames. Nothing handles the
+# default event loop's Wi-Fi events: a short queue.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=2
+CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=2
+CONFIG_ESP_SYSTEM_EVENT_QUEUE_SIZE=8

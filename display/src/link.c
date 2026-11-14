@@ -12,7 +12,7 @@
 #include "model.h"
 #include "parser.h"
 
-#define PORT UART_NUM_2
+#define PORT LINK_UART
 
 static void on_line(const char *line) {
     model_line(line);

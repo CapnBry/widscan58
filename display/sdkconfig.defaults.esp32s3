@@ -1,0 +1,7 @@
+# Widscan58 display on the ES3C35P (ESP32-S3 N16R8). GPL-3.0-or-later.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# The console (log, debug.c) on the native USB Serial/JTAG; UART0's pins
+# carry the link.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# The 8 MB octal PSRAM stays off for now: the draw buffers and the screens
+# fit in internal RAM.

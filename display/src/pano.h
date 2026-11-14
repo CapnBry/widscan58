@@ -2,9 +2,10 @@
 #pragma once
 #include <stdint.h>
 
+#include "lcd.h"
 #include "lvgl.h"
 
-#define WF_H 50 /* waterfall rows */
+#define WF_H (LCD_H * 5 / 24) /* waterfall rows: 50 at 240, 66 at 320 */
 
 typedef struct {
     uint32_t updates, rects, px, wf_rows, layouts;

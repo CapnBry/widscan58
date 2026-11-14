@@ -3,6 +3,9 @@
  * down and switches between them. GPL-3.0-or-later. */
 #include "rid_radio.h"
 
+#include "board.h"
+
+#if BOARD_HAS_RID
 #include <string.h>
 
 #include "esp_bt.h"
@@ -264,3 +267,17 @@ void rid_radio_status(rid_radio_status_t *out) { memcpy(out, (const void *)&st, 
 bool rid_radio_receive(rid_raw_t *m) { return xQueueReceive(queue, m, 0) == pdTRUE; }
 
 void rid_radio_inject(const rid_raw_t *m) { put(m, m->src == RID_SRC_BLE ? RID_BLE : RID_WIFI); }
+
+#else /* !BOARD_HAS_RID: nothing to do */
+#include <string.h>
+
+void rid_radio_init(void) {}
+void rid_radio_enable(bool on) {}
+void rid_radio_config(int ble_pct, int lock) {}
+void rid_radio_status(rid_radio_status_t *st) {
+    memset(st, 0, sizeof(*st));
+    st->radio = -1;
+}
+bool rid_radio_receive(rid_raw_t *m) { return false; }
+void rid_radio_inject(const rid_raw_t *m) {}
+#endif

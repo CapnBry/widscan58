@@ -1,13 +1,14 @@
 # Widscan58 display: developer notes
 
 Technical reference for `display/`: a stand-alone display for a widscan58 on
-an ESP32 "Cheap Yellow Display" (ESP32-2432S028R). The user-facing
+an ESP32 "Cheap Yellow Display" (ESP32-2432S028R) or, in progress, an
+LCDwiki 3.5" ESP32-S3 display (ES3C35P). The user-facing
 description is in [README.md](README.md); the widscan58 itself (firmware,
 protocol, web UI) is in [../CLAUDE.md](../CLAUDE.md).
 
 | Path | What |
 |---|---|
-| `src/` | The firmware: screens (`ui*.c`), host protocol (`host.c`, `link.c`), panel and touch (`lcd.c`, `touch.c`, `lvport.c`), simulator (`sim.c`), RemoteID receiver (`rid*.c`, `ui_rid.c`). |
+| `src/` | The firmware: screens (`ui*.c`), host protocol (`host.c`, `link.c`), boards (`board*.h`), panel and touch drivers (`lcd_*.c`, `touch_*.c`, `backlight.c`, `lvport.c`), simulator (`sim.c`), RemoteID receiver (`rid*.c`, `ui_rid.c`). |
 | `RAM.md` | RAM map: static RAM by object, the heap by startup step and with the RemoteID radios up (measured 2026-11-12). |
 | `test/` | Host tests (`pio test -e native`): RemoteID parsing, decoding, the aircraft list and the radio time slices. |
 | `tools/cydshot.py` | Screenshots and injected touch over the CYD's USB port (see below). |
@@ -16,8 +17,8 @@ protocol, web UI) is in [../CLAUDE.md](../CLAUDE.md).
 | `voice/` | The callout clips (`voice.bin`, tracked) and the paid API's cached replies (`cache/`, not tracked). |
 
 `display/` is its own PlatformIO + ESP-IDF 5.5.5 project (the same pioarduino
-platform as `firmware/`) for an ESP32-2432S028R: 320x240 in landscape,
-XPT2046 touch. It drives the widscan58 over the C5's host UART as
+platform as `firmware/`) for an ESP32-2432S028R (`cyd`: 320x240 in landscape,
+XPT2046 touch) and an ES3C35P (`cyds3`: 480x320, see "Boards"). It drives the widscan58 over the C5's host UART as
 the web UI does over USB (`src/host.c`: `INFO` until it answers, then the
 mode's setup: `PROTOCOL MONITOR|RH`, the stored `CHANNELS`, `MODE`, `GAIN`,
 and power meter mode's scan from `../web/src/model/power.ts`). The only shared
@@ -29,17 +30,81 @@ cd display
 pio run -e cyd -t upload            # the real thing (UART to a C5)
 pio run -e cyd-sim -t upload        # built-in simulated widscan58 (src/sim.c), no C5 needed
 pio run -e cyd-lcdtest -t upload    # panel bring-up: write speed and readback per SPI clock
+pio run -e cyds3-sim -t upload      # ES3C35P with the simulator (cyds3: the UART, untested)
 tools/cydshot.py shot out.png       # screenshot over USB; also swipe l|r|u|d, tap X Y, drag X0 Y0 X1 Y1, bench, peek X Y, reopen, log [s], fakelaps, fakerid N
+tools/cydshot.py --port /dev/ttyACM0 shot out.png   # the same on the ES3C35P (its USB Serial/JTAG)
 pio test -e native                  # host tests (test/test_rid)
 ```
 
+- **Boards** (`src/board.h`): each board is a header, `board_<name>.h`,
+  picked by its `-DBOARD_<NAME>` in `platformio.ini` (one section per board,
+  `[cyd]`, `[cyds3]`, with its envs). It sets the screen size (`LCD_W`,
+  `LCD_H`, landscape), which panel and touch driver to build
+  (`LCD_DRIVER_<name>` → `lcd_<name>.c`, `TOUCH_DRIVER_<name>` →
+  `touch_<name>.c`; every driver file is compiled, empty unless picked), the
+  pins, the draw window alignment (`LCD_ALIGN`, a rounder in `lvport.c`),
+  LVGL's buffer rows, the link's UART and pins, where the debug console is
+  (`CONSOLE_USB_JTAG`), and the features it has (`BOARD_HAS_AUDIO`, `_RID`,
+  `_PASSTHRU`, `_LCD_TEST`; without one, `audio.c`, `rid_radio.c` and
+  `passthru.c` build as stubs, the Global screen has no RemoteID checkbox and
+  `rid_on` loads as 0). `board.h` lists every define. The interfaces are
+  `lcd.h` (`lcd_init`, `lcd_draw`, `lcd_reopen`, `lcd_peek`; the backlight in
+  `backlight.c`, LEDC on `BL_GPIO`) and `touch.h` (`touch_read` in screen
+  coordinates). Components: `src/CMakeLists.txt` adds each board's by
+  `IDF_TARGET` (requirements are resolved before Kconfig is read, so they
+  can't follow `CONFIG_` values); Kconfig in `sdkconfig.defaults` (every
+  board) and `sdkconfig.defaults.<target>` (ESP-IDF loads both; the CYD's
+  generated sdkconfig came out identical after the split, 2026-11-14), the
+  component lock per target (`dependencies.lock.<target>`). A new board:
+  a header, a section in `platformio.ini`, a driver file for a new
+  controller, its target's components and defaults. Screens use `LCD_W`
+  and `LCD_H`: monitor mode (`pano.c`, `WF_H` a fraction of `LCD_H`, tag
+  sizes and fonts by `LCD_H`) fills the screen; the other screens still have
+  the CYD's 320x240 geometry and sit at the top left of a larger screen.
+- **ES3C35P** (`cyds3`, `board_cyds3.h`;
+  https://www.lcdwiki.com/3.5inch_ESP32-S3_Display): ESP32-S3 N16R8 (16 MB
+  flash, 8 MB octal PSRAM, off for now), native USB Serial/JTAG (the console
+  and `cydshot.py`, `--port /dev/ttyACM0`), 320x480 IPS ST77922 on QSPI
+  (`lcd_st77922.c`: CS 10, CLK 12, D0-D3 11/13/14/9; instruction 0x02 then
+  00 <cmd> 00 for commands, 0x32 for pixels on four lines, at 40 MHz, the
+  fastest 80 MHz / n under the controller's 62.5 MHz). Landscape is
+  software: the panel stays in its native portrait (MADCTL 0x00; USB at the
+  bottom, column 0 left, row 0 top) and `lcd_draw` transposes each area into
+  one of two DMA buffers (`LCD_ROTATION` 90: USB on the right; 270: on the
+  left), handing LVGL its buffer back at once. MADCTL 0xA0 (MV | MY,
+  reported to give landscape on this board) flipped the rows but did not
+  exchange the axes here (2026-11-14): the ST77922's MADCTL has no MV bit
+  (datasheet v0.1, p. 211; the frame RAM is compressed row by row), so
+  landscape is always a software turn. Turning through two 6 KB chunks
+  (RAMWR, then Write Memory Continue 3Ch) saved ~33 KB of heap but made a
+  full redraw 59 ms (93 ms with the sending on its own task); the
+  full-area buffers stay, for speed. The vendor init sequence
+  is the factory firmware's (decoded by github.com/jlmeredith/ES3C35P,
+  docs/HARDWARE.md, which also has the board's pin and touch findings).
+  Windows on 4 px (dual gate). The panel's reset is the chip's EN: a USB
+  reset leaves the panel as it was, so after flashing over other firmware
+  unplug the board once. Backlight GPIO41 (25 kHz PWM). Touch: the panel's
+  own controller on I2C (SDA 38, SCL 39, reset 48, address 0x55, the
+  ST7123's registers; `touch_st7123.c`), points in portrait, turned to
+  landscape there. Link: UART1 on the 4-pin serial socket's GPIO43 (TX) and
+  44 (RX); `cyds3` builds but is untested with a C5. Not ported yet: the lap
+  callouts (ES8311 codec over I2S, the amplifier's enable on GPIO1, low
+  on), the RemoteID receiver (the S3's Bluetooth is not the ESP32's
+  controller), passthru flashing, `lcd_peek` (reads need instruction 0x0B
+  with a dummy phase). Measured 2026-11-14 with the simulator: full-screen
+  redraw 40.2 ms, sd 0.5 (24.7 fps; 3 boots x 10 `bench` runs, the same
+  pattern every boot); a build differing only in the touch code's size ran
+  39.3 ms, the same read with the new code 40.25: code placement (flash
+  cache), not the work done, monitor mode every spectrum (50 updates/s,
+  ~1.8-2.9 ms of refresh per 8 ms loop), ~72 KB of heap free after boot
+  (LVGL's 2 x 32 rows and the rotation buffers: 4 x 30 KB).
 - **Wiring** (CYD connector CN1: GND, GPIO22, GPIO27, 3.3V): CYD GPIO22 (TX)
   to the C5's RX (GPIO12, D7 on the XIAO), CYD GPIO27 (RX, pull-up on) to the
   C5's TX (GPIO11, D6), GND to GND, 921600 baud. GPIO21 is the backlight and
   GPIO1/3 are the CH340's, so CN1 is what is left. The CYD's 3.3V pin can
   power a XIAO through its 3V3 pin only while the XIAO's USB is unplugged
   (two regulators in parallel otherwise). Pins: `LINK_TX_GPIO`/`LINK_RX_GPIO`
-  (`src/link.h`).
+  (`src/board_cyd.h`).
 - **UI:** swipe left/right cycles monitor, lap timer, power meter,
   RemoteID (only while its receiver is on) and Global (a mode overlay
   shows 0.7 s; swipes work while it shows), swipe down opens the
@@ -57,7 +122,7 @@ pio test -e native                  # host tests (test/test_rid)
   speed and ends at a release, so most swipes on this resistive panel
   failed): 40 px along one axis and twice the other, from any point of the
   last 600 ms; a press survives 3 reads with no or disagreeing touch
-  readings (`touch.c`, `TOUCH_BAD`); one swipe per press, sent to the
+  readings (`touch_xpt2046.c`, `TOUCH_BAD`); one swipe per press, sent to the
   active screen as `LV_EVENT_GESTURE` (handlers read `lvport_gesture_dir()`),
   not when the press is on a slider or scrolling. Monitor mode's panorama
   also draws the web UI's average line (blue, under the trace): per column, 0.05 per
@@ -210,7 +275,7 @@ pio test -e native                  # host tests (test/test_rid)
   (320x20 while the RemoteID receiver is on: monitor full redraw 25.8 ms
   instead of 21.8, live updates unchanged).
   The panel setup runs at 40 MHz (TFT_eSPI's rate here), then the bus at
-  80 MHz (`LCD_PCLK_HZ`, `src/lvport.c`; `-DLCD_PCLK_HZ=40000000` for 40).
+  80 MHz (`LCD_PCLK_HZ`, `src/board_cyd.h`; `-DLCD_PCLK_HZ=40000000` for 40).
   Full-screen redraws (`cydshot.py bench`), 2026-11-11: lap timer
   placeholder 16.1 ms (62 fps) at 80 MHz, 31.4 ms at 40; power meter 21.7 /
   32.1 ms; monitor 24.9 / 33.9 ms (below 40 MHz's ~31 ms, the CPU's drawing
@@ -229,7 +294,7 @@ pio test -e native                  # host tests (test/test_rid)
   look when it shows, not on the first update: hidden cards skipped once
   kept LVGL's default white stripe and no name (it looked like an 80 MHz
   fault). The console (921600 baud) prints these figures every 2 s.
-- **Panel setup** (`src/lcd.c`, `panel_init`): byte for byte what TFT_eSPI
+- **Panel setup** (CYD: `src/lcd_ili9341.c`, `panel_init`): byte for byte what TFT_eSPI
   sends with the ASCII-Aquarium sketch's flags (ILI9341_2_DRIVER,
   TFT_INVERSION_ON, `setRotation(1)`), known to work on this board. Its ID
   registers read like an ST7789 (RDID3 0x52), but ST7789 sequences and

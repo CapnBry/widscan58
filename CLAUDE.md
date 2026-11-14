@@ -27,7 +27,7 @@ keep that for anything new that is copied or derived from it.
 |---|---|
 | `firmware/` | PlatformIO + ESP-IDF 5.5.5 (pioarduino). `src/radio/` is the only target-specific code. |
 | `web/` | Vite + TypeScript dashboard (Web Serial, simulator, replay). |
-| `display/` | Stand-alone display for a widscan58 on the C5's host UART (an ESP32-2432S028R "Cheap Yellow Display"). Its own developer notes: [display/CLAUDE.md](display/CLAUDE.md). |
+| `display/` | Stand-alone display for a widscan58 on the C5's host UART (an ESP32-2432S028R "Cheap Yellow Display"; an LCDwiki 3.5" ESP32-S3 board in progress). Its own developer notes: [display/CLAUDE.md](display/CLAUDE.md). |
 | `tools/widscan58cli.py` | Python client: `info`, `monitor`, `rawiq`, `spectrum`, `cmd`, `bootloader`. |
 | `tools/serial_bridge.py` | Serial ↔ WebSocket bridge (headless tests, remote viewing). |
 | `tools/flash.sh` | Build and flash with esptool (`--manual` after BOOT + EN; `RX_ENV=esp32c5` for the C5). Experimental, see the flashing notes. |

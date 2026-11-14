@@ -1,17 +1,20 @@
-/* The read sequence and calibration are those of the XPT2046_Touchscreen
- * library at rotation 1, which match the panel's landscape (lcd.c).
+/* TOUCH_DRIVER_XPT2046: resistive touch on its own SPI bus (SPI3).
+ * The read sequence and calibration are those of the XPT2046_Touchscreen
+ * library at rotation 1, which match the panel's landscape (lcd_ili9341.c).
  * GPL-3.0-or-later. */
 #include "touch.h"
 
+#include "lcd.h"
+
+#if TOUCH_DRIVER_XPT2046
 #include <string.h>
 
 #include "driver/spi_master.h"
-#include "lcd.h"
 
-#define PIN_CLK 25
-#define PIN_MOSI 32
-#define PIN_MISO 39
-#define PIN_CS 33
+#define PIN_CLK TOUCH_PIN_CLK
+#define PIN_MOSI TOUCH_PIN_MOSI
+#define PIN_MISO TOUCH_PIN_MISO
+#define PIN_CS TOUCH_PIN_CS
 #define Z_THRESHOLD 300
 #define RAW_X0 250
 #define RAW_X1 3850
@@ -70,3 +73,4 @@ touch_t touch_read(int *x, int *y) {
     *y = map(py, RAW_Y0, RAW_Y1, LCD_H);
     return TOUCH_OK;
 }
+#endif /* TOUCH_DRIVER_XPT2046 */

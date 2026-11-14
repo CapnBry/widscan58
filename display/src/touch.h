@@ -1,4 +1,5 @@
-/* XPT2046 resistive touch on the CYD's own SPI pins (SPI3). GPL-3.0-or-later. */
+/* The touch panel: one driver per controller (touch_<name>.c, picked by
+ * the board's TOUCH_DRIVER_<name>). GPL-3.0-or-later. */
 #pragma once
 #include <stdbool.h>
 

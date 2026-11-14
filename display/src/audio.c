@@ -1,6 +1,9 @@
 /* GPL-3.0-or-later. */
 #include "audio.h"
 
+#include "board.h"
+
+#if BOARD_HAS_AUDIO
 #include "driver/dac_continuous.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -104,3 +107,8 @@ void audio_init(void) {
 void audio_say_lap(uint32_t lap_ms) {
     if (q) xQueueOverwrite(q, &lap_ms);
 }
+
+#else /* !BOARD_HAS_AUDIO: nothing to do */
+void audio_init(void) {}
+void audio_say_lap(uint32_t lap_ms) {}
+#endif

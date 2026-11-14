@@ -1,8 +1,10 @@
-/* Widscan58 display: a CYD (ESP32-2432S028R) showing a widscan58 over its
- * UART, with the web UI's monitor, lap timer and power meter modes cut
- * down to 320x240, and a RemoteID receiver on its own radios.
+/* Widscan58 display: an ESP32 display board (board.h: the CYD, the
+ * ES3C35P) showing a widscan58 over its UART, with the web UI's monitor,
+ * lap timer and power meter modes cut down to a small screen, and (CYD)
+ * a RemoteID receiver on its own radios.
  * GPL-3.0-or-later. */
 #include "audio.h"
+#include "board.h"
 #include "debug.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -83,7 +85,7 @@ static void ui_task(void *arg) {
 }
 
 void app_main(void) {
-#ifdef WS_LCD_TEST
+#if defined(WS_LCD_TEST) && BOARD_HAS_LCD_TEST
     lcd_init(40000000, LCD_W * 8, NULL, NULL);
     lcd_backlight(true);
     for (;;) {
@@ -91,6 +93,7 @@ void app_main(void) {
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
 #endif
+    ESP_LOGI(TAG, "%s, %dx%d", BOARD_NAME, LCD_W, LCD_H);
 #ifndef WS_SIM
     if (passthru_requested()) {
         passthru_run(); /* does not return */

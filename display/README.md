@@ -29,7 +29,19 @@ ILI9341 setup:
 
 A board with a real ILI9341, or an ST7789 that expects the ST7789 sequence,
 can show a mirrored, colour-inverted or shifted picture. The setup is in
-`src/lcd.c` (`panel_init`).
+`src/lcd_ili9341.c` (`panel_init`).
+
+### Experimental: 3.5" ESP32-S3 display
+
+A second target, `cyds3`, is for experimenting only: the 3.5" ESP32-S3
+display **ES3C35P** (ESP32-S3 with 16 MB flash and 8 MB PSRAM, 480x320 IPS
+panel with an ST77922 controller on QSPI, capacitive touch on I2C, USB on
+the ESP32-S3's own port). Only the monitor screen is scaled to its larger
+screen, as a demonstration; the other screens keep the 320x240 layout in
+the top-left corner. There is no sound output, no RemoteID receiver and no
+flashing of the widscan58 through it, and it has only been run with the
+built-in simulator (`pio run -e cyds3-sim -t upload`). After flashing over
+other firmware, unplug it once: its panel only resets at power-up.
 
 ## Wiring
 

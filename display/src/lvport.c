@@ -12,6 +12,7 @@
  *  - it fires once per press, while the finger is still down, and the
  *    press then goes to nobody (no click on release). A press that started
  *    on a slider, or that scrolls something, is left to it.
+ * Areas are rounded out to the board's LCD_ALIGN (rounder_cb).
  * GPL-3.0-or-later. */
 #include "lvport.h"
 
@@ -24,12 +25,6 @@
 #include "lvgl.h"
 #include "debug.h"
 #include "touch.h"
-
-/* The panel is set up at 40 MHz (TFT_eSPI's rate here), then runs at this:
- * pixel data reads back right at 80 MHz (lcd_selftest). */
-#ifndef LCD_PCLK_HZ
-#define LCD_PCLK_HZ 80000000
-#endif
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t *bufs[2];
@@ -48,6 +43,15 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *a, lv_color_t *px) {
     lcd_draw(a->x1, a->y1, a->x2, a->y2, px); /* waits for the previous one, if still on the wire */
     lvport_flush_us += (uint32_t)(esp_timer_get_time() - t0);
 }
+
+#if LCD_ALIGN > 1
+static void rounder_cb(lv_disp_drv_t *drv, lv_area_t *a) {
+    a->x1 &= ~(LCD_ALIGN - 1);
+    a->y1 &= ~(LCD_ALIGN - 1);
+    a->x2 |= LCD_ALIGN - 1;
+    a->y2 |= LCD_ALIGN - 1;
+}
+#endif
 
 #define SWIPE_PX 40
 #define SWIPE_RATIO 2
@@ -143,6 +147,9 @@ void lvport_init(void) {
     disp_drv.hor_res = LCD_W;
     disp_drv.ver_res = LCD_H;
     disp_drv.flush_cb = flush_cb;
+#if LCD_ALIGN > 1
+    disp_drv.rounder_cb = rounder_cb;
+#endif
     disp_drv.draw_buf = &draw_buf;
     lv_disp_drv_register(&disp_drv);
     lv_indev_drv_init(&indev_drv);

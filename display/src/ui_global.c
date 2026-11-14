@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "board.h"
 #include "host.h"
 #include "lcd.h"
 #include "model.h"
@@ -81,6 +82,7 @@ lv_obj_t *global_create(void) {
     lv_obj_t *b = ui_button(s, "GPIO config", gpio_open, NULL);
     lv_obj_set_pos(b, 10, y);
     lv_obj_set_size(b, 300, 34);
+#if BOARD_HAS_RID
     lv_obj_t *cb = lv_checkbox_create(s);
     lv_checkbox_set_text(cb, "RemoteID receiver");
     lv_obj_set_style_text_color(cb, TH_INK2, 0);
@@ -88,6 +90,9 @@ lv_obj_t *global_create(void) {
     lv_obj_set_ext_click_area(cb, 6);
     if (g_set.rid_on) lv_obj_add_state(cb, LV_STATE_CHECKED);
     lv_obj_add_event_cb(cb, rid_toggle, LV_EVENT_VALUE_CHANGED, NULL);
+#else
+    (void)rid_toggle;
+#endif
     gl_device = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "");
     lv_obj_set_width(gl_device, 300);
     lv_label_set_long_mode(gl_device, LV_LABEL_LONG_DOT);

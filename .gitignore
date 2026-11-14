@@ -14,6 +14,7 @@ firmware/managed_components/
 display/.pio/
 display/sdkconfig.*
 !display/sdkconfig.defaults
+!display/sdkconfig.defaults.*
 display/managed_components/
 
 # Web

@@ -1,5 +1,6 @@
 /* Monitor mode: band panorama and waterfall, as web/src/views/panorama.ts
- * but cut down to 320x240. GPL-3.0-or-later.
+ * but cut down to the screen (LCD_W x LCD_H: 320x240 or 480x320; the
+ * tags' font and sizes follow LCD_H). GPL-3.0-or-later.
  *
  * The SPI link to the panel is the bottleneck (~18 ms a full frame at
  * 80 MHz), so only what changed goes out:
@@ -19,8 +20,8 @@
  *  - The average (the web UI's blue line) is an exponential average of
  *    each column's power, 0.05 per spectrum as web/src/model/store.ts,
  *    drawn over the trace with its own line span, diffed the same way.
- *  - The waterfall is a ring of colour indices, redrawn whole (320x40,
- *    ~5 ms) once per rotation of the LOs. */
+ *  - The waterfall is a ring of colour indices, redrawn whole (320x50 on
+ *    the CYD, ~5 ms) once per rotation of the LOs. */
 #include "pano.h"
 
 #include <math.h>
@@ -39,7 +40,22 @@
 #define DB_MAX (-20.0f)
 #define MERGE_PX 256 /* a rectangle's overhead in pixels */
 #define MAX_RECTS 12
+/* Channel tags (name at the top, value at the bottom) and the dB scale. */
+#if LCD_H >= 320
+#define TAG_FONT lv_font_montserrat_14
+#define SCALE_FONT lv_font_montserrat_12
+#define LABEL_H 19
+#define NAME_W 30
+#define VAL_W 32      /* whole dB */
+#define VAL_W_WIDE 44 /* with a decimal */
+#else
+#define TAG_FONT lv_font_montserrat_12
+#define SCALE_FONT lv_font_montserrat_10
 #define LABEL_H 15
+#define NAME_W 22
+#define VAL_W 26
+#define VAL_W_WIDE 36
+#endif
 #define VALUE_PERIOD_MS 250
 #define EDGE_HZ 16000000 /* panorama margin beyond the outermost channels */
 #define AVG_W 0.05f      /* average weight per spectrum, as the web UI */
@@ -223,8 +239,8 @@ static void layout(void) {
     }
     /* Values with a decimal where they fit, else whole dB; staggered on
      * two rows when even those would touch (20 MHz bands). */
-    val_wide = min_gap >= 38;
-    int vw = val_wide ? 36 : 26;
+    val_wide = min_gap >= VAL_W_WIDE + 2;
+    int vw = val_wide ? VAL_W_WIDE : VAL_W;
     bool stagger = min_gap < vw + 1;
     for (int k = 0; k < nvis; k++) {
         int j = order[k], row = stagger ? k & 1 : 0;
@@ -233,8 +249,8 @@ static void layout(void) {
         lv_obj_clear_flag(v, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(n, p->ch[j].name);
         lv_obj_set_width(v, vw);
-        int nx = cx[j] - 11, vx = cx[j] - vw / 2;
-        nx = nx < 0 ? 0 : nx > W - 22 ? W - 22 : nx;
+        int nx = cx[j] - NAME_W / 2, vx = cx[j] - vw / 2;
+        nx = nx < 0 ? 0 : nx > W - NAME_W ? W - NAME_W : nx;
         vx = vx < 0 ? 0 : vx > W - vw ? W - vw : vx;
         lv_obj_set_pos(n, nx, 1 + row * LABEL_H);
         lv_obj_set_pos(v, vx, PANO_H - LABEL_H - 1 - row * LABEL_H);
@@ -486,12 +502,12 @@ static lv_obj_t *plain(lv_obj_t *parent, int y, int h) {
 
 static lv_obj_t *tag(lv_obj_t *parent) {
     lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(l, &TAG_FONT, 0);
     lv_obj_set_style_text_color(l, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(l, 3, 0);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_size(l, 22, LABEL_H - 1);
+    lv_obj_set_size(l, NAME_W, LABEL_H - 1);
     lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
     return l;
 }
@@ -514,15 +530,15 @@ void pano_create(lv_obj_t *scr) {
     /* dB scale: a few grid values at the left. */
     for (int db = -70; db <= -30; db += 20) {
         lv_obj_t *l = lv_label_create(scr);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(l, &SCALE_FONT, 0);
         lv_obj_set_style_text_color(l, TH_MUTED, 0);
         lv_label_set_text_fmt(l, "%d", db);
-        lv_obj_set_pos(l, 2, db_y(db) - 11);
+        lv_obj_set_pos(l, 2, db_y(db) - lv_font_get_line_height(&SCALE_FONT)); /* just above its grid line */
     }
     for (int j = 0; j < MAX_CH; j++) lab_name[j] = tag(scr), lab_val[j] = tag(scr);
     notice = lv_label_create(scr);
     lv_obj_set_style_text_color(notice, TH_INK2, 0);
-    lv_obj_set_width(notice, 300);
+    lv_obj_set_width(notice, W - 20);
     lv_obj_set_style_text_align(notice, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_bg_color(notice, TH_SURFACE, 0);
     lv_obj_set_style_bg_opa(notice, LV_OPA_COVER, 0);

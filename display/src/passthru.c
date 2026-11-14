@@ -21,6 +21,9 @@
  * tools/displayflash.py does the PC side. GPL-3.0-or-later. */
 #include "passthru.h"
 
+#include "board.h"
+
+#if BOARD_HAS_PASSTHRU
 #include <stdio.h>
 #include <string.h>
 
@@ -263,3 +266,9 @@ void passthru_run(void) {
         }
     }
 }
+
+#else /* !BOARD_HAS_PASSTHRU: nothing to do */
+void passthru_request(void) {}
+bool passthru_requested(void) { return false; }
+void passthru_run(void) {}
+#endif

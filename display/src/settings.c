@@ -3,6 +3,7 @@
 
 #include <string.h>
 
+#include "board.h"
 #include "lap.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -45,7 +46,7 @@ void settings_load(void) {
         memcpy(&g_set, blob + 1, sizeof(g_set));
         if (g_set.volume > 100) g_set.volume = 100;
         if (g_set.backlight < BACKLIGHT_MIN || g_set.backlight > 100) g_set.backlight = 100;
-        g_set.rid_on = g_set.rid_on != 0;
+        g_set.rid_on = BOARD_HAS_RID && g_set.rid_on != 0; /* no receiver: never on */
         if (g_set.rid_ble_pct > 100 || g_set.rid_ble_pct % RID_BLE_PCT_STEP) g_set.rid_ble_pct = 50;
         if (g_set.rid_lock >= RID_LOCK_COUNT) g_set.rid_lock = RID_LOCK_NONE;
         if (g_set.lap_min_s > 99) g_set.lap_min_s = 99;

@@ -1,4 +1,4 @@
-/* The CYD's panel on esp_lcd's SPI panel IO, initialised as TFT_eSPI does
+/* LCD_DRIVER_ILI9341: the CYD's panel on esp_lcd's SPI panel IO, initialised as TFT_eSPI does
  * (panel_init). Its ID registers read like an ST7789 (RDID3 0x52, RDDID
  * 85 52), but it takes TFT_eSPI's ILI9341_2 sequence.
  * GPL-3.0-or-later.
@@ -8,11 +8,11 @@
  * so a draw only blocks while the previous one is still on the wire. */
 #include "lcd.h"
 
+#if LCD_DRIVER_ILI9341
 #include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
-#include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
@@ -21,13 +21,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define PIN_SCLK 14
-#define PIN_MOSI 13
-#define PIN_MISO 12
-#define PIN_CS 15
-#define PIN_DC 2
-#define PIN_RST 4
-#define PIN_BL 21
+#define PIN_SCLK LCD_PIN_SCLK
+#define PIN_MOSI LCD_PIN_MOSI
+#define PIN_MISO LCD_PIN_MISO
+#define PIN_CS LCD_PIN_CS
+#define PIN_DC LCD_PIN_DC
+#define PIN_RST LCD_PIN_RST
 #define HOST SPI2_HOST
 
 static const char *TAG = "lcd";
@@ -123,51 +122,12 @@ static void panel_init(void) {
     CMD(0xE1, 0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31, 0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E);
 }
 
-/* The backlight: LEDC PWM on its pin (the board's transistor), 10 bits at
- * 5 kHz. */
-#define BL_BITS 10
-static int bl_pct = 100;
-static bool bl_on, bl_ready;
-
-static void bl_apply(void) {
-    if (!bl_ready) return;
-    uint32_t duty = bl_on ? ((1u << BL_BITS) - 1) * (uint32_t)bl_pct / 100 : 0;
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-}
-
-static void bl_init(void) {
-    ledc_timer_config_t t = {.speed_mode = LEDC_LOW_SPEED_MODE,
-                             .duty_resolution = BL_BITS,
-                             .timer_num = LEDC_TIMER_0,
-                             .freq_hz = 5000,
-                             .clk_cfg = LEDC_AUTO_CLK};
-    ledc_timer_config(&t);
-    ledc_channel_config_t c = {.gpio_num = PIN_BL,
-                               .speed_mode = LEDC_LOW_SPEED_MODE,
-                               .channel = LEDC_CHANNEL_0,
-                               .timer_sel = LEDC_TIMER_0,
-                               .duty = 0};
-    ledc_channel_config(&c);
-    bl_ready = true;
-}
-
-void lcd_backlight(bool on) {
-    bl_on = on;
-    bl_apply();
-}
-
-void lcd_brightness(int pct) {
-    bl_pct = pct < 1 ? 1 : pct > 100 ? 100 : pct;
-    bl_apply();
-}
-
 void lcd_init(uint32_t pclk_hz, size_t max_px, lcd_done_cb_t done, void *arg) {
     done_cb = done;
     done_arg = arg;
     gpio_config_t g = {.pin_bit_mask = 1ULL << PIN_RST, .mode = GPIO_MODE_OUTPUT};
     gpio_config(&g);
-    bl_init(); /* off */
+    backlight_init(); /* off */
     spi_bus_config_t bus = {
         .sclk_io_num = PIN_SCLK,
         .mosi_io_num = PIN_MOSI,
@@ -215,7 +175,6 @@ void lcd_peek(int x, int y, int n, uint8_t *g6, uint8_t *b5) {
     io_open(pclk);
 }
 
-/* Reopen the panel IO at the same clock, sending nothing. Debug. */
 void lcd_reopen(void) {
     vTaskDelay(pdMS_TO_TICKS(40));
     esp_lcd_panel_io_del(io);
@@ -303,3 +262,4 @@ void lcd_selftest(void) {
     free(buf);
     free(rd);
 }
+#endif /* LCD_DRIVER_ILI9341 */

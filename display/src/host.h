@@ -21,6 +21,10 @@ void host_request_lap_gain(int gain);
 void host_request_enable(uint32_t mask);
 /* Lap timer: write every seat's EnterAt/ExitAt from L. */
 void host_request_thresholds(void);
+/* Idle (the Global and RemoteID screens): the device's scan stops (SCAN
+ * STOP; the C5 then powers its radio down) and lap timer mode stops
+ * polling; off: the mode's scan runs again. */
+void host_set_idle(bool idle);
 
 /* GPIO configuration: read it (GPIO?) into M.gpio, or with want set
  * (M.gpio's characters per pin, MAX_GPIO at most) send GPIO <n> ... for

@@ -74,7 +74,7 @@ does lap timing with callouts, the monitor, power meter, and even a RemoteID rec
 ![display's monitor screen: Raceband panorama with two VTXs and a waterfall](images/display-monitor.png)
 ![display's lap timer: current lap, best three consecutive laps and the level graph](images/display-laptimer.png)
 
-**[See what it can do and how to build one →](display/README.md)**
+**[See what it can do and how to build one →](display/)**
 
 ## Getting started
 

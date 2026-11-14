@@ -9,7 +9,6 @@ protocol, web UI) is in [../CLAUDE.md](../CLAUDE.md).
 | Path | What |
 |---|---|
 | `src/` | The firmware: screens (`ui*.c`), host protocol (`host.c`, `link.c`), boards (`board*.h`), panel and touch drivers (`lcd_*.c`, `touch_*.c`, `backlight.c`, `lvport.c`), simulator (`sim.c`), RemoteID receiver (`rid*.c`, `ui_rid.c`). |
-| `RAM.md` | RAM map: static RAM by object, the heap by startup step and with the RemoteID radios up (measured 2026-11-12). |
 | `test/` | Host tests (`pio test -e native`): RemoteID parsing, decoding, the aircraft list and the radio time slices. |
 | `tools/cydshot.py` | Screenshots and injected touch over the CYD's USB port (see below). |
 | `tools/gen_voice.py` | Makes the lap callout clips with a TTS model on OpenRouter (`OPENROUTER_API_KEY`); see "Lap callouts". |
@@ -138,7 +137,20 @@ pio test -e native                  # host tests (test/test_rid)
   the screen last shown: Global, RemoteID (while its receiver is on) or a
   mode (`g_set.screen`: `SCREEN_GLOBAL`, `SCREEN_RID` or
   `SCREEN_OF_MODE`).
-  The widscan58 is set up for `g_set.mode` whichever it is. Backlight 5-100 %
+  The widscan58 is set up for `g_set.mode` whichever it is, but on
+  Global and RemoteID (and the screens they open) it idles
+  (`host_set_idle`, from `show` in `ui.c`; a mode's own screens, settings
+  and channel editor included, keep it scanning): `SCAN STOP`, so the C5
+  powers its radio down (../CLAUDE.md, "Idle"). In monitor protocol its
+  telemetry (4/s) still shows the link is up; in lap timer mode the
+  polls stop (they would restart the scan) and `INFO` every 1 s
+  (`IDLE_PING_MS`) does that. Showing a mode runs its setup again, which
+  ends with `SCAN START` (the C5 keeps a stopped scan across protocol
+  switches; lap timer mode's next poll restarts its own). Swiping always
+  passes monitor or power meter mode on the way to Global or RemoteID, so
+  lap timer mode idles only if it was set up for there (checked once with
+  a build booting so, 2026-11-14). The simulator stops too and sends
+  telemetry only. Backlight 5-100 %
   (LEDC PWM on GPIO21, `lcd_brightness`; `g_set.backlight`) and GPIO config: the web UI's GPIO dialog, 5 pins a page, on a
   copy of `GPIO?` (`M.gpio`). OK sends `GPIO <n> …` for each changed pin, then
   `GPIO SAVE` and `GPIO?` (`host_request_gpio`); Cancel and Back drop the
@@ -182,8 +194,8 @@ pio test -e native                  # host tests (test/test_rid)
   Settings (swipe down): the split, Lock, Clear list, frames heard per
   transport. `cydshot.py fakerid N` injects a frame from each of N made-up
   aircraft (`rid_fake`, the tests use it too), counted as heard by its
-  radio, so it drives the locks and the block's colour too. Where all of
-  the RAM goes: [RAM.md](RAM.md). Memory: the radios take ~35 KB
+  radio, so it drives the locks and the block's colour too. Memory:
+  the radios take ~35 KB
   (Wi-Fi with its event loop ~21 KB, the BT controller ~14 KB), more than
   the ~30 KB left after boot, so while the receiver is on LVGL's draw
   buffers are 20 rows (`LV_BUF_ROWS_LOW`, one block for both) instead of

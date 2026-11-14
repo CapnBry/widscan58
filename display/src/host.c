@@ -23,6 +23,8 @@ static const char *TAG = "host";
 #define REQ_ENABLE (1u << 4)
 #define REQ_THRESH (1u << 5)
 #define REQ_GPIO (1u << 6)
+#define REQ_IDLE (1u << 7)
+#define IDLE_PING_MS 1000 /* lap timer mode while idle: INFO, to see it is there */
 
 /* RotorHazard node protocol (firmware/src/proto/rh.c). */
 #define RH_READ_FREQUENCY 0x03
@@ -48,6 +50,8 @@ static volatile uint32_t enable_mask;
 static int64_t dev_ms = -1; /* the device's clock at the last poll */
 static char gpio_want[MAX_GPIO + 1]; /* empty: only read */
 static volatile host_gpio_t gpio_status;
+static volatile bool want_idle;
+static bool idle_applied; /* the scan stopped (SCAN STOP sent) */
 
 host_state_t host_state(void) { return state; }
 int host_mode(void) { return mode_applied; }
@@ -85,6 +89,11 @@ void host_request_enable(uint32_t mask) {
     request(REQ_ENABLE);
 }
 void host_request_thresholds(void) { request(REQ_THRESH); }
+void host_set_idle(bool idle) {
+    if (idle == want_idle) return;
+    want_idle = idle;
+    request(REQ_IDLE);
+}
 void host_request_lap_gain(int gain) {
     lap_gain = gain;
     request(REQ_LAP_GAIN);
@@ -399,8 +408,30 @@ static bool setup(int mode) {
         const char *list[] = {"MODE SINGLE", gain, win, "METRICS FULL", line};
         if (!cmds(list, 5)) return false;
     }
-    static const char *const post[] = {"PROFILE?", "STATUS?"};
-    return cmds(post, 2);
+    /* The device keeps a stopped scan across protocol switches. */
+    static const char *const post[] = {"SCAN START", "PROFILE?", "STATUS?"};
+    return cmds(post, 3);
+}
+
+/* Stop or restart the scan for want_idle. Lap timer mode: SCAN STOP is the
+ * host timeout, and the next poll restarts it (levels reset); no lap
+ * spans the stop. */
+static bool apply_idle(bool idle) {
+    ESP_LOGI(TAG, "%s", idle ? "idle: scan stopped" : "scan running");
+    if (mode_applied == MODE_LAP) {
+        if (idle) {
+            if (cmd("SCAN STOP", 1000) < 0) return false;
+        } else {
+            model_lock();
+            lap_break_all();
+            model_unlock();
+        }
+    } else {
+        const char *list[] = {idle ? "SCAN STOP" : "SCAN START", "STATUS?"};
+        if (!cmds(list, 2)) return false;
+    }
+    idle_applied = idle;
+    return true;
 }
 
 static void host_task(void *arg) {
@@ -419,7 +450,7 @@ static void host_task(void *arg) {
         }
         int wait = mode_applied < 0 ? 0 : 100;
         if (mode_applied == MODE_LAP) {
-            int32_t left = LAP_POLL_MS - (int32_t)(now_ms() - last_poll);
+            int32_t left = (idle_applied ? IDLE_PING_MS : LAP_POLL_MS) - (int32_t)(now_ms() - last_poll);
             wait = left > 0 ? left : 0;
         }
         req = take_requests(wait);
@@ -439,12 +470,15 @@ static void host_task(void *arg) {
             }
             model_clear_levels();
             mode_applied = want;
+            idle_applied = false; /* setup leaves the scan running */
             state = HOST_READY;
             missed = 0;
             M.last_frame_ms = now_ms();
             continue;
         }
         bool ok = true;
+        bool idle = want_idle;
+        if (idle != idle_applied) ok = apply_idle(idle);
         if ((req & REQ_CHANNELS) && mode_applied != MODE_LAP) {
             static const char *const post[] = {"PROFILE?", "STATUS?"};
             ok = send_channels() && cmds(post, 2);
@@ -473,7 +507,14 @@ static void host_task(void *arg) {
         /* Gone? Monitor protocol streams frames; lap timer mode is silent
          * until asked, so ask. */
         uint32_t t = now_ms();
-        if (mode_applied == MODE_LAP) {
+        if (mode_applied == MODE_LAP && idle_applied) {
+            /* No polls: they would restart the scan. Text commands don't. */
+            if (ok && t - last_poll >= IDLE_PING_MS) {
+                last_poll = t;
+                missed = cmd("INFO", 300) > 0 ? 0 : missed + 1;
+                if (missed >= 3) ok = false;
+            }
+        } else if (mode_applied == MODE_LAP) {
             /* The polls keep the device's scan running (its 5 s host timeout)
              * and tell whether it is still there. */
             if (ok && t - last_poll >= LAP_POLL_MS) {

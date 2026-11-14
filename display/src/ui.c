@@ -575,6 +575,9 @@ static void show(int k) {
     /* The boot screen too: RemoteID and Global as such, a mode by g_set.mode. */
     g_set.screen = k >= MODE_COUNT ? (uint8_t)k : SCREEN_OF_MODE;
     ui_schedule_save();
+    /* Global and RemoteID (and what opens from them) need no scan: the
+     * widscan58 idles. A mode's own screens keep it running. */
+    host_set_idle(k >= MODE_COUNT);
     if (k == SCR_RID) {
         lv_scr_load(rid_screen());
         overlay_show("RemoteID receiver");
@@ -637,6 +640,7 @@ void ui_init(void) {
      * widscan58 is set up for g_set.mode whichever it is. */
     cur_scr = g_set.mode;
     if (g_set.screen == SCR_GLOBAL || (g_set.screen == SCR_RID && g_set.rid_on)) cur_scr = g_set.screen;
+    host_set_idle(cur_scr >= MODE_COUNT);
     lv_scr_load(cur_scr == SCR_RID ? rid_screen() : cur_scr == SCR_GLOBAL ? global_screen() : scr_mode[cur_scr]);
 }
 

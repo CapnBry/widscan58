@@ -24,7 +24,7 @@
 #define HOP_MS 4
 
 static struct {
-    bool monitor, single;
+    bool monitor, single, stopped;
     int gain;
     uint32_t rssi_hz, search_hz, spec_span;
     int spec_every, spec_bins;
@@ -109,10 +109,10 @@ static void status(const char *kw) {
     int o = 0;
     for (int j = 0; j < S.nlo; j++) o += snprintf(plan_js + o, sizeof(plan_js) - o, "%s{\"lo_khz\":%u,\"ch\":[]}", j ? "," : "", (unsigned)S.lo[j]);
     plan_js[o] = 0;
-    reply("%s {\"protocol\":\"%s\",\"profile\":\"c5-race\",\"running\":1,\"enabled\":%u,\"mode\":\"%s\",\"gain_mode\":\"MANUAL\","
+    reply("%s {\"protocol\":\"%s\",\"profile\":\"c5-race\",\"running\":%d,\"enabled\":%u,\"mode\":\"%s\",\"gain_mode\":\"MANUAL\","
           "\"gain\":%d,\"gain_max\":63,\"metrics\":\"%s\",\"rssi_hz\":%u,\"search_hz\":%u,\"spec_every\":%d,\"spec_bins\":%d,"
           "\"spec_span_hz\":%u,\"spec_detector\":1,\"link\":\"uart\",\"plan\":[%s]}",
-          kw, S.monitor ? "MONITOR" : "RH", S.enabled, S.single ? "SINGLE" : "GROUP", S.gain, S.monitor ? "FULL" : "RSSI", (unsigned)S.rssi_hz,
+          kw, S.monitor ? "MONITOR" : "RH", !S.stopped, S.enabled, S.single ? "SINGLE" : "GROUP", S.gain, S.monitor ? "FULL" : "RSSI", (unsigned)S.rssi_hz,
           (unsigned)S.search_hz, S.spec_every, S.spec_bins, (unsigned)S.spec_span, plan_js);
 }
 
@@ -152,6 +152,8 @@ static void command(const char *line) {
               (unsigned)S.rssi_hz, (unsigned)S.search_hz, ch);
     } else if (!strcmp(line, "STATUS?")) status("STATUS");
     else if (!strcmp(line, "CONFIG?")) status("CONFIG");
+    else if (!strcmp(line, "SCAN STOP")) S.stopped = true, reply("OK");
+    else if (!strcmp(line, "SCAN START")) S.stopped = false, reply("OK");
     else if (!strcmp(line, "PROTOCOL MONITOR")) S.monitor = true, reply("OK");
     else if (!strcmp(line, "PROTOCOL RH")) S.monitor = false, reply("OK");
     else if (!strncmp(line, "CHANNELS ", 9)) set_channels(line + 9), S.enabled = (1u << S.nch) - 1, reply("OK");
@@ -213,6 +215,7 @@ static void rh_reply(const uint8_t *p, int n) {
 
 static void rh_command(const uint8_t *p, int n) {
     if (n < 1) return;
+    S.stopped = false; /* as the C5: a RotorHazard command restarts the scan */
     int j = rcur;
     uint32_t now = now_ms();
     switch (p[0]) {
@@ -264,7 +267,7 @@ static float vtx_at(uint32_t khz, float t, float flicker) {
 
 static void sim_task(void *arg) {
     static uint8_t buf[1100];
-    uint32_t hop = 0, next_spec = 0;
+    uint32_t hop = 0, next_spec = 0, last_telem = 0;
     TickType_t wake = xTaskGetTickCount();
     for (;;) {
         char *line;
@@ -275,6 +278,15 @@ static void sim_task(void *arg) {
         }
         vTaskDelayUntil(&wake, pdMS_TO_TICKS(HOP_MS));
         if (!S.monitor || !S.nlo) continue;
+        if (S.stopped) { /* the C5 keeps sending telemetry, 4 a second */
+            if (now_ms() - last_telem >= 250) {
+                last_telem = now_ms();
+                frame_telemetry_t tf;
+                memset(&tf, 0, sizeof(tf));
+                emit(FRAME_TELEMETRY, &tf, sizeof(tf));
+            }
+            continue;
+        }
         float t = now_ms() / 1000.0f;
         /* gain changes the levels; power meter mode (gain 0, one LO per channel)
          * reads about a 25 mW VTX behind 30 dB on R1 */

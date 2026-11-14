@@ -8,6 +8,8 @@
 #include <string.h>
 
 #include "bands.h"
+#include "esp_log.h"
+#include "esp_pm.h"
 #include "host.h"
 #include "link.h"
 #include "lvport.h"
@@ -76,8 +78,7 @@ void ui_device_text(char *out, size_t n) {
     if (st == HOST_SEARCHING)
         snprintf(out, n, "Searching for widscan58 (UART: TX GPIO%d, RX GPIO%d)", LINK_TX_GPIO, LINK_RX_GPIO);
     else
-        snprintf(out, n, "widscan58 %s%s%s%s", M.version[0] ? M.version : "", M.prof.valid ? " - " : "",
-                 M.prof.valid ? M.prof.name : "", st == HOST_SETUP ? " (setting up)" : "");
+        snprintf(out, n, "widscan58 %s%s", M.version, st == HOST_SETUP ? " (setting up)" : "");
 }
 
 /* ---- mode overlay ---- */
@@ -106,7 +107,8 @@ static void overlay_check(uint32_t t) {
 /* ---- settings and channel editor ---- */
 
 static lv_obj_t *scr_settings, *scr_edit;
-static lv_obj_t *set_gain_val, *set_gain_slider, *set_atten_val, *set_device;
+static lv_obj_t *set_gain_val, *set_gain_slider, *set_atten_val;
+static bool set_sync; /* settings_sync while it shows (not lap timer mode) */
 static lv_obj_t *set_ch[MAX_CH];
 static int set_ch_state[MAX_CH]; /* shown: 1 on, 0 off, -1 not yet */
 static int settings_mode;
@@ -288,18 +290,11 @@ void ui_open_settings(int mode) {
     lv_obj_set_pos(edit, 10, y);
     lv_obj_set_size(edit, 300, 34);
     settings_sync();
-    set_device = NULL;
+    set_sync = mode != MODE_LAP;
     if (mode == MODE_LAP) {
         lv_obj_t *b = ui_button(s, "Lap settings", lap_rules_clicked, NULL);
         lv_obj_set_pos(b, 10, y + 42);
         lv_obj_set_size(b, 300, 34);
-    } else {
-        set_device = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "");
-        lv_obj_set_width(set_device, 300);
-        lv_label_set_long_mode(set_device, LV_LABEL_LONG_DOT);
-        lv_obj_align(set_device, LV_ALIGN_BOTTOM_LEFT, 10, -6);
-        lv_obj_t *hint = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "Swipe up to close");
-        lv_obj_align(hint, LV_ALIGN_BOTTOM_RIGHT, -10, -20);
     }
     lv_obj_t *old = scr_settings;
     scr_settings = s;
@@ -570,6 +565,16 @@ static void power_update(uint32_t t) {
 
 /* ---- mode screens ---- */
 
+/* The CPU clock: 80 MHz on Global and RemoteID (little to draw), the
+ * default (240) in the modes. Not lower: under 80 MHz the APB clock drops
+ * too, and the UART driver holds it only while sending (921600 baud in). */
+static void cpu_speed(bool slow) {
+    int mhz = slow ? 80 : CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+    esp_pm_config_t c = {.max_freq_mhz = mhz, .min_freq_mhz = mhz, .light_sleep_enable = false};
+    esp_err_t e = esp_pm_configure(&c);
+    if (e != ESP_OK) ESP_LOGW("ui", "CPU at %d MHz: %s", mhz, esp_err_to_name(e));
+}
+
 static void show(int k) {
     cur_scr = k;
     /* The boot screen too: RemoteID and Global as such, a mode by g_set.mode. */
@@ -578,6 +583,7 @@ static void show(int k) {
     /* Global and RemoteID (and what opens from them) need no scan: the
      * widscan58 idles. A mode's own screens keep it running. */
     host_set_idle(k >= MODE_COUNT);
+    cpu_speed(k >= MODE_COUNT);
     if (k == SCR_RID) {
         lv_scr_load(rid_screen());
         overlay_show("RemoteID receiver");
@@ -641,6 +647,7 @@ void ui_init(void) {
     cur_scr = g_set.mode;
     if (g_set.screen == SCR_GLOBAL || (g_set.screen == SCR_RID && g_set.rid_on)) cur_scr = g_set.screen;
     host_set_idle(cur_scr >= MODE_COUNT);
+    cpu_speed(cur_scr >= MODE_COUNT);
     lv_scr_load(cur_scr == SCR_RID ? rid_screen() : cur_scr == SCR_GLOBAL ? global_screen() : scr_mode[cur_scr]);
 }
 
@@ -658,10 +665,7 @@ void ui_update(void) {
     if (act == scr_mode[MODE_MONITOR]) pano_update();
     else if (act == scr_mode[MODE_POWER]) power_update(t);
     else if (act == scr_mode[MODE_LAP]) lap_main_update();
-    else if (act == scr_settings && set_device) {
-        char buf[96];
-        ui_device_text(buf, sizeof(buf));
-        ui_set_text(set_device, buf);
+    else if (act == scr_settings && set_sync) {
         settings_sync();
     } else if (act && act == lap_seat_screen()) {
         lap_seat_update();

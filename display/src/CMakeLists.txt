@@ -4,7 +4,7 @@ file(GLOB SRCS "*.c")
 # requirements are resolved before Kconfig is read, so they cannot follow
 # CONFIG_ values. A second board on a target that needs other components
 # adds them to that target's list (unused ones only cost build time).
-set(REQS lvgl esp_lcd esp_driver_spi esp_driver_gpio esp_driver_ledc esp_driver_uart esp_timer nvs_flash)
+set(REQS lvgl esp_lcd esp_driver_spi esp_driver_gpio esp_driver_ledc esp_driver_uart esp_timer esp_pm nvs_flash)
 set(EMBED "")
 if(IDF_TARGET STREQUAL "esp32")
     # CYD: the RemoteID receiver's radios, the lap callouts' DAC and words

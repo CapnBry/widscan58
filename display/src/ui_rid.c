@@ -688,8 +688,6 @@ void rid_settings_open(void) {
     lv_obj_set_size(c, 110, 30);
     st.stats = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "");
     lv_obj_align(st.stats, LV_ALIGN_BOTTOM_LEFT, 10, -6);
-    lv_obj_t *hint = ui_label(s, &lv_font_montserrat_10, TH_MUTED, "Swipe up to close");
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_RIGHT, -10, -6);
     st.text_t = 0;
     lv_scr_load(s);
 }

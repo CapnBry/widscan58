@@ -326,6 +326,22 @@ pio test -e native                  # host tests (test/test_rid)
   look when it shows, not on the first update: hidden cards skipped once
   kept LVGL's default white stripe and no name (it looked like an 80 MHz
   fault). The console (921600 baud) prints these figures every 2 s.
+- **Power** (CYD and C5 together on one USB meter, 5.2 V, 2026-11-14):
+  the backlight is most of it, ~85 mA at 100 % (Global: 172 mA at 100 %,
+  87 mA at 5 %). The CPU idles in `waiti` between UI loops (FreeRTOS run
+  time stats: the UI task ~4 % of its core on Global at 80 MHz, ~16 % in
+  lap timer mode and ~40-60 % in monitor mode at 240). On Global and
+  RemoteID (`cpu_speed`, `ui.c`, with `host_set_idle`) the CPU runs at
+  80 MHz (`CONFIG_PM_ENABLE`, `esp_pm_configure` with min = max): 73 mA
+  instead of 87 at backlight 5 %. Not lower: under 80 MHz the APB clock
+  drops too, and the UART driver holds it only while sending. PM moves
+  the console UART to the 1 MHz REF_TICK, which can't make 921600 baud:
+  `con_init` (`debug.c`) puts it back on APB, so IDF's few startup lines
+  after the PM setup are garbled. Both RemoteID radios receive at 80 MHz
+  (~24 BLE adverts/s, ~6.5 Wi-Fi management frames/s at the 50/50
+  split). PM's IRAM fits only just: the run time stats on top overflowed
+  it by 1.8 KB (`CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH` made room for
+  a measuring build).
 - **Panel setup** (CYD: `src/lcd_ili9341.c`, `panel_init`): byte for byte what TFT_eSPI
   sends with the ASCII-Aquarium sketch's flags (ILI9341_2_DRIVER,
   TFT_INVERSION_ON, `setRotation(1)`), known to work on this board. Its ID

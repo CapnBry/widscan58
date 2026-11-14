@@ -93,13 +93,13 @@ void app_main(void) {
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
 #endif
-    ESP_LOGI(TAG, "%s, %dx%d", BOARD_NAME, LCD_W, LCD_H);
 #ifndef WS_SIM
     if (passthru_requested()) {
         passthru_run(); /* does not return */
     }
 #endif
-    debug_init();
+    debug_init(); /* first: the console's clock (debug.c) */
+    ESP_LOGI(TAG, "%s, %dx%d", BOARD_NAME, LCD_W, LCD_H);
     settings_load();
     rid_radio_init(); /* first: frees the controller's Classic memory; radios
                        * off until the UI starts them (rid_poll) */

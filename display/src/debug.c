@@ -57,7 +57,22 @@ static void con_write(const void *p, size_t n) {
 }
 static void con_drain(void) { usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(30000)); }
 #else
-static void con_init(void) { uart_driver_install(PORT, 256, 0, 0, NULL, 0); }
+/* Power management (ui.c, cpu_speed) moved the console to the 1 MHz
+ * REF_TICK clock, which can't make 921600 baud: back to APB, which stays at
+ * 80 MHz (the CPU never goes below 80). */
+static void con_init(void) {
+    uart_driver_install(PORT, 256, 0, 0, NULL, 0);
+    uart_config_t cfg = {
+        .baud_rate = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    uart_wait_tx_idle_polling(PORT);
+    uart_param_config(PORT, &cfg);
+}
 static bool con_getc(uint8_t *b) { return uart_read_bytes(PORT, b, 1, portMAX_DELAY) == 1; }
 static void con_write(const void *p, size_t n) { uart_write_bytes(PORT, p, n); }
 static void con_drain(void) { uart_wait_tx_done(PORT, pdMS_TO_TICKS(30000)); }
